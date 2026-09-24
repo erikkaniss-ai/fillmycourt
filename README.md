@@ -2,50 +2,34 @@
 
 Revenue infrastructure for racket clubs.
 
-**Website:** https://fillmycourt.com  
-**Production host:** Netlify  
-**Canonical source:** this repository
+## Source release: 3.5.0 — unified identity v1
 
-## Current release
+One master logo and asset system now serves the product website, FillMyCourt's Olsen Steiner portfolio presentation and LinkedIn. See `BRAND-IDENTITY.md` and `assets/fmc-brand-v1/identity.json`.
 
-**v3.4 — Blue Identity Refresh — 24 Sep 2026**
+- F-tile and outlined FillMyCourt wordmark; do not recreate with font text.
+- Navy #071E33, blue #1267E5, cyan #35A7FF, pale #F4F8FD and white.
+- More play. Higher revenue.
+- Shared capacity-slot motif; illustrations are not client performance data.
+- 97 HTML pages updated, including PT/EN/ES/LV, with product logic and form endpoints preserved.
+- Responsive menus, header sizing, hero hierarchy and onboarding overflow corrected.
+- LinkedIn Page logo 400x400, Page cover 1512x256, post 1200x1200 and URL preview 1200x627.
 
-The v3.4 release aligns the product site with the new FillMyCourt visual identity:
+Browser QA: 194 checks across 97 pages at 390px and 1440px, no detected layout/JavaScript failures or broken images. No forms were submitted. Details: `docs/BRAND-QA-v1.json`.
 
-- deep navy `#071E33`
-- primary blue `#1267E5`
-- electric blue `#35A7FF`
-- pale blue `#EAF4FF`
-- new FillMyCourt logo and favicon
-- refreshed Open Graph artwork
-- blue revenue / CRM / booking / analytics visual system
-- preserved multilingual routes, SEO structure, tools, forms and product positioning
+## Production is a separate verification
 
-## Positioning
+A GitHub source update is NOT a confirmed Netlify deployment. At the branding audit, fillmycourt.com was still serving the old deploy `6aaedb41941aa8202f985d2a`.
 
-FillMyCourt is a revenue-first SaaS platform for racket-sport clubs, combining:
+Existing Netlify project: fillmycourt
+Site ID: 72eee365-bff0-48ec-bb8f-f08ff01341b7
+Repository: erikkaniss-ai/fillmycourt
+Production branch: main
+Build command: empty (static HTML/CSS/JS)
+Publish directory: .
+Base directory: empty
 
-- revenue recovery automation
-- behavioural CRM
-- booking and inventory
-- player retention and loyalty
-- match formation
-- distribution connectors
-- white-label player experiences
-- multi-location enterprise control
+Use the existing project and domain, not a new site. Confirm the published commit and the new `/assets/fmc-brand-v1/identity.json` before claiming production is updated.
 
 ## Source rule
 
-All future production changes should start from `main`. Do not deploy an older ZIP or archive over the canonical source.
-
-## Deployment
-
-The existing Netlify project is `fillmycourt` and production domain is `fillmycourt.com`.
-
-Continuous deployment should use:
-
-- repository: `erikkaniss-ai/fillmycourt`
-- branch: `main`
-- base directory: repository root
-- build command: none
-- publish directory: repository root
+Future work starts from main or a verified descendant. Preserve the underlying revenue-recovery, CRM, booking, loyalty, white-label, distribution and enterprise architecture; this release is an identity and responsive-presentation update, not a change in product scope.
