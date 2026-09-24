@@ -1,0 +1,37 @@
+name: Brand identity v1 review
+on:
+  push:
+    branches: [brand-unification-v1]
+    paths: ['scripts/**', '.github/workflows/brand-unification-v1.yml']
+permissions:
+  contents: write
+jobs:
+  brand:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rendering and QA dependencies
+        run: |
+          python -m pip install cairosvg playwright
+          python -m playwright install --with-deps chromium
+      - name: Apply identity from the single master
+        run: python scripts/brand-unification-v1.py
+      - name: Browser QA - desktop and mobile, no form submissions
+        run: python scripts/qa-brand.py
+      - name: Preserve QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fillmycourt-brand-v1-qa
+          path: .qa/
+      - name: Commit reviewed source and generated assets
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets '*.html' BRAND-IDENTITY.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'Apply unified FillMyCourt identity v1 after browser QA'
+            git push
+          fi
