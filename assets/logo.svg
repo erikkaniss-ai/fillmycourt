@@ -1,16 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 118" role="img" aria-labelledby="t d">
-<title id="t">FillMyCourt</title><desc id="d">Revenue infrastructure for racket clubs</desc>
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0B4FBF"/><stop offset="1" stop-color="#35A7FF"/></linearGradient></defs>
-<g transform="translate(5,8)">
- <path d="M10 42 38 16h45L57 42Z" fill="#0B4FBF"/><path d="M62 42 90 16h44l-24 26Z" fill="#35A7FF" opacity=".92"/>
- <path d="M2 48h52L31 79H0Z" fill="#0A315F"/><path d="M57 48h51L84 79H34Z" fill="#1267E5"/>
- <path d="M112 48h47l-11 31H91Z" fill="#168BFF"/><path d="M138 16h35l-10 26h-49Z" fill="#1B91FF"/>
- <path d="M27 77C78 74 109 61 142 27" fill="none" stroke="url(#g)" stroke-width="7" stroke-linecap="round"/>
- <path d="M53 79C95 74 124 58 151 34" fill="none" stroke="#35A7FF" stroke-width="3.4" stroke-linecap="round" opacity=".9"/>
- <circle cx="161" cy="13" r="9.5" fill="#168BFF"/>
-</g>
-<g font-family="Inter,Arial,sans-serif" font-weight="800" font-size="52" letter-spacing="-2.2">
- <text x="192" y="68" fill="#071E33">Fill</text><text x="278" y="68" fill="#1267E5">My</text><text x="346" y="68" fill="#071E33">Court</text>
-</g>
-<text x="195" y="94" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="650" letter-spacing="5.8" fill="#5E748E">MORE PLAY · HIGHER REVENUE</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 112" role="img" aria-labelledby="t d">
+<title id="t">FillMyCourt</title><desc id="d">FillMyCourt logo</desc>
+<rect x="0" y="8" width="96" height="96" rx="22" fill="#1267E5"/>
+<text x="48" y="74" text-anchor="middle" font-family="Inter,Arial,sans-serif" font-size="55" font-weight="800" fill="#FFFFFF">F</text>
+<text x="122" y="72" font-family="Inter,Arial,sans-serif" font-size="54" font-weight="800" letter-spacing="-2.1" fill="#071E33">FillMyCourt</text>
 </svg>
