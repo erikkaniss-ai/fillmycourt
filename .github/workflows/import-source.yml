@@ -1,44 +1,37 @@
 name: Import canonical FillMyCourt source
 
-on:
+'on':
   push:
-    branches: [main]
-    paths:
-      - ".github/workflows/import-source.yml"
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   import:
-    if: github.actor != 'github-actions[bot]'
+    if: ${{ !contains(github.event.head_commit.message, '[skip import]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Download canonical source archive
-        env:
-          SOURCE_ZIP_URL: "https://sdmntprnortheu.oaiusercontent.com/files/00000000-bf04-81f4-81b5-7cd0332e4588/raw?se=2026-09-24T00%3A21%3A51Z&sp=r&sv=2026-02-06&sr=b&scid=7bf2a85d-3c21-5582-9af9-d4d04719a777&skoid=5c9dda00-298b-4376-81e9-b4568c8a3c0f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-23T17%3A57%3A47Z&ske=2026-09-24T17%3A57%3A47Z&sks=b&skv=2026-02-06&sig=eeUI1QEs6YKi2DjP9Do0BePWPICNPdizAgrBIu/KB7Y%3D"
+      - name: Import source
         run: |
           set -euo pipefail
-          curl -fL "$SOURCE_ZIP_URL" -o /tmp/fillmycourt.zip
+          curl -fL 'https://sdmntprnortheu.oaiusercontent.com/files/00000000-bf04-81f4-81b5-7cd0332e4588/raw?se=2026-09-24T00%3A21%3A51Z&sp=r&sv=2026-02-06&sr=b&scid=7bf2a85d-3c21-5582-9af9-d4d04719a777&skoid=5c9dda00-298b-4376-81e9-b4568c8a3c0f&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-23T17%3A57%3A47Z&ske=2026-09-24T17%3A57%3A47Z&sks=b&skv=2026-02-06&sig=eeUI1QEs6YKi2DjP9Do0BePWPICNPdizAgrBIu/KB7Y%3D' -o /tmp/fillmycourt.zip
           rm -rf /tmp/fmc-import
           mkdir -p /tmp/fmc-import
           unzip -q /tmp/fillmycourt.zip -d /tmp/fmc-import
           rm -rf /tmp/fmc-import/archive
           cp -a /tmp/fmc-import/. .
-          cat > .gitignore <<'EOF'
-.DS_Store
-Thumbs.db
-*.tmp
-EOF
-      - name: Commit imported source
+          printf '.DS_Store\nThumbs.db\n*.tmp\n' > .gitignore
+      - name: Commit source
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           if git diff --cached --quiet; then
-            echo "No source changes"
+            echo 'No changes'
             exit 0
           fi
-          git commit -m "Import FillMyCourt v3.3.4 canonical production source"
+          git commit -m 'Import FillMyCourt v3.3.4 source [skip import]'
           git push
