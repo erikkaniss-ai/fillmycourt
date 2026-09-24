@@ -1,0 +1,13 @@
+{
+  "release": "3.5.0",
+  "identity": "FillMyCourt identity v1",
+  "date": "2026-09-24",
+  "source_status": "browser QA passed",
+  "live_deployment": "Not verified; existing Netlify site was still serving deploy 6aaedb41941aa8202f985d2a at audit time. Repository source updates do not prove publication.",
+  "ci_run": "https://github.com/erikkaniss-ai/fillmycourt/actions/runs/35943546467",
+  "qa": {"html_pages":97,"viewport_widths":[390,1440],"page_viewport_checks":194,"horizontal_overflow_or_javascript_failures":0,"broken_images_detected":0},
+  "limits": "Automated checks measure layout overflow, image-load status and JS errors, and exercise navigation. No forms were submitted, and this is not a full product-functionality certification. CI logs retain the results; first-run screenshot artifact upload was skipped by the hidden-directory filter.",
+  "master_logo_sha256": "e271fa60eefe4659ab151bcfdded4e9f3f2d80519cc8c52c32830dcf510cd0c5",
+  "shared_with": "erikkaniss-ai/olsensteiner/assets/fmc-brand-v1/",
+  "linkedin": "Final assets prepared, not installed: linkedin-logo.png 400x400; linkedin-cover.png 1512x256. Retire the older racket/photo banner and off-centre icon."
+}
