@@ -1,0 +1,26 @@
+{
+  "identity": "FillMyCourt identity v1",
+  "date": "2026-09-24",
+  "logo": "F-tile + outlined FillMyCourt wordmark",
+  "palette": {
+    "navy": "#071E33",
+    "blue": "#1267E5",
+    "cyan": "#35A7FF",
+    "canvas": "#F4F8FD",
+    "white": "#FFFFFF"
+  },
+  "message": "More play. Higher revenue.",
+  "descriptor": "Revenue infrastructure for racket clubs",
+  "visual_motif": "Capacity slots filling; conceptual, not client data",
+  "logo_hash": "e271fa60eefe4659ab151bcfdded4e9f3f2d80519cc8c52c32830dcf510cd0c5",
+  "assets": {
+    "mark.svg": "910f0773a6005452c05b3b99d884f73d95c6aa2838e010ef77863c5cf8dea1fc",
+    "logo.svg": "e271fa60eefe4659ab151bcfdded4e9f3f2d80519cc8c52c32830dcf510cd0c5",
+    "logo-light.svg": "983b8996cf5a302d1d60d907bcdb38fb1b3504207e52dfd8cec095dcc41869f6",
+    "linkedin-logo.svg": "b29bec7c62494875edb843bb33c73740aa29fddba8df47821991850d8534ec38",
+    "slots.svg": "927366b9c021c64af2b472e3fc1d0c14741c7a9bcc93950372c53f6abe9ca281",
+    "linkedin-cover.svg": "1a76b499630bcd5fa10207767defb573e289a7bd4f9469925b879beb71ed8f27",
+    "social-preview.svg": "94ccf929d1f6859a81a062640b385cdf999742cde51d46cce15c05f86c7da7ab",
+    "linkedin-post.svg": "8f47c1ba158e9dcb919673a3b6203ed198f0c57c3a2612600e6294b54c58dccc"
+  }
+}
