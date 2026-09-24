@@ -1,1 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="#071E33"/><g transform="translate(8 8)"><path d="M1 22 13 10h15L17 22Z" fill="#0B4FBF"/><path d="M19 22 31 10h15L36 22Z" fill="#35A7FF"/><path d="M0 26h17L8 39H0Z" fill="#0A315F"/><path d="M18 26h18L26 39H10Z" fill="#1267E5"/><path d="M37 26h12l-4 13H29Z" fill="#168BFF"/><path d="M10 39C27 37 37 31 48 18" fill="none" stroke="#35A7FF" stroke-width="3.6" stroke-linecap="round"/><circle cx="50" cy="12" r="4" fill="#168BFF"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="t">
+<title id="t">FillMyCourt</title>
+<rect width="64" height="64" rx="15" fill="#1267E5"/>
+<text x="32" y="44" text-anchor="middle" font-family="Arial,sans-serif" font-size="36" font-weight="800" fill="#FFFFFF">F</text>
+</svg>
