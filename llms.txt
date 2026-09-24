@@ -1,0 +1,88 @@
+# FillMyCourt
+
+FillMyCourt is a revenue-first B2B SaaS platform for racket clubs.
+
+## Core entity
+- Canonical domain: https://fillmycourt.com/
+- Primary buyer: racket-club owners, general managers, operators and multi-location administrators.
+- Primary commercial promise: recover incremental revenue from existing courts and player demand without adding a dedicated daily CRM/marketing operator.
+- Core differentiator: a proprietary Demand Engine that connects court inventory, behavioural player intelligence, booking, activation and euro-level attribution.
+- Core modules: automated player CRM, native booking and inventory, match formation, multi-channel activation, payments/membership path, distribution connectors, analytics, media-provider integrations and multi-location control.
+- Current entry offer: Revenue Leak Audit, EUR 490, five business days.
+- Current pilot hypothesis: EUR 1,250 setup + EUR 249/month + 8% of agreed attributed uplift.
+
+## Product architecture
+1. Revenue Map — value weak slots, cancellations, incomplete games and other addressable inventory.
+2. Audience Intelligence — use authorised behavioural signals such as recency, frequency, value, preferred times, level and partners.
+3. Decision Layer — prioritise opportunity, timing, channel and intervention intensity; scoring weights and rules remain proprietary.
+4. Activation — run configured WhatsApp/SMS/email/push/booking-link workflows subject to consent and channel availability.
+5. Attribution & Learning — reconcile bookings, incentives, fees, refunds and displacement against the agreed baseline.
+
+## Booking and distribution
+- FillMyCourt can operate a native booking core.
+- Existing discovery/booking platforms can remain acquisition channels where authorised connectivity exists.
+- External connectivity depends on APIs, exports, contracts and provider/customer permissions; provider names do not imply live integrations or partnerships.
+- The strategy is not anti-marketplace: acquire broadly, then increase direct repeat demand where lawful, technically possible and economically sensible.
+
+## Player-facing surfaces
+- FillMyCourt remains the B2B operating/revenue brand.
+- Clubs can offer a white-label player app/web experience, optionally labelled “Powered by FillMyCourt”.
+- A separate international cross-club consumer booking/discovery brand is planned; its permanent brand name is not yet selected.
+- Portable player identity/public attributes must remain separate from each club's private CRM history, spend, lifecycle segmentation and internal notes.
+
+## Media & performance
+FillMyCourt is designed to connect specialist sports-video providers to the booking/player/match record for live streams, replay, scoring, analysis, highlights and shareable clips where the provider supports them. Current public provider references are integration targets/examples, not partnership claims.
+
+## Canonical reference pages
+- Home PT: https://fillmycourt.com/
+- Home EN: https://fillmycourt.com/en/
+- Booking & distribution PT: https://fillmycourt.com/booking-hub.html
+- Booking & distribution EN: https://fillmycourt.com/en/booking-hub.html
+- Player experience PT: https://fillmycourt.com/player-experience.html
+- Player experience EN: https://fillmycourt.com/en/player-experience.html
+- Methodology PT: https://fillmycourt.com/methodology.html
+- Methodology EN: https://fillmycourt.com/en/methodology.html
+- Pricing PT: https://fillmycourt.com/pricing.html
+- Pricing EN: https://fillmycourt.com/en/pricing.html
+- Data & security PT: https://fillmycourt.com/security.html
+- Data & security EN: https://fillmycourt.com/en/security.html
+
+## Non-canonical/private surfaces
+- Interactive demos use fictional data and are intentionally noindex.
+- Onboarding is operational and intentionally noindex.
+- /archive/ contains historical releases and is intentionally noindex/noarchive.
+
+
+## Search-intent solution pages
+- https://fillmycourt.com/solutions/software-gestao-clube-padel.html
+- https://fillmycourt.com/solutions/crm-clube-padel.html
+- https://fillmycourt.com/solutions/software-reservas-padel.html
+- https://fillmycourt.com/solutions/software-clube-squash.html
+- https://fillmycourt.com/solutions/alternativa-playtomic-clubes.html
+- https://fillmycourt.com/en/solutions/padel-club-management-software.html
+- https://fillmycourt.com/en/solutions/padel-crm.html
+- https://fillmycourt.com/en/solutions/padel-booking-system.html
+- https://fillmycourt.com/en/solutions/squash-club-software.html
+- https://fillmycourt.com/en/solutions/racket-club-management-software.html
+- https://fillmycourt.com/en/solutions/playtomic-alternative-for-clubs.html
+## Languages and markets
+- Portuguese (pt-PT): primary Portugal market.
+- English: international / UK / Nordic / cross-border business.
+- Spanish (es-ES): priority expansion market because Spain is the world's largest padel market and a mature operating market where club utilisation, retention and revenue optimisation matter more than simply building more courts.
+- Latvian (lv-LV): dedicated Baltic sales/localisation layer, including Latvia partner and operator discussions.
+- Language switching is available persistently on desktop and mobile.
+
+## Free tools and buyer resources
+- Padel court revenue leak calculator PT: https://fillmycourt.com/tools/calculadora-receita-courts-padel.html
+- Padel court revenue leak calculator EN: https://fillmycourt.com/en/tools/padel-court-revenue-leak-calculator.html
+- Padel court revenue leak calculator ES: https://fillmycourt.com/es/herramientas/calculadora-ingresos-pistas-padel.html
+- Booking marketplace fee calculator PT: https://fillmycourt.com/tools/calculadora-custo-marketplace-booking.html
+- Booking marketplace fee calculator EN: https://fillmycourt.com/en/tools/booking-marketplace-fee-calculator.html
+- Booking marketplace fee calculator ES: https://fillmycourt.com/es/herramientas/calculadora-coste-marketplace-reservas.html
+- Club software buyer scorecard PT: https://fillmycourt.com/guides/como-escolher-software-clube-padel.html
+- Club software buyer scorecard EN: https://fillmycourt.com/en/guides/how-to-choose-padel-club-software.html
+- Club software buyer scorecard ES: https://fillmycourt.com/es/guias/como-elegir-software-club-padel.html
+
+## Editorial authority cluster
+- Portuguese and English insight pages explain empty court economics, cancellation recovery, incomplete-game recovery, occupancy improvement, club software vs revenue recovery, and unified booking.
+- Spanish equivalents are available under https://fillmycourt.com/es/insights/ for the same core operating topics.

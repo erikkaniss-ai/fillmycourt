@@ -1,0 +1,45 @@
+User-agent: *
+Allow: /
+Disallow: /onboarding/
+Disallow: /en/onboarding/
+Disallow: /archive/
+
+User-agent: Google-Extended
+Allow: /
+Disallow: /onboarding/
+Disallow: /en/onboarding/
+Disallow: /archive/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /onboarding/
+Disallow: /en/onboarding/
+Disallow: /archive/
+
+User-agent: ChatGPT-User
+Allow: /
+Disallow: /archive/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /onboarding/
+Disallow: /en/onboarding/
+Disallow: /archive/
+
+User-agent: Claude-SearchBot
+Allow: /
+Disallow: /onboarding/
+Disallow: /en/onboarding/
+Disallow: /archive/
+
+User-agent: Claude-User
+Allow: /
+Disallow: /archive/
+
+User-agent: ClaudeBot
+Allow: /
+Disallow: /onboarding/
+Disallow: /en/onboarding/
+Disallow: /archive/
+
+Sitemap: https://fillmycourt.com/sitemap.xml

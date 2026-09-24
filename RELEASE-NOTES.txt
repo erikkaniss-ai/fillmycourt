@@ -1,0 +1,90 @@
+FillMyCourt v3.4 — Blue Identity Refresh — 24 Sep 2026
+- Replaced black/lime identity with deep-navy + blue/electric-blue system.
+- Added new horizontal FillMyCourt logo and favicon.
+- Reworked navigation, CTAs, dashboards, positive states and dark sections to the new visual system.
+- Updated Open Graph artwork to the new blue brand.
+- Preserved product copy, SEO architecture, forms, multilingual routes and conversion logic.
+
+FillMyCourt v3.3 — Revenue-first production release
+Date: 19 Sep 2026
+
+PURPOSE
+This release promotes the reviewed redesign direction into the production-ready package while preserving the previous production release under /archive/v2/ and via its immutable Netlify deploy permalink.
+
+POSITIONING
+- Primary promise: fill empty/at-risk courts and recover incremental revenue automatically.
+- FillMyCourt remains the B2B operating/revenue core, not the generic consumer brand.
+- Booking, CRM, matchmaking, distribution, payments, analytics, player apps, media integrations and enterprise control exist underneath the Revenue Engine.
+- Public content demonstrates the sophistication of the Demand Engine without publishing proprietary scoring weights, thresholds, exact timing, channel sequencing or incentive trees.
+
+PRODUCT
+- Revenue Map + financial simulator + owner P&L.
+- Automated behavioural Player CRM.
+- Demand Engine: Revenue Map → Audience Intelligence → Decision Layer → Activation → Attribution & Learning.
+- Native booking/inventory core and connector architecture.
+- External marketplaces/discovery channels can remain acquisition sources; direct repeat booking can grow where contracts, permissions and consent allow.
+- Club white-label player app architecture with optional “Powered by FillMyCourt”.
+- Separate international cross-club consumer network architecture; permanent consumer brand remains TBD and is not exposed as a fake launch brand.
+- Match formation/open-match support.
+- Media/performance integration layer for specialist video providers; provider references are examples/integration targets, not partnerships.
+- Multi-location hierarchy, tenant isolation, role/policy model, API/webhook path and enterprise scale architecture.
+
+COMMERCIAL
+- Revenue Leak Audit: EUR 490 / five business days.
+- Current Sprint hypothesis: EUR 1,250 setup + EUR 249/month + 8% of agreed attributed uplift.
+- Financial examples remain illustrative, not client results or guarantees.
+- Marketplace/platform fee savings are user-configurable illustrations and separated from payment-processing costs.
+
+PLAYER BRAND ARCHITECTURE
+- FillMyCourt = B2B platform / revenue engine.
+- White-label Club App = club-owned player relationship and direct booking surface.
+- International Booking Network = separate future consumer brand, name TBD.
+- Portable/public identity is separated from tenant-private club CRM.
+
+SEO / LLM / ANALYTICS
+- Production canonical and hreflang restored.
+- Indexable commercial pages included in sitemap.
+- Demo and onboarding are noindex; historical /archive/ is noindex/noarchive.
+- robots.txt allows public acquisition content and blocks archive/onboarding from crawlers.
+- llms.txt and llms-full.txt describe the final revenue-first architecture and explicit limitations.
+- First-party Netlify event layer retained for sessions, source/UTM, CTA, financial simulator, channel-margin interactions, lead/onboarding events and demo interactions.
+- Netlify commercial lead/onboarding forms retained.
+
+ARCHIVE
+- Previous live production v2 is bundled at /archive/v2/ with noindex/noarchive, forms disabled and analytics disabled.
+- Previous production immutable Netlify deploy: https://6aad86172d703ba021f786db--fillmycourt.netlify.app/
+
+IMPORTANT LIMITATIONS
+- No universal external booking integration is claimed.
+- No provider partnership is claimed unless separately verified.
+- No global multi-region SLA is claimed before implementation/validation.
+- No guaranteed revenue/ROI/search ranking/LLM visibility claim.
+
+
+V3.3.3 MULTILINGUAL NAVIGATION
+- Fixed language switcher so it remains visible on mobile and desktop.
+- Added Spanish (ES) commercial site and priority solution pages.
+- Added Latvian (LV) core commercial experience for Latvia partner/operator discussions.
+- Added PT/EN/ES/LV hreflang on equivalent core pages.
+- Updated sitemap and LLM context.
+- Added ES and LV lead forms; lead automation must process club-lead-es and club-lead-lv.
+
+
+V3.3.3 MULTILINGUAL NAVIGATION
+- Fixed language switcher so it remains visible on mobile and desktop.
+- Added Spanish (ES) commercial site and priority solution pages.
+- Added Latvian (LV) core commercial experience for Latvia partner/operator discussions.
+- Added PT/EN/ES/LV hreflang on equivalent core pages.
+- Updated sitemap and LLM context.
+- Added ES and LV lead forms; lead automation must process club-lead-es and club-lead-lv.
+
+
+v3.3.4 — SEO Authority & Acquisition Layer — 2026-09-19
+- Added standalone Revenue Leak Calculator in PT/EN/ES.
+- Added Marketplace/Direct Booking Fee Calculator in PT/EN/ES.
+- Added vendor-neutral Padel Club Software Buyer Scorecard in PT/EN/ES + downloadable CSV.
+- Added Spanish translations of six core operator insight articles.
+- Added free-tools/resources section to PT/EN/ES homepages.
+- Fixed persistent language selector on all legacy PT/EN insight pages.
+- Expanded sitemap and llms files for new authority assets.
+- Static QA: language selector coverage, internal link integrity, XML and JS syntax.

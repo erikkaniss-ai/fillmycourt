@@ -1,0 +1,13 @@
+Criteria,Weight,Supplier A,Supplier B,Supplier C,Notes
+"Revenue recovery",5,,,,"Can the system identify at-risk inventory and attribute incremental revenue rather than only report occupancy?"
+"Booking integrity",5,,,,"Locks, idempotency, conflict prevention and clear rules when multiple channels touch the same slot."
+"Behavioural CRM",5,,,,"Recency, frequency, value, preferred times, level, partners, lifecycle and consent in one usable player profile."
+"Retention automation",5,,,,"Can the system react to churn risk, inactivity, cancellations and off-peak fit without manual campaign lists?"
+"Direct relationship",4,,,,"Club-owned web/app booking, white-label options and a clear path to retain repeat customers directly."
+"Integrations & API",5,,,,"Authorised APIs, webhooks, imports/exports and transparent limitations when a provider is read-only."
+"Channel attribution",4,,,,"Can the club see where a booking came from and what distribution cost was attached to it?"
+"Payments & membership",3,,,,"Payments, wallet/credits, memberships, refunds and billing appropriate to the club model."
+"Matchmaking & open play",3,,,,"Open matches, skill compatibility and automatic completion of incomplete games."
+"Automation vs headcount",5,,,,"How much routine work disappears after setup? Which exceptions still need staff?"
+"P&L analytics",5,,,,"Owner view should reconcile baseline, action, booking, cost and net result—not just clicks or reservations."
+"Scale & security",4,,,,"Roles, tenant isolation, audit logs, multi-location hierarchy, SSO path and data governance."

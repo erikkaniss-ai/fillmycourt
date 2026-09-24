@@ -1,0 +1,79 @@
+[build]
+  publish = "."
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy = "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none'"
+
+[[headers]]
+  for = "/archive/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow, noarchive"
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/llms*.txt"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[redirects]]
+  from = "/pt/*"
+  to = "/:splat"
+  status = 301
+
+[[redirects]]
+  from = "/demo-v3/*"
+  to = "/demo/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/en/v3/*"
+  to = "/en/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/demo"
+  to = "/demo/"
+  status = 301
+
+[[redirects]]
+  from = "/en/demo"
+  to = "/en/demo/"
+  status = 301
+
+[[redirects]]
+  from = "/onboarding"
+  to = "/onboarding/"
+  status = 301
+
+[[redirects]]
+  from = "/en/onboarding"
+  to = "/en/onboarding/"
+  status = 301
+
+[[redirects]]
+  from = "/booking-hub"
+  to = "/booking-hub.html"
+  status = 301
+
+[[redirects]]
+  from = "/en/booking-hub"
+  to = "/en/booking-hub.html"
+  status = 301
+
+[[redirects]]
+  from = "/player-experience"
+  to = "/player-experience.html"
+  status = 301
+
+[[redirects]]
+  from = "/en/player-experience"
+  to = "/en/player-experience.html"
+  status = 301

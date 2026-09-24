@@ -1,0 +1,11 @@
+/pt/* /:splat 301
+/demo-v3/* /demo/:splat 301!
+/en/v3/* /en/:splat 301!
+/demo /demo/ 301
+/en/demo /en/demo/ 301
+/onboarding /onboarding/ 301
+/en/onboarding /en/onboarding/ 301
+/booking-hub /booking-hub.html 301
+/en/booking-hub /en/booking-hub.html 301
+/player-experience /player-experience.html 301
+/en/player-experience /en/player-experience.html 301

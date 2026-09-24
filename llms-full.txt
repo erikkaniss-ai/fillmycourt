@@ -1,0 +1,154 @@
+# FillMyCourt — full machine-readable context
+
+## Definition
+FillMyCourt is a revenue-first B2B SaaS platform for racket clubs. Its primary purpose is to turn addressable empty or at-risk court capacity into measurable incremental revenue. Booking, CRM, matchmaking, distribution, payments, analytics and media integrations sit underneath that revenue objective.
+
+## Buyer and business outcome
+The primary buyer is a racket-club owner, general manager, operator or multi-location administrator. The intended outcome is more incremental profit from existing courts and existing/player demand without creating another daily manual CRM or campaign role for club staff.
+
+Public financial examples are illustrations, not customer results or forecasts. FillMyCourt separates:
+- total unsold capacity;
+- structurally unlikely/non-addressable capacity;
+- addressable revenue leakage;
+- attributed recovered gross revenue;
+- incentives, distribution costs and FillMyCourt fees;
+- net incremental club gain.
+
+## Demand Engine
+The public operating model has five layers.
+
+1. Revenue Map
+Value court-hours, cancellations, released inventory, incomplete games and other demand windows. Only opportunities with a credible economic case should enter the action queue.
+
+2. Audience Intelligence
+Use authorised behavioural and booking signals such as recency, frequency, spend/value, preferred times, sport/level, usual partners, attendance and cancellation history to identify plausible demand.
+
+3. Proprietary Decision Layer
+Prioritise which opportunity to act on, when, through which configured channel and at what intervention intensity. Scoring weights, cohort thresholds, exact timing, channel sequencing, escalation rules and incentive decision trees are proprietary and are not published in full.
+
+4. Activation
+Run configured workflows across channels such as WhatsApp, SMS, email, push and booking links where authorised and consented. The target is to reduce repetitive daily work rather than create another staff dashboard that requires constant manual operation.
+
+5. Attribution & Learning
+Link the opportunity, action, booking, incentive, distribution cost, refund/displacement where applicable and final financial result to an agreed baseline. A booking that occurred after an action is not automatically counted as incremental revenue.
+
+## Automated Player CRM
+FillMyCourt treats CRM as behavioural demand intelligence rather than a static contact database. Dynamic states can include Active, At Risk, Dormant, Off-Peak Fit, Match Candidate and High Value. Each state has an economic job: retain habit, prevent churn, reactivate, shift demand into weak dayparts, complete games or protect lifetime value.
+
+Private club CRM data must stay tenant-isolated. A club's spend history, lifecycle/churn status, internal segments, internal notes and communication history must not become visible to another club.
+
+## Booking & inventory core
+FillMyCourt is designed to support native booking and a common internal representation of organisation, venue, court, slot, price, availability, booking state and player/match context.
+
+Booking architecture requirements include:
+- visual availability/calendar;
+- booking rules and pricing;
+- cancellation policy;
+- waitlist path;
+- recurring bookings;
+- native checkout/payment abstraction;
+- reservation locks;
+- idempotent writes;
+- conflict prevention;
+- queue-based processing for high-volume operations;
+- timezone-safe scheduling.
+
+## Distribution and direct economics
+FillMyCourt is not positioned as anti-marketplace. External discovery/booking systems can remain useful acquisition channels. FillMyCourt aims to give the club one operational core for availability, CRM, attribution and channel economics.
+
+Where APIs, exports, contracts, permissions and consent allow, external channels can connect through adapters. The club can increase direct repeat booking through its own website or white-label app while retaining external channels that provide incremental new demand.
+
+Marketplace/platform distribution fees must be distinguished from payment-processing costs. Any public fee-savings model is configurable/illustrative and must not present one provider's fee as universal.
+
+References to Playtomic, MATCHi, CourtReserve, SportyHQ or other market systems indicate relevant connector/distribution targets only. They do not imply an existing commercial partnership or live two-way integration unless specifically verified.
+
+## Player-facing brand architecture
+FillMyCourt is the B2B master brand and should not be the primary generic consumer-account brand.
+
+Club white-label experience:
+- club name/logo/icon/colours;
+- court booking;
+- open matches/matchmaking;
+- memberships, packages, wallet/credits path;
+- notifications;
+- booking history;
+- match media/replay/highlights where integrated;
+- optional discreet “Powered by FillMyCourt”.
+
+International consumer network:
+- separate permanent brand to be selected later;
+- cross-club discovery, availability, booking and open matches;
+- travel/roaming use cases;
+- new-demand acquisition for participating clubs;
+- optional “Powered by FillMyCourt”.
+
+A portable player identity can exist underneath subject to consent, but private club CRM must remain separate from portable/public player attributes.
+
+## Match formation
+FillMyCourt can support completion of multi-player games such as padel 1/4→4/4 and squash 1/2→2/2. Finding a missing player does not automatically mean the full booking value is incremental revenue; the agreed attribution rule determines what can be counted.
+
+## Media & performance integration layer
+FillMyCourt should integrate specialist court-video/broadcast/performance products rather than rebuild specialist computer vision in the MVP.
+
+Public examples of relevant integration targets include:
+- PlaySight — relevant racket-sport/squash streaming, replay, scoring/scoreboard and highlight/analysis workflows where supported;
+- Wingfield — padel/tennis video, shot tracking, stats, scoring and highlight workflows where supported;
+- Save My Play — player recording, instant replay, highlights/coaching/social workflows where supported;
+- Spiideo — cloud capture/broadcast and third-party camera ingest for larger operations.
+
+Provider capabilities vary by sport and product. These names are examples/integration targets, not partnership claims. The intended FillMyCourt media workflow is booking/player/match identity → provider capture/stream/analysis → FillMyCourt match record/entitlement → player replay/highlights/share.
+
+## Multi-location and enterprise architecture
+The data model is intended to scale from one venue to distributed networks without changing the basic hierarchy:
+Network → region → organisation → venue → court.
+
+Architecture targets include tenant isolation, role-based access, central policies with local overrides, aggregated BI, white-label surfaces, API/webhooks, auditability, MFA/SSO path, multi-language/multi-currency/timezone handling and a future regional deployment path. FillMyCourt does not claim a global multi-region SLA until implemented and validated.
+
+## Commercial offer
+Revenue Leak Audit: EUR 490, five business days. Typical inputs are 4–12 weeks of authorised/minimised booking data. Outputs can include a court/daypart revenue map, addressable leakage, CRM opportunity segments, cancellations/released inventory, incomplete-game opportunity, booking/distribution assessment and a one-page business case.
+
+Revenue Recovery Sprint — current commercial hypothesis: EUR 1,250 setup + EUR 249/month + 8% of agreed attributed uplift. The Sprint should be proposed only when the Audit shows a case worth testing.
+
+## Data posture
+Do not submit passwords, payment-card data, identity documents or private-message content in the Audit intake. Prefer minimised/anonymised identifiers where possible. Persistent integrations require explicit permissions, tenant isolation, retention/export/deletion rules and clear controller/processor responsibilities.
+
+## Claims and limitations
+- FillMyCourt does not guarantee recovered revenue, occupancy growth or ROI.
+- Public demo data is fictional and does not send real messages or create real bookings.
+- Provider connectivity is conditional on authorised technical access and contracts.
+- External provider names do not imply partnership.
+- The permanent international consumer-network brand is not yet selected.
+- Proprietary scoring, cohorts, timing, sequencing and incentive logic are not published in full.
+
+## Canonical domain
+https://fillmycourt.com/
+
+
+## Search-intent solution pages
+- https://fillmycourt.com/solutions/software-gestao-clube-padel.html
+- https://fillmycourt.com/solutions/crm-clube-padel.html
+- https://fillmycourt.com/solutions/software-reservas-padel.html
+- https://fillmycourt.com/solutions/software-clube-squash.html
+- https://fillmycourt.com/solutions/alternativa-playtomic-clubes.html
+- https://fillmycourt.com/en/solutions/padel-club-management-software.html
+- https://fillmycourt.com/en/solutions/padel-crm.html
+- https://fillmycourt.com/en/solutions/padel-booking-system.html
+- https://fillmycourt.com/en/solutions/squash-club-software.html
+- https://fillmycourt.com/en/solutions/racket-club-management-software.html
+- https://fillmycourt.com/en/solutions/playtomic-alternative-for-clubs.html
+## Languages and markets
+- Portuguese (pt-PT): primary Portugal market.
+- English: international / UK / Nordic / cross-border business.
+- Spanish (es-ES): priority expansion market because Spain is the world's largest padel market and a mature operating market where club utilisation, retention and revenue optimisation matter more than simply building more courts.
+- Latvian (lv-LV): dedicated Baltic sales/localisation layer, including Latvia partner and operator discussions.
+- Language switching is available persistently on desktop and mobile.
+
+
+FREE TOOLS / LINKABLE ASSETS
+FillMyCourt publishes free, vendor-neutral decision tools:
+1. Revenue Leak Calculator — estimates theoretical sellable capacity, unsold capacity, addressable leakage, illustrative recovered gross and illustrative net gain. It is not a forecast or guarantee.
+2. Marketplace Fee Calculator — estimates current platform-distribution fees and potential reduction if eligible repeat demand moves to direct club channels; payment processing is kept conceptually separate.
+3. Club Software Buyer Scorecard — 12 weighted criteria covering revenue recovery, booking integrity, behavioural CRM, retention automation, direct customer relationship, APIs, channel attribution, payments, matchmaking, automation/headcount, P&L analytics, and scale/security.
+
+SPANISH EDITORIAL CLUSTER
+Spanish content mirrors the core operational themes relevant to the Spain expansion market: empty-court economics, cancellation recovery, incomplete matches, occupancy growth, club-management software vs revenue recovery, and unified booking architecture.

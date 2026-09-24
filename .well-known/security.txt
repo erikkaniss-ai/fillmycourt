@@ -1,0 +1,4 @@
+Contact: https://fillmycourt.com/security.html
+Preferred-Languages: en, pt
+Canonical: https://fillmycourt.com/.well-known/security.txt
+Expires: 2027-09-19T23:59:59Z
