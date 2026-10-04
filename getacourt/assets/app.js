@@ -3,7 +3,7 @@
   const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
   const state = {
     sport:"padel", venues:[], filter:"all", selected:null, hold:null, timer:null,
-    platform:{ bookingEnabled:false, authConfigured:false }, session:null
+    platform:{ bookingEnabled:false, authConfigured:false }, session:null, profile:null
   };
 
   const el = {
@@ -16,7 +16,10 @@
     bookingsList:q("#bookingsList"), myBookings:q("#myBookingsButton"),
     closeBookings:q("#closeBookingsButton"), toast:q("#toast"),
     authButton:q("#authButton"), authDialog:q("#authDialog"), authForm:q("#authForm"),
-    authEmail:q("#authEmail"), authStatus:q("#authStatus"), closeAuth:q("#closeAuthButton")
+    authEmail:q("#authEmail"), authStatus:q("#authStatus"), closeAuth:q("#closeAuthButton"),
+    profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
+    profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
+    closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton")
   };
 
   const now = new Date();
@@ -37,7 +40,7 @@
     try{return JSON.parse(localStorage.getItem("gac.session")||"null");}catch{return null;}
   }
   function saveSession(data){
-    if(!data){localStorage.removeItem("gac.session");state.session=null;updateAuthUI();return;}
+    if(!data){localStorage.removeItem("gac.session");state.session=null;state.profile=null;updateAuthUI();return;}
     state.session={
       accessToken:data.access_token||data.accessToken,
       refreshToken:data.refresh_token||data.refreshToken,
@@ -58,7 +61,7 @@
     if(access&&refresh){
       saveSession({access_token:access,refresh_token:refresh,expires_in:Number(hash.get("expires_in")||3600)});
       history.replaceState(null,"",location.pathname+location.search);
-      setTimeout(()=>toast("Signed in to GetACourt."),100);
+      setTimeout(()=>{toast("Signed in to GetACourt.");loadProfile(true);},100);
     }
   }
   async function accessToken(){
@@ -74,8 +77,9 @@
     if(!el.authButton) return;
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
     const email=payload.email||"";
-    el.authButton.textContent=email ? email : "Sign in";
-    el.authButton.title=email ? "Signed in · click to manage session" : "Sign in";
+    const label=state.profile?.full_name||email;
+    el.authButton.textContent=label ? label : "Sign in";
+    el.authButton.title=label ? "Signed in · open player profile" : "Sign in";
   }
 
   async function api(path,options={},auth=false){
@@ -216,6 +220,74 @@
     }catch(err){if(button){button.disabled=false;button.textContent="Cancel booking";}toast(err.message||"Could not cancel booking.");}
   }
 
+  async function loadProfile(promptIfMissing=false){
+    if(!state.session?.accessToken) return null;
+    try{
+      const data=await api("/api/gac/player-profile",{},true);
+      state.profile=data.profile||null;
+      if(state.profile){
+        el.profileName.value=state.profile.full_name||"";
+        el.profileArea.value=state.profile.home_area||"";
+        el.profileMarketing.checked=state.profile.marketing_consent===true;
+        const preferred=new Set(state.profile.preferred_sports||[]);
+        qa('input[name="preferredSport"]',el.profileForm).forEach(x=>x.checked=preferred.has(x.value));
+      }
+      updateAuthUI();
+      if(promptIfMissing&&!state.profile) openProfile();
+      return state.profile;
+    }catch(err){
+      if(err.code==="AUTH_REQUIRED"||err.status===401) saveSession(null);
+      return null;
+    }
+  }
+  async function openProfile(){
+    if(!(await requireSignedIn())) return;
+    const profile=await loadProfile(false);
+    const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
+    if(!profile){
+      el.profileName.value="";
+      el.profileArea.value=el.location.value.trim()||"";
+      el.profileMarketing.checked=false;
+      qa('input[name="preferredSport"]',el.profileForm).forEach(x=>x.checked=x.value===state.sport);
+      el.profileStatus.textContent="Complete your player profile. It is global to GetACourt and separate from club CRM records.";
+    }else{
+      el.profileStatus.textContent="Your player preferences help GetACourt prioritize relevant courts and times.";
+    }
+    if(payload.email&&!el.email.value) el.email.value=payload.email;
+    el.profileDialog.showModal();
+  }
+  async function saveProfile(e){
+    e.preventDefault();
+    const fullName=el.profileName.value.trim();
+    if(fullName.length<2){el.profileStatus.textContent="Please enter your name.";return;}
+    const preferredSports=qa('input[name="preferredSport"]:checked',el.profileForm).map(x=>x.value);
+    el.profileStatus.textContent="Saving…";
+    try{
+      const data=await api("/api/gac/player-profile",{
+        method:"PUT",
+        headers:{"content-type":"application/json"},
+        body:JSON.stringify({
+          fullName,
+          homeArea:el.profileArea.value.trim()||null,
+          preferredSports,
+          locale:"en",
+          marketingConsent:el.profileMarketing.checked
+        })
+      },true);
+      state.profile=data.profile||null;
+      if(state.profile?.home_area) el.location.value=state.profile.home_area;
+      updateAuthUI();
+      el.profileStatus.textContent="Profile saved.";
+      toast("Player profile saved.");
+      setTimeout(()=>el.profileDialog.close(),450);
+    }catch(err){el.profileStatus.textContent=err.message||"Could not save profile.";}
+  }
+  function signOut(){
+    saveSession(null);
+    if(el.profileDialog.open) el.profileDialog.close();
+    toast("Signed out.");
+  }
+
   function openAuth(message=""){
     if(message) el.authStatus.textContent=message;
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
@@ -224,7 +296,6 @@
   }
   async function sendMagicLink(e){
     e.preventDefault();
-    if(state.session?.accessToken){saveSession(null);el.authDialog.close();toast("Signed out.");return;}
     const email=el.authEmail.value.trim().toLowerCase();if(!email)return;
     el.authStatus.textContent="Sending secure sign-in link…";
     try{
@@ -241,10 +312,13 @@
   el.dialog.addEventListener("close",()=>{clearInterval(state.timer);if(el.dialog.returnValue==="cancel")reset();});
   el.myBookings.addEventListener("click",loadBookings);
   el.closeBookings.addEventListener("click",()=>el.bookingsDialog.close());
-  el.authButton.addEventListener("click",()=>openAuth(state.session?.accessToken?"You are signed in. Submit below to sign out.":""));
+  el.authButton.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth(""));
   el.authForm.addEventListener("submit",sendMagicLink);
   el.closeAuth.addEventListener("click",()=>el.authDialog.close());
+  el.profileForm.addEventListener("submit",saveProfile);
+  el.closeProfile.addEventListener("click",()=>el.profileDialog.close());
+  el.profileSignOut.addEventListener("click",signOut);
 
   updateAuthUI();
-  loadPlatform().then(search);
+  loadPlatform().then(async()=>{if(state.session?.accessToken) await loadProfile(false);search();});
 })();
