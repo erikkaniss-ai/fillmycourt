@@ -479,8 +479,9 @@ def create_v1_app(settings, service: str = "all"):
                 for ch in reversed(b["result"].get("changes", [])):
                     if ch.get("created"):
                         c.execute(text("""
-                            delete from public.people where id=cast(:id as uuid) and organization_id=cast(:org as uuid)
-                              and auth_user_id is null
+                            delete from public.people p where p.id=cast(:id as uuid) and p.organization_id=cast(:org as uuid)
+                              and p.auth_user_id is null
+                              and not exists (select 1 from public.bookings b where b.player_id=p.id)
                         """), {"id": ch["id"], "org": org})
                     else:
                         before = ch.get("before") or {}
