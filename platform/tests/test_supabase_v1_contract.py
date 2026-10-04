@@ -94,12 +94,18 @@ def test_player_profile_rls_is_owned_by_auth_user(store):
 
     with store.user(outsider) as c:
         assert c.execute(text("select count(*) from public.player_profiles")).scalar() == 0
-        with pytest.raises(Exception):
-            c.execute(text("""
-                update public.player_profiles
-                set full_name='Hijacked'
-                where user_id=cast(:uid as uuid)
-            """), {"uid": owner})
+        result = c.execute(text("""
+            update public.player_profiles
+            set full_name='Hijacked'
+            where user_id=cast(:uid as uuid)
+        """), {"uid": owner})
+        assert result.rowcount == 0
+
+    with store.user(owner) as c:
+        got = c.execute(text("""
+            select full_name from public.player_profiles where user_id=cast(:uid as uuid)
+        """), {"uid": owner}).scalar()
+        assert got == "Player One"
 
 
 def test_player_profile_rejects_unsupported_sport(store):
