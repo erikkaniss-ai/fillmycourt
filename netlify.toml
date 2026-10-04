@@ -18,4 +18,4 @@
   [headers.values]
     X-Robots-Tag = "noindex, nofollow, noarchive"
 
-# staging env refresh
+# canonical auth origin
