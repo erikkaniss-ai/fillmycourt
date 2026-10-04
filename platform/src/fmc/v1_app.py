@@ -92,6 +92,14 @@ class ProviderIn(BaseModel):
     config: dict = {}
 
 
+class MappingIn(BaseModel):
+    provider_connection_id: str
+    entity_type: str = "court"
+    external_id: str = Field(min_length=1, max_length=200)
+    local_id: str
+    metadata: dict = {}
+
+
 class ReconRunIn(BaseModel):
     provider_connection_id: str | None = None
     scope: str = "bookings"
@@ -544,6 +552,38 @@ def create_v1_app(settings, service: str = "all"):
                     returning id::text,provider,status,capabilities,config
                 """), {"org": org, "provider": provider, "cap": json.dumps(capabilities), "config": json.dumps(body.config)}))
                 audit(c, request, org, a, "provider.configured", "provider_connection", r["id"], after=r)
+                return r
+
+        @app.post("/api/fmc/{org}/provider-mappings", status_code=201)
+        def provider_mapping(org: str, body: MappingIn, request: Request):
+            a = who(request)
+            if body.entity_type != "court":
+                raise DomainError("MAPPING_TYPE", "Only court mapping is enabled in this release.", 422)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_ADMIN)
+                pc = one(c.execute(text("""
+                    select id::text,provider from public.provider_connections
+                    where id=cast(:pc as uuid) and organization_id=cast(:org as uuid)
+                """), {"pc": body.provider_connection_id, "org": org}))
+                if not pc:
+                    raise DomainError("PROVIDER_NOT_FOUND", "Provider connection not found.", 404)
+                court = one(c.execute(text("""
+                    select c.id::text from public.courts c
+                    join public.venues v on v.id=c.venue_id
+                    where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid)
+                """), {"court": body.local_id, "org": org}))
+                if not court:
+                    raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
+                r = one(c.execute(text("""
+                    insert into public.provider_mappings
+                      (organization_id,provider_connection_id,entity_type,local_id,external_id,metadata)
+                    values(cast(:org as uuid),cast(:pc as uuid),'court',cast(:local as uuid),:external,cast(:metadata as jsonb))
+                    on conflict(provider_connection_id,entity_type,external_id) do update set
+                      local_id=excluded.local_id,metadata=excluded.metadata
+                    returning id::text,provider_connection_id::text,entity_type,local_id::text,external_id,metadata
+                """), {"org": org, "pc": body.provider_connection_id, "local": body.local_id,
+                       "external": body.external_id, "metadata": json.dumps(body.metadata)}))
+                audit(c, request, org, a, "provider.mapping_upserted", "provider_mapping", r["id"], after=r)
                 return r
 
         @app.post("/api/fmc/{org}/providers/{provider}/sync", status_code=202)
