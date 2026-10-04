@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import hashlib
 import json
 import time
@@ -213,9 +214,9 @@ class V1Store:
         """), {"court": court_id}))
         if not court:
             raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
-        local = starts_at.astimezone(timezone.utc)
-        weekday = starts_at.weekday()
-        minute = starts_at.hour * 60 + starts_at.minute
+        local = starts_at.astimezone(ZoneInfo(court["timezone"]))
+        weekday = local.weekday()
+        minute = local.hour * 60 + local.minute
         rate = one(c.execute(text("""
             select price_minor,currency::text
             from public.court_rates
