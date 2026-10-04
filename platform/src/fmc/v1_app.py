@@ -81,6 +81,26 @@ class BlockIn(BaseModel):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class StaffBookingIn(BaseModel):
+    court_id: str
+    person_id: str
+    starts_at: str
+    duration: int = Field(ge=30, le=240)
+    participants: int = Field(default=1, ge=1, le=20)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class CutoverIn(BaseModel):
+    confirmation: str
+    backup_ref: str = Field(min_length=5, max_length=1000)
+    legacy_disabled_ref: str = Field(min_length=5, max_length=1000)
+    reconciliation_run_id: str
+
+
+class StaffCancelIn(BaseModel):
+    note: str = Field(min_length=3, max_length=1000)
+
+
 class ImportIn(BaseModel):
     source: str = Field(min_length=1, max_length=40)
     csv: str = Field(min_length=1, max_length=2_500_000)
@@ -320,11 +340,16 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_DESK)
                 db.advisory_court_lock(c, body.court_id)
                 court = one(c.execute(text("""
-                    select c.id from public.courts c join public.venues v on v.id=c.venue_id
+                    select c.id,c.inventory_mode::text,c.native_write_enabled
+                    from public.courts c join public.venues v on v.id=c.venue_id
                     where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid)
                 """), {"court": body.court_id, "org": org}))
                 if not court:
                     raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
+                if court["inventory_mode"] != "native" or not court["native_write_enabled"]:
+                    raise DomainError("HANDOFF_REQUIRED", "Blocks can only be written after this court is cut over to FmC native inventory.", 409)
+                if db.active_conflict(c, body.court_id, start, end):
+                    raise DomainError("SLOT_TAKEN", "This interval overlaps an active booking or hold.", 409)
                 r = one(c.execute(text("""
                     insert into public.court_blocks(organization_id,court_id,starts_at,ends_at,reason,created_by)
                     values(cast(:org as uuid),cast(:court as uuid),:a,:b,:reason,cast(:uid as uuid))
@@ -499,6 +524,134 @@ def create_v1_app(settings, service: str = "all"):
                 """), {"id": batch})
                 audit(c, request, org, a, "import.rolled_back", "import_batch", batch)
                 return {"id": batch, "status": "rolled_back"}
+
+        @app.post("/api/fmc/{org}/staff-bookings", status_code=201)
+        def staff_booking(org: str, body: StaffBookingIn, request: Request,
+                          idempotency_key: str | None = Header(default=None)):
+            a = who(request)
+            require_key(idempotency_key)
+            start = iso(body.starts_at)
+            end = start + timedelta(minutes=body.duration)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_DESK)
+                db.advisory_court_lock(c, body.court_id)
+                court = one(c.execute(text("""
+                    select c.id::text,c.venue_id::text,c.inventory_mode::text,c.native_write_enabled
+                    from public.courts c join public.venues v on v.id=c.venue_id
+                    where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid)
+                """), {"court": body.court_id, "org": org}))
+                if not court:
+                    raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
+                if court["inventory_mode"] != "native" or not court["native_write_enabled"]:
+                    raise DomainError("HANDOFF_REQUIRED", "This court is not writable in FmC.", 409)
+                person = one(c.execute(text("""
+                    select id::text from public.people
+                    where id=cast(:person as uuid) and organization_id=cast(:org as uuid)
+                """), {"person": body.person_id, "org": org}))
+                if not person:
+                    raise DomainError("PERSON_NOT_FOUND", "Customer not found.", 404)
+                existing = one(c.execute(text("""
+                    select id::text,status::text from public.bookings
+                    where organization_id=cast(:org as uuid) and idempotency_key=:key
+                """), {"org": org, "key": idempotency_key}))
+                if existing:
+                    return existing
+                if db.active_conflict(c, body.court_id, start, end):
+                    raise DomainError("SLOT_TAKEN", "This slot is no longer available.", 409)
+                _, quote = db.quote(c, body.court_id, start, body.duration)
+                r = one(c.execute(text("""
+                    insert into public.bookings
+                      (organization_id,venue_id,court_id,player_id,status,starts_at,ends_at,currency,
+                       gross_amount_minor,source,idempotency_key,cancellation_policy_version,metadata)
+                    values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:person as uuid),
+                           'confirmed',:start,:end,:currency,:amount,'fmc_staff',:key,:policy,cast(:metadata as jsonb))
+                    returning id::text,status::text,starts_at,ends_at,currency::text,gross_amount_minor
+                """), {"org": org, "venue": court["venue_id"], "court": body.court_id,
+                       "person": body.person_id, "start": start, "end": end,
+                       "currency": quote["currency"], "amount": quote["amount_minor"],
+                       "key": idempotency_key, "policy": settings.terms_version or "operator",
+                       "metadata": json.dumps({"participants": body.participants, "note": body.note, "created_by": a.id})}))
+                audit(c, request, org, a, "booking.staff_created", "booking", r["id"], after=r)
+                return r
+
+        @app.post("/api/fmc/{org}/staff-bookings/{booking_id}/cancel")
+        def staff_cancel(org: str, booking_id: str, body: StaffCancelIn, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_DESK)
+                b = one(c.execute(text("""
+                    select id::text,status::text from public.bookings
+                    where id=cast(:id as uuid) and organization_id=cast(:org as uuid) for update
+                """), {"id": booking_id, "org": org}))
+                if not b:
+                    raise DomainError("BOOKING_NOT_FOUND", "Booking not found.", 404)
+                if b["status"] not in ("confirmed","pending_payment"):
+                    raise DomainError("BOOKING_STATE", "Booking cannot be cancelled in this state.", 409)
+                c.execute(text("""
+                    update public.bookings set status='cancelled',
+                      metadata=metadata || jsonb_build_object('staff_cancel_note',:note,'cancelled_by',:uid),
+                      updated_at=now()
+                    where id=cast(:id as uuid)
+                """), {"id": booking_id, "note": body.note, "uid": a.id})
+                audit(c, request, org, a, "booking.staff_cancelled", "booking", booking_id,
+                      before={"status": b["status"]}, after={"status":"cancelled","note":body.note})
+                return {"id": booking_id, "status": "cancelled"}
+
+        @app.post("/api/fmc/{org}/courts/{court_id}/activate-native")
+        def activate_native(org: str, court_id: str, body: CutoverIn, request: Request):
+            a = who(request)
+            if body.confirmation != "ACTIVATE_FMC_NATIVE":
+                raise DomainError("CONFIRMATION", "Explicit cutover confirmation is required.", 422)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_ADMIN)
+                court = one(c.execute(text("""
+                    select c.id::text,c.inventory_mode::text,c.native_write_enabled
+                    from public.courts c join public.venues v on v.id=c.venue_id
+                    where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid) for update
+                """), {"court": court_id, "org": org}))
+                if not court:
+                    raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
+                run = one(c.execute(text("""
+                    select id::text,status,completed_at from public.reconciliation_runs
+                    where id=cast(:run as uuid) and organization_id=cast(:org as uuid)
+                """), {"run": body.reconciliation_run_id, "org": org}))
+                if not run or run["status"] != "completed" or not run["completed_at"]:
+                    raise DomainError("RECON_REQUIRED", "A completed reconciliation run is required.", 409)
+                critical = c.execute(text("""
+                    select count(*) from public.reconciliation_items
+                    where run_id=cast(:run as uuid) and severity='critical'
+                      and status not in ('resolved','ignored')
+                """), {"run": body.reconciliation_run_id}).scalar_one()
+                if critical:
+                    raise DomainError("RECON_BLOCKED", "Resolve critical reconciliation items before cutover.", 409)
+                c.execute(text("""
+                    update public.courts
+                    set inventory_mode='native',native_write_enabled=true
+                    where id=cast(:court as uuid)
+                """), {"court": court_id})
+                audit(c, request, org, a, "court.native_activated", "court", court_id,
+                      before=court, after={"inventory_mode":"native","native_write_enabled":True,
+                      "backup_ref":body.backup_ref,"legacy_disabled_ref":body.legacy_disabled_ref,
+                      "reconciliation_run_id":body.reconciliation_run_id})
+                return {"id": court_id, "inventory_mode": "native", "native_write_enabled": True}
+
+        @app.post("/api/fmc/{org}/courts/{court_id}/pause-native")
+        def pause_native(org: str, court_id: str, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_MANAGER)
+                court = one(c.execute(text("""
+                    select c.id::text,c.inventory_mode::text,c.native_write_enabled
+                    from public.courts c join public.venues v on v.id=c.venue_id
+                    where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid) for update
+                """), {"court": court_id, "org": org}))
+                if not court:
+                    raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
+                c.execute(text("update public.courts set native_write_enabled=false where id=cast(:court as uuid)"),
+                          {"court": court_id})
+                audit(c, request, org, a, "court.native_paused", "court", court_id,
+                      before=court, after={"native_write_enabled":False})
+                return {"id": court_id, "native_write_enabled": False}
 
         @app.get("/api/fmc/{org}/calendar")
         def calendar(org: str, request: Request, start: str, end: str):
