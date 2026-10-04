@@ -168,11 +168,24 @@ class V1Store:
         """), {"org": org_id, "uid": actor.id}))
         if existing:
             return existing["id"]
+        profile = one(c.execute(text("""
+            select full_name,marketing_consent
+            from public.player_profiles
+            where user_id=cast(:uid as uuid)
+        """), {"uid": actor.id}))
         r = one(c.execute(text("""
-            insert into public.people(organization_id,auth_user_id,full_name,email,source)
-            values(cast(:org as uuid),cast(:uid as uuid),null,:email,'getacourt')
+            insert into public.people
+              (organization_id,auth_user_id,full_name,email,marketing_consent,source)
+            values
+              (cast(:org as uuid),cast(:uid as uuid),:full_name,:email,:marketing_consent,'getacourt')
             returning id::text
-        """), {"org": org_id, "uid": actor.id, "email": actor.email}))
+        """), {
+            "org": org_id,
+            "uid": actor.id,
+            "full_name": profile["full_name"] if profile else None,
+            "email": actor.email,
+            "marketing_consent": profile["marketing_consent"] if profile else None,
+        }))
         return r["id"]
 
     def active_conflict(self, c, court_id: str, starts_at: datetime, ends_at: datetime,
