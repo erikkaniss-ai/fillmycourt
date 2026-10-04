@@ -10,12 +10,29 @@ def main():
     p.add_argument('command',choices=['serve','migrate','worker','projector','reconciliation-worker','provider-sync-worker','verify-club','grant-role'])
     p.add_argument('--venue');p.add_argument('--actor');p.add_argument('--evidence');p.add_argument('--player');p.add_argument('--role',choices=['owner','manager','staff','accountant','viewer'])
     args=p.parse_args();settings=Settings.from_env();settings.validate()
+
+    if settings.data_contract=='supabase-v1':
+        if args.command=='serve':
+            import uvicorn
+            uvicorn.run('fmc.v1_app:create_from_env',factory=True,host='0.0.0.0',
+                        port=int(os.getenv('PORT','8000')),proxy_headers=False,access_log=False)
+            return
+        if args.command in ('reconciliation-worker','provider-sync-worker'):
+            from .v1_workers import run
+            run(settings,args.command)
+            return
+        if args.command=='migrate':
+            raise SystemExit('supabase-v1 migrations are applied by the reviewed Supabase migration workflow, never by app startup.')
+        raise SystemExit('This administrative command is legacy-v04 only; use reviewed Supabase-v1 operations.')
+
     if args.command=='serve':
         import uvicorn
-        uvicorn.run('fmc.app:create_app',factory=True,host='0.0.0.0',port=int(os.getenv('PORT','8000')),proxy_headers=False,access_log=False)
+        uvicorn.run('fmc.app:create_app',factory=True,host='0.0.0.0',
+                    port=int(os.getenv('PORT','8000')),proxy_headers=False,access_log=False)
         return
     db=d.Store(settings.database,settings.environment in ('staging','production'),initialize=False)
-    if args.command=='migrate':db.migrate();print('Schema ready; no customers or inventory seeded.');return
+    if args.command=='migrate':
+        db.migrate();print('Schema ready; no customers or inventory seeded.');return
     if args.command in ('verify-club','grant-role'):
         if not args.venue or not args.actor or not args.evidence:raise SystemExit('--venue --actor --evidence are required')
         with db.tx() as c:
@@ -44,4 +61,5 @@ def main():
     while running:
         worked=worker.step()
         if not worked:time.sleep(1)
+
 if __name__=='__main__':main()
