@@ -68,11 +68,19 @@ export default async (req) => {
       }
     }
 
-    const venues = Array.from(byVenue.values()).map(v => ({
-      ...v,
-      tags: [v.indoor ? "Indoor" : "Outdoor", ...v.tags].slice(0,4),
-      slots: v.slots.sort((a,b) => a.startsAt.localeCompare(b.startsAt) || a.duration-b.duration),
-    }));
+    const venues = Array.from(byVenue.values()).map(v => {
+      const surface = new Set((v.slots || []).map(s => s.indoor === true ? "indoor" : s.indoor === false ? "outdoor" : "unknown"));
+      const courtType = surface.has("indoor") && surface.has("outdoor")
+        ? "Indoor + outdoor"
+        : surface.has("indoor") ? "Indoor"
+        : surface.has("outdoor") ? "Outdoor"
+        : "Court";
+      return {
+        ...v,
+        tags: [courtType, ...v.tags].slice(0,4),
+        slots: v.slots.sort((a,b) => a.startsAt.localeCompare(b.startsAt) || a.duration-b.duration),
+      };
+    });
     return response({ mode:"platform", query:{ sport,location,date,from,to }, venues });
   } catch (error) {
     return errorResponse(error);
