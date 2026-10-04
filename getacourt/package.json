@@ -1,0 +1,9 @@
+{
+  "name":"getacourt",
+  "private":true,
+  "version":"0.1.0",
+  "type":"module",
+  "scripts":{"dev":"netlify dev","typecheck":"tsc --noEmit"},
+  "dependencies":{"@netlify/blobs":"latest","@netlify/functions":"latest"},
+  "devDependencies":{"netlify-cli":"latest","typescript":"latest"}
+}

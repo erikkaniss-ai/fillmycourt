@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1726" />
+  <meta name="description" content="GetACourt helps you find and book available racket courts near you." />
+  <meta property="og:title" content="GetACourt — Find a court. Play now." />
+  <meta property="og:description" content="Search live court availability across clubs and booking systems." />
+  <title>GetACourt — Find a court. Play now.</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="GetACourt home">
+      <span class="brand-mark" aria-hidden="true">G</span>
+      <span class="brand-word">GetACourt</span>
+    </a>
+    <nav class="top-actions" aria-label="Primary navigation">
+      <button class="text-btn" data-scroll="how">How it works</button>
+      <button class="pill-btn ghost" id="myBookingsBtn">My bookings</button>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero shell">
+      <div class="hero-copy">
+        <div class="eyebrow">RACKET COURTS, ONE SEARCH</div>
+        <h1>Find a court.<br><span>Play now.</span></h1>
+        <p>Search available padel, tennis, squash and badminton courts around you — without opening five different apps.</p>
+        <div class="trust-row">
+          <span>Fast availability</span><span>Clear prices</span><span>One booking flow</span>
+        </div>
+      </div>
+
+      <div class="search-card" id="searchCard">
+        <div class="mode-tabs" role="tablist" aria-label="Search mode">
+          <button class="mode-tab active" data-mode="court">Book a court</button>
+          <button class="mode-tab" data-mode="match">Join a match</button>
+        </div>
+
+        <label class="field location-field">
+          <span>Where</span>
+          <div class="field-control">
+            <input id="locationInput" autocomplete="off" value="Cascais" aria-label="Location" />
+            <button id="nearMeBtn" class="icon-btn" type="button" title="Use my location" aria-label="Use my location">◎</button>
+          </div>
+        </label>
+
+        <div class="field-grid">
+          <label class="field">
+            <span>Sport</span>
+            <select id="sportSelect" aria-label="Sport">
+              <option value="padel">Padel</option>
+              <option value="tennis">Tennis</option>
+              <option value="squash">Squash</option>
+              <option value="badminton">Badminton</option>
+              <option value="pickleball">Pickleball</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Date</span>
+            <input id="dateInput" type="date" aria-label="Date" />
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label class="field">
+            <span>From</span>
+            <select id="timeSelect" aria-label="Time">
+              <option>07:00</option><option>08:00</option><option>09:00</option><option>10:00</option>
+              <option>11:00</option><option>12:00</option><option>13:00</option><option>14:00</option>
+              <option>15:00</option><option>16:00</option><option>17:00</option><option selected>18:00</option>
+              <option>19:00</option><option>20:00</option><option>21:00</option><option>22:00</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Duration</span>
+            <select id="durationSelect" aria-label="Duration">
+              <option value="60">60 min</option>
+              <option value="90" selected>90 min</option>
+              <option value="120">120 min</option>
+            </select>
+          </label>
+        </div>
+
+        <button class="primary-btn" id="searchBtn">Show available courts <span>→</span></button>
+        <p class="microcopy">Pilot mode: demo inventory is clearly labelled. Live provider inventory will plug into the same search.</p>
+      </div>
+    </section>
+
+    <section class="quick-strip shell" aria-label="Quick search suggestions">
+      <button class="quick-chip" data-quick="tonight">Tonight</button>
+      <button class="quick-chip" data-quick="weekend">This weekend</button>
+      <button class="quick-chip" data-quick="lastminute">Next 3 hours</button>
+      <button class="quick-chip" data-quick="indoor">Indoor only</button>
+    </section>
+
+    <section class="results shell" id="resultsSection" hidden>
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">LIVE SEARCH</div>
+          <h2 id="resultsTitle">Available courts</h2>
+        </div>
+        <div class="result-actions">
+          <select id="sortSelect" aria-label="Sort results">
+            <option value="best">Best match</option>
+            <option value="time">Earliest</option>
+            <option value="price">Lowest price</option>
+            <option value="distance">Nearest</option>
+          </select>
+          <button class="pill-btn ghost" id="filterBtn">Filters</button>
+        </div>
+      </div>
+      <div class="results-layout">
+        <div class="venue-list" id="venueList" aria-live="polite"></div>
+        <aside class="map-panel" aria-label="Search area preview">
+          <div class="map-noise"></div>
+          <div class="map-label">Search area</div>
+          <div class="map-ring ring-one"></div>
+          <div class="map-ring ring-two"></div>
+          <div class="map-pin pin-a">1</div>
+          <div class="map-pin pin-b">2</div>
+          <div class="map-pin pin-c">3</div>
+          <div class="map-you">You</div>
+          <p>Interactive maps are a launch integration. Search works without forcing map permissions.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="how shell" id="how">
+      <div class="section-head narrow">
+        <div class="eyebrow">ONE JOB, DONE WELL</div>
+        <h2>From “let’s play” to a confirmed court.</h2>
+      </div>
+      <div class="steps">
+        <article><b>01</b><h3>Search once</h3><p>Location, sport, time and duration. GetACourt checks connected inventory instead of making you hunt club by club.</p></article>
+        <article><b>02</b><h3>Pick the best slot</h3><p>Compare distance, indoor/outdoor, surface and total price. No hidden “starting from” ambiguity.</p></article>
+        <article><b>03</b><h3>Hold & book</h3><p>A short booking hold protects the slot while you confirm players, payment method and cancellation terms.</p></article>
+        <article><b>04</b><h3>Just play</h3><p>Your booking, directions and access instructions stay in one place. Split payment and open matches sit on the same booking core.</p></article>
+      </div>
+    </section>
+
+    <section class="product-band">
+      <div class="shell band-inner">
+        <div>
+          <div class="eyebrow inverse">BUILT FOR WHERE THIS GOES NEXT</div>
+          <h2>Private bookings today.<br>Open games, coaches and activities tomorrow.</h2>
+        </div>
+        <div class="feature-stack">
+          <span>Split payment</span><span>Open matches</span><span>Waitlists</span><span>Coach booking</span><span>Passes & memberships</span><span>Access codes</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer shell">
+    <div class="brand footer-brand"><span class="brand-mark">G</span><span class="brand-word">GetACourt</span></div>
+    <div class="footer-meta">Powered by <strong>FillMyCourt</strong></div>
+    <div class="footer-meta">Pilot · Europe · English first</div>
+  </footer>
+
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+  <aside class="booking-sheet" id="bookingSheet" aria-hidden="true" aria-label="Booking checkout">
+    <button class="sheet-close" id="sheetClose" aria-label="Close">×</button>
+    <div id="sheetContent"></div>
+  </aside>
+
+  <dialog id="bookingsDialog" class="bookings-dialog">
+    <form method="dialog" class="dialog-shell">
+      <div class="dialog-head"><h2>My bookings</h2><button class="sheet-close">×</button></div>
+      <div id="myBookingsList"></div>
+    </form>
+  </dialog>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
