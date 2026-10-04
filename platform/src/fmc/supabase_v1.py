@@ -183,7 +183,7 @@ class V1Store:
               union all
               select 1 from public.booking_holds
               where court_id=cast(:court as uuid) and expires_at > now()
-                and (:ignore is null or id<>cast(:ignore as uuid))
+                and (cast(:ignore as uuid) is null or id<>cast(:ignore as uuid))
                 and starts_at < :b and ends_at > :a
               union all
               select 1 from public.court_blocks
