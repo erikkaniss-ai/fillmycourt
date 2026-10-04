@@ -235,6 +235,84 @@ class V1Store:
         amount = (int(rate["price_minor"]) * int(duration_minutes) + 59) // 60
         return court, {"amount_minor": amount, "currency": rate["currency"], "duration_minutes": duration_minutes}
 
+    def availability(self, date: str, start_time: str, end_time: str, sport: str,
+                     duration: int, location: str = "", indoor: str = "all", limit: int = 200):
+        params = {
+            "date": date,
+            "time": start_time,
+            "end_time": end_time,
+            "sport": sport,
+            "duration": duration,
+            "location": location.strip().lower(),
+            "loc": f"%{location.strip().lower()}%",
+            "indoor": indoor.lower(),
+            "limit": limit,
+        }
+        with self.trusted() as c:
+            return rows(c.execute(text("""
+                with court_base as (
+                  select c.id,c.name,c.sport,c.indoor,c.venue_id,
+                         v.name venue_name,v.timezone,v.currency,v.address,v.organization_id
+                  from public.courts c
+                  join public.venues v on v.id=c.venue_id
+                  where c.active and v.active and c.sport=:sport
+                    and c.inventory_mode='native' and c.native_write_enabled
+                    and (:location='' or lower(v.name) like :loc or lower(v.address::text) like :loc)
+                    and (:indoor='all'
+                         or (:indoor='true' and c.indoor is true)
+                         or (:indoor='false' and c.indoor is false))
+                ),
+                candidates as (
+                  select cb.*,
+                         gs as starts_at,
+                         gs + make_interval(mins => cast(:duration as int)) as ends_at,
+                         (extract(isodow from (gs at time zone cb.timezone))::int - 1) as weekday,
+                         (extract(hour from (gs at time zone cb.timezone))::int * 60
+                          + extract(minute from (gs at time zone cb.timezone))::int) as local_minute
+                  from court_base cb
+                  cross join lateral generate_series(
+                    (cast(:date as date) + cast(:time as time)) at time zone cb.timezone,
+                    ((cast(:date as date) + cast(:end_time as time)) at time zone cb.timezone)
+                      - make_interval(mins => cast(:duration as int)),
+                    interval '30 minutes'
+                  ) gs
+                )
+                select x.id::text,x.name,x.sport,x.indoor,x.venue_id::text,
+                       x.venue_name,x.timezone,x.currency::text,x.address,x.organization_id::text,
+                       x.starts_at,x.ends_at,
+                       ((rate.price_minor * cast(:duration as int) + 59) / 60)::int as amount_minor,
+                       cast(:duration as int) as duration_minutes
+                from candidates x
+                join lateral (
+                  select cr.price_minor,cr.currency
+                  from public.court_rates cr
+                  where cr.court_id=x.id and cr.active
+                    and (cr.weekday is null or cr.weekday=x.weekday)
+                    and cr.start_minute<=x.local_minute
+                    and cr.end_minute>x.local_minute
+                  order by cr.priority asc,cr.created_at desc
+                  limit 1
+                ) rate on true
+                where not exists (
+                  select 1 from public.bookings b
+                  where b.court_id=x.id
+                    and b.status in ('held','pending_payment','confirmed')
+                    and b.starts_at<x.ends_at and b.ends_at>x.starts_at
+                )
+                and not exists (
+                  select 1 from public.booking_holds h
+                  where h.court_id=x.id and h.expires_at>now()
+                    and h.starts_at<x.ends_at and h.ends_at>x.starts_at
+                )
+                and not exists (
+                  select 1 from public.court_blocks bl
+                  where bl.court_id=x.id
+                    and bl.starts_at<x.ends_at and bl.ends_at>x.starts_at
+                )
+                order by x.venue_name,x.name,x.starts_at
+                limit :limit
+            """), params))
+
     def cleanup_expired_holds(self, c):
         c.execute(text("delete from public.booking_holds where expires_at<=now()"))
 
