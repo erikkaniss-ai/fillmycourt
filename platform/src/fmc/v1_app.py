@@ -921,40 +921,20 @@ def create_v1_app(settings, service: str = "all"):
                 raise DomainError("SPORT", "Unsupported sport.", 422)
             if duration not in (30, 60, 90, 120, 150, 180, 240):
                 raise DomainError("DURATION", "Unsupported duration.", 422)
+            if indoor.lower() not in ("all", "true", "false"):
+                raise DomainError("INDOOR", "Use all, true or false.", 422)
             try:
-                day = datetime.fromisoformat(date).date()
+                datetime.strptime(date, "%Y-%m-%d")
                 sh, sm = map(int, time.split(":"))
                 eh, em = map(int, end_time.split(":"))
+                if not (0 <= sh <= 23 and 0 <= eh <= 23 and 0 <= sm <= 59 and 0 <= em <= 59):
+                    raise ValueError
+                if (eh, em) <= (sh, sm):
+                    raise ValueError
             except Exception:
-                raise DomainError("DATE_TIME", "Use YYYY-MM-DD and HH:MM.", 422)
-            candidates = []
-            with db.trusted() as c:
-                courts = rows(c.execute(text("""
-                    select c.id::text,c.name,c.sport,c.indoor,c.venue_id::text,
-                           v.name venue_name,v.timezone,v.currency::text,v.address,v.organization_id::text
-                    from public.courts c join public.venues v on v.id=c.venue_id
-                    where c.active and v.active and c.sport=:sport
-                      and c.inventory_mode='native' and c.native_write_enabled
-                      and (:location='' or lower(v.name) like :loc or lower(v.address::text) like :loc)
-                      and (:indoor='all' or (:indoor='true' and c.indoor is true) or (:indoor='false' and c.indoor is false))
-                    order by v.name,c.name
-                """), {"sport": sport, "location": location.strip().lower(), "loc": f"%{location.strip().lower()}%",
-                       "indoor": indoor.lower()}))
-                for court in courts:
-                    tz = ZoneInfo(court["timezone"])
-                    cursor = datetime(day.year, day.month, day.day, sh, sm, tzinfo=tz)
-                    stop = datetime(day.year, day.month, day.day, eh, em, tzinfo=tz)
-                    while cursor + timedelta(minutes=duration) <= stop:
-                        end = cursor + timedelta(minutes=duration)
-                        try:
-                            _, quote = db.quote(c, court["id"], cursor, duration)
-                        except DomainError:
-                            cursor += timedelta(minutes=30)
-                            continue
-                        if not db.active_conflict(c, court["id"], cursor, end):
-                            candidates.append({**court, "starts_at": cursor.isoformat(), "ends_at": end.isoformat(), **quote})
-                        cursor += timedelta(minutes=30)
-            return {"slots": candidates[:200], "count": min(len(candidates), 200)}
+                raise DomainError("DATE_TIME", "Use YYYY-MM-DD and an increasing HH:MM time range.", 422)
+            slots = db.availability(date, time, end_time, sport, duration, location, indoor, 200)
+            return {"slots": slots, "count": len(slots)}
 
         @app.post("/api/holds", status_code=201)
         def hold(body: HoldIn, request: Request, idempotency_key: str | None = Header(default=None)):
