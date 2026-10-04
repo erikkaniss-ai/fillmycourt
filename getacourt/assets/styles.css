@@ -348,3 +348,14 @@ main { overflow: hidden; }
   .network-card { border-radius: 26px; }
   .checkout-grid { grid-template-columns: 1fr; }
 }
+
+.preference-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.profile-sports > legend { margin-bottom:10px; }
+.profile-sports .preference-grid label { margin:0; }
+.profile-actions { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-top:18px; }
+.profile-actions .confirm-button { margin:0; }
+.profile-actions .ghost-button { min-height:48px; padding:0 18px; }
+@media (max-width:560px) {
+  .preference-grid { grid-template-columns:1fr; }
+  .profile-actions { grid-template-columns:1fr; }
+}
