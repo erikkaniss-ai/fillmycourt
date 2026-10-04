@@ -9,7 +9,9 @@ def main():
     p=argparse.ArgumentParser(description='FillMyCourt shared platform')
     p.add_argument('command',choices=['serve','migrate','worker','projector','reconciliation-worker','provider-sync-worker','verify-club','grant-role'])
     p.add_argument('--venue');p.add_argument('--actor');p.add_argument('--evidence');p.add_argument('--player');p.add_argument('--role',choices=['owner','manager','staff','accountant','viewer'])
-    args=p.parse_args();settings=Settings.from_env();settings.validate()
+    args=p.parse_args();settings=Settings.from_env()
+    is_worker=args.command in ('reconciliation-worker','provider-sync-worker')
+    settings.validate(require_public_origin=not is_worker)
 
     if settings.data_contract=='supabase-v1':
         if args.command=='serve':
