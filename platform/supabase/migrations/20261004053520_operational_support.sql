@@ -39,6 +39,7 @@ create table if not exists public.import_batches (
   status text not null default 'staged' check (status in ('staged','committed','rolled_back','failed')),
   payload jsonb not null default '[]'::jsonb,
   errors jsonb not null default '[]'::jsonb,
+  result jsonb not null default '{}'::jsonb,
   actor_user_id uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
   committed_at timestamptz,
