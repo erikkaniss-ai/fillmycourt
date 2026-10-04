@@ -1,0 +1,9 @@
+{
+  "name": "GetACourt",
+  "short_name": "GetACourt",
+  "start_url": "/getacourt/",
+  "display": "standalone",
+  "background_color": "#fff8f0",
+  "theme_color": "#0d1726",
+  "description": "Find a court. Play now."
+}
