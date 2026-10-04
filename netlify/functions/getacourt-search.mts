@@ -39,7 +39,7 @@ export default async (req) => {
             name: slot.venue_name,
             area: areaFrom(slot.address),
             distanceKm: null,
-            indoor: Boolean(slot.indoor),
+            indoor: null,
             tags: [],
             sport: slot.sport,
             source: "FillMyCourt booking core",
@@ -62,6 +62,7 @@ export default async (req) => {
           duration: Number(slot.duration_minutes || 0),
           currency: slot.currency || "EUR",
           status: "available",
+          indoor:Boolean(slot.indoor),
           provider: "fillmycourt",
         });
       }
