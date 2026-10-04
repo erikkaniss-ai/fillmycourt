@@ -78,3 +78,35 @@ def test_provider_write_mode_constraint(store):
             c.execute(text("""insert into public.provider_connections(organization_id,provider,status,capabilities)
                              values(cast(:org as uuid),'bad-provider','configured','{"write_mode":"invented"}'::jsonb)"""),
                       {"org": org})
+
+
+def test_player_profile_rls_is_owned_by_auth_user(store):
+    owner, outsider, org, venue, court = seed(store)
+    with store.user(owner) as c:
+        c.execute(text("""
+            insert into public.player_profiles(user_id,full_name,home_area,preferred_sports,locale)
+            values(cast(:uid as uuid),'Player One','Cascais',array['padel','tennis'],'en')
+        """), {"uid": owner})
+        got = c.execute(text("""
+            select full_name from public.player_profiles where user_id=cast(:uid as uuid)
+        """), {"uid": owner}).scalar()
+        assert got == "Player One"
+
+    with store.user(outsider) as c:
+        assert c.execute(text("select count(*) from public.player_profiles")).scalar() == 0
+        with pytest.raises(Exception):
+            c.execute(text("""
+                update public.player_profiles
+                set full_name='Hijacked'
+                where user_id=cast(:uid as uuid)
+            """), {"uid": owner})
+
+
+def test_player_profile_rejects_unsupported_sport(store):
+    owner, outsider, org, venue, court = seed(store)
+    with store.user(owner) as c:
+        with pytest.raises(Exception):
+            c.execute(text("""
+                insert into public.player_profiles(user_id,full_name,preferred_sports)
+                values(cast(:uid as uuid),'Player One',array['football'])
+            """), {"uid": owner})
