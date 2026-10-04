@@ -85,6 +85,10 @@ class V1Store:
     def __init__(self, url: str):
         if not url.startswith("postgresql"):
             raise RuntimeError("supabase-v1 requires PostgreSQL")
+        if url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url[len("postgresql://"):]
+        elif url.startswith("postgres://"):
+            url = "postgresql+psycopg://" + url[len("postgres://"):]
         self.engine = create_engine(
             url,
             pool_pre_ping=True,
