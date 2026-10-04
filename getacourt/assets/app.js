@@ -121,15 +121,17 @@
     render();
     q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
   }
-  function visible(v){
-    if(state.filter==="indoor") return !!v.indoor;
-    if(state.filter==="under35") return v.slots.some(s=>s.price<35&&s.status==="available");
-    if(state.filter==="90min") return v.slots.some(s=>s.duration===90&&s.status==="available");
-    return true;
+  function filteredSlots(v){
+    let slots=(v.slots||[]).filter(s=>s.status==="available");
+    if(state.filter==="indoor") slots=slots.filter(s=>s.indoor===true);
+    if(state.filter==="under35") slots=slots.filter(s=>s.price<35);
+    if(state.filter==="90min") slots=slots.filter(s=>s.duration===90);
+    return slots;
   }
+  function visible(v){return filteredSlots(v).length>0;}
   function render(){
     const venues=state.venues.filter(visible);
-    const n=venues.reduce((a,v)=>a+v.slots.filter(s=>s.status==="available").length,0);
+    const n=venues.reduce((a,v)=>a+filteredSlots(v).length,0);
     el.count.textContent=n+" available slot"+(n===1?"":"s")+" · "+venues.length+" venue"+(venues.length===1?"":"s");
     if(!venues.length){
       el.grid.innerHTML='<div class="empty-state"><div class="empty-orbit"></div><h3>No live courts match this search</h3><p>There is no connected native inventory for this time window yet. GetACourt no longer fabricates preview availability.</p></div>';
@@ -139,7 +141,7 @@
     venues.forEach(v=>{
       const card=document.createElement("article");card.className="venue-card";
       const tags=(v.tags||[]).map(t=>"<span>"+esc(t)+"</span>").join("");
-      const slots=(v.slots||[]).map(s=>
+      const slots=filteredSlots(v).map(s=>
         '<button class="slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'" '+(s.status!=="available"?"disabled":"")+'>'+
         '<strong>'+esc(s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>'
       ).join("");
