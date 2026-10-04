@@ -144,6 +144,14 @@ class ConfirmIn(BaseModel):
     accept_policy: bool = False
 
 
+class PlayerProfileIn(BaseModel):
+    full_name: str = Field(min_length=2, max_length=120)
+    home_area: str | None = Field(default=None, max_length=120)
+    preferred_sports: list[str] = Field(default_factory=list, max_length=5)
+    locale: str = Field(default="en", min_length=2, max_length=16)
+    marketing_consent: bool | None = None
+
+
 def create_v1_app(settings, service: str = "all"):
     if service not in ("all", "core", "operations"):
         raise RuntimeError("Unknown service mode")
@@ -856,6 +864,56 @@ def create_v1_app(settings, service: str = "all"):
                 """), {"org": org, "after": after, "limit": limit}))}
 
     if service in ("core", "all"):
+        @app.get("/api/player-profile")
+        def player_profile(request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                profile = one(c.execute(text("""
+                    select user_id::text,full_name,home_area,preferred_sports,locale,
+                           marketing_consent,onboarding_completed_at,created_at,updated_at
+                    from public.player_profiles
+                    where user_id=cast(:uid as uuid)
+                """), {"uid": a.id}))
+                return {"profile": profile}
+
+        @app.put("/api/player-profile")
+        def upsert_player_profile(body: PlayerProfileIn, request: Request):
+            a = who(request)
+            sports = list(dict.fromkeys(body.preferred_sports))
+            if any(s not in SPORTS for s in sports):
+                raise DomainError("SPORT", "Unsupported preferred sport.", 422)
+            full_name = body.full_name.strip()
+            home_area = body.home_area.strip() if body.home_area else None
+            if len(full_name) < 2:
+                raise DomainError("PROFILE_NAME", "Use a valid player name.", 422)
+            with db.user(a.id) as c:
+                profile = one(c.execute(text("""
+                    insert into public.player_profiles
+                      (user_id,full_name,home_area,preferred_sports,locale,marketing_consent,
+                       onboarding_completed_at,updated_at)
+                    values
+                      (cast(:uid as uuid),:full_name,:home_area,:sports,:locale,:marketing_consent,
+                       now(),now())
+                    on conflict(user_id) do update set
+                      full_name=excluded.full_name,
+                      home_area=excluded.home_area,
+                      preferred_sports=excluded.preferred_sports,
+                      locale=excluded.locale,
+                      marketing_consent=excluded.marketing_consent,
+                      onboarding_completed_at=coalesce(public.player_profiles.onboarding_completed_at,now()),
+                      updated_at=now()
+                    returning user_id::text,full_name,home_area,preferred_sports,locale,
+                              marketing_consent,onboarding_completed_at,created_at,updated_at
+                """), {
+                    "uid": a.id,
+                    "full_name": full_name,
+                    "home_area": home_area,
+                    "sports": sports,
+                    "locale": body.locale.strip().lower(),
+                    "marketing_consent": body.marketing_consent,
+                }))
+                return {"profile": profile}
+
         @app.get("/api/availability")
         def availability(date: str, time: str, sport: str = "padel", duration: int = 90,
                          end_time: str = "23:00", location: str = "", indoor: str = "all"):
