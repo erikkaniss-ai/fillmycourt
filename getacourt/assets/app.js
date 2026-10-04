@@ -181,12 +181,22 @@
   }
   async function cancelBooking(id) {
     const email=localStorage.getItem("gac.email")||"";
-    try { await api("/api/gac/cancel",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookingId:id,email})}); }
-    catch {
+    const item=el.bookingsList.querySelector('[data-id="'+CSS.escape(id)+'"]');
+    const button=item&&item.querySelector(".cancel-button");
+    if (button) { button.disabled=true; button.textContent="Cancelling…"; }
+    try {
+      await api("/api/gac/cancel",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookingId:id,email})});
+    } catch {
       const all=JSON.parse(localStorage.getItem("gac.localBookings")||"[]"), hit=all.find(b=>b.bookingId===id);
-      if(hit) hit.status="cancelled"; localStorage.setItem("gac.localBookings",JSON.stringify(all));
+      if(hit) hit.status="cancelled";
+      localStorage.setItem("gac.localBookings",JSON.stringify(all));
     }
-    toast("Booking cancelled."); loadBookings();
+    if (item) {
+      const status=item.querySelector(".booking-status");
+      if (status) status.textContent="cancelled";
+      if (button) button.remove();
+    }
+    toast("Booking cancelled.");
   }
 
   qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{qa(".sport-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.sport=b.dataset.sport;}));
