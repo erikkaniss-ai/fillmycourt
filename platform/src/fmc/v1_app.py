@@ -826,3 +826,11 @@ def create_v1_app(settings, service: str = "all"):
                 return {"id": booking_id, "status": "cancelled"}
 
     return app
+
+
+def create_from_env():
+    from .config import Settings
+    settings = Settings.from_env()
+    settings.validate()
+    import os
+    return create_v1_app(settings, os.getenv("FMC_SERVICE","all"))
