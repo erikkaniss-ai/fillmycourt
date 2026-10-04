@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="/getacourt/assets/styles.css" />
 </head>
 <body data-mode="preview">
-  <div class="preview-strip" id="previewStrip">Preview environment · test bookings only</div>
+  <div class="preview-strip" id="previewStrip">Staging environment · bookings disabled</div>
 
   <header class="site-header">
     <a class="brand" href="/getacourt/" aria-label="GetACourt home">
@@ -20,7 +20,7 @@
     <nav class="nav" aria-label="Primary">
       <a href="#discover">Discover</a>
       <a href="#how">How it works</a>
-      <button class="nav-button" id="myBookingsButton" type="button">My bookings</button>
+      <button class="nav-button" id="myBookingsButton" type="button">My bookings</button>\n      <button class="nav-button" id="authButton" type="button">Sign in</button>
     </nav>
     <a class="club-link" href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">For clubs ↗</a>
   </header>
@@ -159,8 +159,8 @@
         <label class="field"><span>Email</span><input id="emailInput" name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
       </div>
       <label class="consent"><input type="checkbox" id="termsInput" required /> <span>I accept the venue cancellation policy and GetACourt booking terms.</span></label>
-      <button class="confirm-button" id="confirmBookingButton" type="submit">Confirm test booking</button>
-      <p class="payment-note">Preview mode: no card is charged. Production checkout will use a PSP token; GetACourt will not store raw card data.</p>
+      <button class="confirm-button" id="confirmBookingButton" type="submit">Confirm booking</button>
+      <p class="payment-note">Online payments are disabled in staging. GetACourt does not store raw card data.</p>
     </form>
   </dialog>
 
