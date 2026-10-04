@@ -141,11 +141,10 @@ class V1Store:
     def emit(self, c, org_id: str | None, actor_id: str | None, event_type: str,
              entity_type: str, entity_id: str | None, before=None, after=None, request_id=None):
         c.execute(text("""
-            insert into public.audit_events
-              (organization_id,actor_user_id,event_type,entity_type,entity_id,before_state,after_state,request_id)
-            values
-              (cast(:org as uuid),cast(:actor as uuid),:event_type,:entity_type,:entity_id,
-               cast(:before as jsonb),cast(:after as jsonb),:request_id)
+            select private.append_event(
+              cast(:org as uuid),cast(:actor as uuid),:event_type,:entity_type,:entity_id,
+              cast(:before as jsonb),cast(:after as jsonb),:request_id
+            )
         """), {
             "org": org_id, "actor": actor_id, "event_type": event_type,
             "entity_type": entity_type, "entity_id": entity_id,
@@ -153,18 +152,6 @@ class V1Store:
             "after": json.dumps(after) if after is not None else None,
             "request_id": request_id,
         })
-        if org_id:
-            c.execute(text("""
-                insert into public.domain_events
-                  (organization_id,aggregate_type,aggregate_id,event_type,payload)
-                values (cast(:org as uuid),:kind,
-                        case when :entity_id ~* '^[0-9a-f-]{36}$' then cast(:entity_id as uuid) else null end,
-                        :event_type,cast(:payload as jsonb))
-            """), {
-                "org": org_id, "kind": entity_type, "entity_id": entity_id or "",
-                "event_type": event_type,
-                "payload": json.dumps({"entity_id": entity_id, "after": after}),
-            })
 
     def advisory_court_lock(self, c, court_id: str):
         c.execute(text("select pg_advisory_xact_lock(hashtextextended(:court,0))"), {"court": court_id})
