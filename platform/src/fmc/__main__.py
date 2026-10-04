@@ -29,10 +29,12 @@ def main():
                 c.execute(insert(d.members).values(organisation_id=v['organisation_id'],player_id=args.player,role=args.role))
             db.emit(c,v['id'],args.actor,'admin.'+args.command,args.player or v['id'],{'evidence':args.evidence,'role':args.role})
         print('Administrative action recorded.');return
+    if args.command in ('reconciliation-worker','provider-sync-worker'):
+        from .worker_runtime import run
+        run(db,args.command)
+        return
     from .jobs import Worker,Projector
     if args.command=='worker': worker=Worker(db)
-    elif args.command=='reconciliation-worker': worker=Worker(db,kinds={'reconcile'})
-    elif args.command=='provider-sync-worker': worker=Worker(db,kinds={'sync_bookings','sync_players','sync_payments'})
     else: worker=Projector(db)
     running=True
     def stop(*_):

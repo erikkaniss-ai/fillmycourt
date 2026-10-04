@@ -9,13 +9,12 @@ All services use repository `erikkaniss-ai/fillmycourt`, branch
 | --- | --- | --- |
 | `fmc-core-api` | `python -m fmc serve` with `FMC_SERVICE=core` | `/health/ready` |
 | `fmc-operations-api` | `python -m fmc serve` with `FMC_SERVICE=operations` | `/health/ready` |
-| `fmc-reconciliation-worker` | `python -m fmc reconciliation-worker` | process/lease monitoring |
-| `fmc-provider-sync-worker` | `python -m fmc provider-sync-worker` | process/cursor monitoring |
+| `fmc-reconciliation-worker` | `python -m fmc reconciliation-worker` | `/health/ready` |
+| `fmc-provider-sync-worker` | `python -m fmc provider-sync-worker` | `/health/ready` |
 
-Workers deliberately do not expose a public HTTP listener. Their operational
-health is the absence of expired leases, repeated dead-letter jobs and stale
-sync cursors; expose those through a private operations endpoint only after
-the Supabase-v1 adapter is in place.
+Workers expose health only on the Railway service listener; do not attach a
+public domain. Their operational health also requires no expired leases,
+repeated dead-letter jobs or stale sync cursors.
 
 ## Non-secret staging settings
 
