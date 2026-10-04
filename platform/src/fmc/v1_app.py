@@ -208,7 +208,7 @@ def create_v1_app(settings, service: str = "all"):
                 """), {"slug": slug, "name": body.name, "currency": body.currency.upper(), "timezone": body.timezone}))
                 c.execute(text("""
                     insert into public.organization_members(organization_id,user_id,role)
-                    values(:org::uuid,:uid::uuid,'owner')
+                    values(cast(:org as uuid),cast(:uid as uuid),'owner')
                 """), {"org": r["id"], "uid": a.id})
                 audit(c, request, r["id"], a, "organization.created", "organization", r["id"], after=r)
                 return r
@@ -220,7 +220,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a)
                 return {"items": rows(c.execute(text("""
                     select id::text,name,timezone,currency::text,address,active,created_at
-                    from public.venues where organization_id=:org::uuid
+                    from public.venues where organization_id=cast(:org as uuid)
                     order by name
                 """), {"org": org}))}
 
@@ -235,7 +235,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_MANAGER)
                 r = one(c.execute(text("""
                     insert into public.venues(organization_id,name,timezone,currency,address)
-                    values(:org::uuid,:name,:timezone,:currency,cast(:address as jsonb))
+                    values(cast(:org as uuid),:name,:timezone,:currency,cast(:address as jsonb))
                     returning id::text,name,timezone,currency::text,address,active
                 """), {"org": org, "name": body.name, "timezone": body.timezone,
                        "currency": body.currency.upper(), "address": json.dumps(body.address)}))
@@ -251,7 +251,7 @@ def create_v1_app(settings, service: str = "all"):
                     select c.id::text,c.venue_id::text,c.name,c.sport,c.indoor,c.active,
                            c.inventory_mode::text,c.native_write_enabled,v.name venue_name
                     from public.courts c join public.venues v on v.id=c.venue_id
-                    where v.organization_id=:org::uuid
+                    where v.organization_id=cast(:org as uuid)
                     order by v.name,c.name
                 """), {"org": org}))}
 
@@ -265,13 +265,13 @@ def create_v1_app(settings, service: str = "all"):
             with db.user(a.id) as c:
                 role(c, org, a, ROLE_MANAGER)
                 venue = one(c.execute(text("""
-                    select id from public.venues where id=:venue::uuid and organization_id=:org::uuid
+                    select id from public.venues where id=cast(:venue as uuid) and organization_id=cast(:org as uuid)
                 """), {"venue": body.venue_id, "org": org}))
                 if not venue:
                     raise DomainError("VENUE_NOT_FOUND", "Venue not found.", 404)
                 r = one(c.execute(text("""
                     insert into public.courts(venue_id,name,sport,indoor,inventory_mode,native_write_enabled)
-                    values(:venue::uuid,:name,:sport,:indoor,:mode::public.fmc_inventory_mode,false)
+                    values(cast(:venue as uuid),:name,:sport,:indoor,cast(:mode as public.fmc_inventory_mode),false)
                     returning id::text,venue_id::text,name,sport,indoor,active,inventory_mode::text,native_write_enabled
                 """), {"venue": body.venue_id, "name": body.name, "sport": body.sport,
                        "indoor": body.indoor, "mode": body.inventory_mode}))
@@ -287,14 +287,14 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_MANAGER)
                 court = one(c.execute(text("""
                     select c.id from public.courts c join public.venues v on v.id=c.venue_id
-                    where c.id=:court::uuid and v.organization_id=:org::uuid
+                    where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid)
                 """), {"court": body.court_id, "org": org}))
                 if not court:
                     raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
                 r = one(c.execute(text("""
                     insert into public.court_rates
                       (organization_id,court_id,weekday,start_minute,end_minute,price_minor,currency,priority)
-                    values(:org::uuid,:court::uuid,:weekday,:start,:end,:price,:currency,:priority)
+                    values(cast(:org as uuid),cast(:court as uuid),:weekday,:start,:end,:price,:currency,:priority)
                     returning id::text,court_id::text,weekday,start_minute,end_minute,price_minor,currency::text,priority
                 """), {"org": org, "court": body.court_id, "weekday": body.weekday,
                        "start": body.start_minute, "end": body.end_minute,
@@ -313,13 +313,13 @@ def create_v1_app(settings, service: str = "all"):
                 db.advisory_court_lock(c, body.court_id)
                 court = one(c.execute(text("""
                     select c.id from public.courts c join public.venues v on v.id=c.venue_id
-                    where c.id=:court::uuid and v.organization_id=:org::uuid
+                    where c.id=cast(:court as uuid) and v.organization_id=cast(:org as uuid)
                 """), {"court": body.court_id, "org": org}))
                 if not court:
                     raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
                 r = one(c.execute(text("""
                     insert into public.court_blocks(organization_id,court_id,starts_at,ends_at,reason,created_by)
-                    values(:org::uuid,:court::uuid,:a,:b,:reason,:uid::uuid)
+                    values(cast(:org as uuid),cast(:court as uuid),:a,:b,:reason,cast(:uid as uuid))
                     returning id::text,court_id::text,starts_at,ends_at,reason
                 """), {"org": org, "court": body.court_id, "a": start, "b": end,
                        "reason": body.reason, "uid": a.id}))
@@ -336,7 +336,7 @@ def create_v1_app(settings, service: str = "all"):
                 return {"items": rows(c.execute(text("""
                     select id::text,full_name,email,phone,marketing_consent,source,external_key,updated_at
                     from public.people
-                    where organization_id=:org::uuid
+                    where organization_id=cast(:org as uuid)
                       and (:after is null or id::text>:after)
                       and (:q='%%' or lower(coalesce(full_name,'')) like :q
                            or lower(coalesce(email,'')) like :q
@@ -377,14 +377,14 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_MANAGER)
                 existing = one(c.execute(text("""
                     select id::text,status,errors from public.import_batches
-                    where organization_id=:org::uuid and source=:source and kind='people' and fingerprint=:fp
+                    where organization_id=cast(:org as uuid) and source=:source and kind='people' and fingerprint=:fp
                 """), {"org": org, "source": body.source, "fp": fingerprint}))
                 if existing:
                     return {"id": existing["id"], "status": existing["status"], "errors": existing["errors"], "duplicate": True}
                 r = one(c.execute(text("""
                     insert into public.import_batches
                       (organization_id,source,kind,fingerprint,payload,errors,actor_user_id)
-                    values(:org::uuid,:source,'people',:fp,cast(:payload as jsonb),cast(:errors as jsonb),:uid::uuid)
+                    values(cast(:org as uuid),:source,'people',:fp,cast(:payload as jsonb),cast(:errors as jsonb),cast(:uid as uuid))
                     returning id::text,status,created_at
                 """), {"org": org, "source": body.source, "fp": fingerprint,
                        "payload": json.dumps(staged), "errors": json.dumps(errors), "uid": a.id}))
@@ -399,7 +399,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_MANAGER)
                 b = one(c.execute(text("""
                     select * from public.import_batches
-                    where id=:id::uuid and organization_id=:org::uuid for update
+                    where id=cast(:id as uuid) and organization_id=cast(:org as uuid) for update
                 """), {"id": batch, "org": org}))
                 if not b:
                     raise DomainError("IMPORT_NOT_FOUND", "Import not found.", 404)
@@ -412,12 +412,12 @@ def create_v1_app(settings, service: str = "all"):
                     existing = None
                     if item.get("external_id"):
                         existing = one(c.execute(text("""
-                            select * from public.people where organization_id=:org::uuid
+                            select * from public.people where organization_id=cast(:org as uuid)
                               and source=:source and external_key=:external limit 1
                         """), {"org": org, "source": b["source"], "external": item["external_id"]}))
                     if not existing and item.get("email"):
                         existing = one(c.execute(text("""
-                            select * from public.people where organization_id=:org::uuid
+                            select * from public.people where organization_id=cast(:org as uuid)
                               and lower(email)=lower(:email) limit 1
                         """), {"org": org, "email": item["email"]}))
                     before = dict(existing) if existing else None
@@ -430,7 +430,7 @@ def create_v1_app(settings, service: str = "all"):
                               phone=coalesce(nullif(:phone,''),phone),
                               marketing_consent=coalesce(:consent,marketing_consent),
                               source=:source,source_updated_at=now(),updated_at=now()
-                            where id=:id::uuid
+                            where id=cast(:id as uuid)
                         """), {"external": item.get("external_id",""), "name": item.get("name",""),
                                "email": item.get("email",""), "phone": item.get("phone",""),
                                "consent": item.get("marketing_consent"), "source": b["source"], "id": str(existing["id"])})
@@ -440,7 +440,7 @@ def create_v1_app(settings, service: str = "all"):
                         r = one(c.execute(text("""
                             insert into public.people
                               (organization_id,external_key,full_name,email,phone,marketing_consent,source,source_updated_at)
-                            values(:org::uuid,nullif(:external,''),nullif(:name,''),nullif(:email,''),
+                            values(cast(:org as uuid),nullif(:external,''),nullif(:name,''),nullif(:email,''),
                                    nullif(:phone,''),:consent,:source,now())
                             returning id::text
                         """), {"org": org, "external": item.get("external_id",""), "name": item.get("name",""),
@@ -451,7 +451,7 @@ def create_v1_app(settings, service: str = "all"):
                 c.execute(text("""
                     update public.import_batches
                     set status='committed',committed_at=now(),result=cast(:result as jsonb)
-                    where id=:id::uuid
+                    where id=cast(:id as uuid)
                 """), {"id": batch, "result": json.dumps(result)})
                 audit(c, request, org, a, "import.committed", "import_batch", batch,
                       after={"count": len(changes)})
@@ -464,14 +464,14 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_ADMIN)
                 b = one(c.execute(text("""
                     select * from public.import_batches
-                    where id=:id::uuid and organization_id=:org::uuid for update
+                    where id=cast(:id as uuid) and organization_id=cast(:org as uuid) for update
                 """), {"id": batch, "org": org}))
                 if not b or b["status"] != "committed":
                     raise DomainError("IMPORT_STATE", "Only a committed import can be rolled back.", 409)
                 for ch in reversed(b["result"].get("changes", [])):
                     if ch.get("created"):
                         c.execute(text("""
-                            delete from public.people where id=:id::uuid and organization_id=:org::uuid
+                            delete from public.people where id=cast(:id as uuid) and organization_id=cast(:org as uuid)
                               and auth_user_id is null
                         """), {"id": ch["id"], "org": org})
                     else:
@@ -479,14 +479,14 @@ def create_v1_app(settings, service: str = "all"):
                         c.execute(text("""
                             update public.people set external_key=:external,full_name=:name,email=:email,phone=:phone,
                               marketing_consent=:consent,source=:source,updated_at=now()
-                            where id=:id::uuid and organization_id=:org::uuid
+                            where id=cast(:id as uuid) and organization_id=cast(:org as uuid)
                         """), {"external": before.get("external_key"), "name": before.get("full_name"),
                                "email": before.get("email"), "phone": before.get("phone"),
                                "consent": before.get("marketing_consent"), "source": before.get("source","fmc"),
                                "id": ch["id"], "org": org})
                 c.execute(text("""
                     update public.import_batches set status='rolled_back',rolled_back_at=now()
-                    where id=:id::uuid
+                    where id=cast(:id as uuid)
                 """), {"id": batch})
                 audit(c, request, org, a, "import.rolled_back", "import_batch", batch)
                 return {"id": batch, "status": "rolled_back"}
@@ -503,13 +503,13 @@ def create_v1_app(settings, service: str = "all"):
                     select b.id::text,b.court_id::text,b.player_id::text,b.status::text,b.starts_at,b.ends_at,
                            b.gross_amount_minor,b.currency::text,b.source,b.external_reference,b.metadata
                     from public.bookings b
-                    where b.organization_id=:org::uuid and b.starts_at<:finish and b.ends_at>:begin
+                    where b.organization_id=cast(:org as uuid) and b.starts_at<:finish and b.ends_at>:begin
                     order by b.starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
                 blocks = rows(c.execute(text("""
                     select id::text,court_id::text,starts_at,ends_at,reason
                     from public.court_blocks
-                    where organization_id=:org::uuid and starts_at<:finish and ends_at>:begin
+                    where organization_id=cast(:org as uuid) and starts_at<:finish and ends_at>:begin
                     order by starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
                 return {"bookings": bookings, "blocks": blocks}
@@ -521,7 +521,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a)
                 return {"items": rows(c.execute(text("""
                     select id::text,provider,status,capabilities,config,last_success_at,last_error_at,created_at
-                    from public.provider_connections where organization_id=:org::uuid order by provider
+                    from public.provider_connections where organization_id=cast(:org as uuid) order by provider
                 """), {"org": org}))}
 
         @app.put("/api/fmc/{org}/providers/{provider}")
@@ -538,7 +538,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_ADMIN)
                 r = one(c.execute(text("""
                     insert into public.provider_connections(organization_id,provider,status,capabilities,config)
-                    values(:org::uuid,:provider,'configured',cast(:cap as jsonb),cast(:config as jsonb))
+                    values(cast(:org as uuid),:provider,'configured',cast(:cap as jsonb),cast(:config as jsonb))
                     on conflict(organization_id,provider) do update set
                       status='configured',capabilities=excluded.capabilities,config=excluded.config
                     returning id::text,provider,status,capabilities,config
@@ -555,14 +555,14 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_FINANCE)
                 connection = one(c.execute(text("""
                     select id::text from public.provider_connections
-                    where organization_id=:org::uuid and provider=:provider and status='configured'
+                    where organization_id=cast(:org as uuid) and provider=:provider and status='configured'
                 """), {"org": org, "provider": provider}))
                 if not connection:
                     raise DomainError("PROVIDER_NOT_CONFIGURED", "Provider is not configured.", 409)
                 key = request.headers.get("idempotency-key") or f"{connection['id']}:{stream}:{datetime.utcnow().date()}"
                 r = one(c.execute(text("""
                     insert into public.jobs(organization_id,kind,dedupe_key,payload)
-                    values(:org::uuid,:kind,:key,cast(:payload as jsonb))
+                    values(cast(:org as uuid),:kind,:key,cast(:payload as jsonb))
                     on conflict(organization_id,kind,dedupe_key) do update set updated_at=now()
                     returning id::text,status
                 """), {"org": org, "kind": f"sync_{stream}", "key": key,
@@ -582,13 +582,13 @@ def create_v1_app(settings, service: str = "all"):
                 run = one(c.execute(text("""
                     insert into public.reconciliation_runs
                       (organization_id,provider_connection_id,scope,window_start,window_end,status)
-                    values(:org::uuid,:provider::uuid,:scope,:begin,:finish,'queued')
+                    values(cast(:org as uuid),cast(:provider as uuid),:scope,:begin,:finish,'queued')
                     returning id::text,status,started_at
                 """), {"org": org, "provider": body.provider_connection_id, "scope": body.scope,
                        "begin": begin, "finish": finish}))
                 c.execute(text("""
                     insert into public.jobs(organization_id,kind,dedupe_key,payload)
-                    values(:org::uuid,'reconcile',:key,cast(:payload as jsonb))
+                    values(cast(:org as uuid),'reconcile',:key,cast(:payload as jsonb))
                 """), {"org": org, "key": run["id"], "payload": json.dumps({"run_id": run["id"]})})
                 audit(c, request, org, a, "reconciliation.queued", "reconciliation_run", run["id"], after={"scope": body.scope})
                 return run
@@ -600,7 +600,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a)
                 return {"items": rows(c.execute(text("""
                     select id::text,provider_connection_id::text,scope,window_start,window_end,status,summary,started_at,completed_at
-                    from public.reconciliation_runs where organization_id=:org::uuid
+                    from public.reconciliation_runs where organization_id=cast(:org as uuid)
                     order by started_at desc limit 100
                 """), {"org": org}))}
 
@@ -613,7 +613,7 @@ def create_v1_app(settings, service: str = "all"):
                     select id::text,run_id::text,booking_id::text,external_reference,category,severity::text,status::text,
                            expected,observed,assigned_to::text,proposed_by::text,approved_by::text,resolution,created_at,resolved_at
                     from public.reconciliation_items
-                    where organization_id=:org::uuid and (:status='' or status::text=:status)
+                    where organization_id=cast(:org as uuid) and (:status='' or status::text=:status)
                     order by case severity when 'critical' then 0 when 'warning' then 1 else 2 end,created_at desc
                     limit :limit
                 """), {"org": org, "status": status, "limit": limit}))}
@@ -627,7 +627,7 @@ def create_v1_app(settings, service: str = "all"):
                 role(c, org, a, ROLE_FINANCE)
                 current = one(c.execute(text("""
                     select id::text,status::text,proposed_by::text from public.reconciliation_items
-                    where id=:id::uuid and organization_id=:org::uuid for update
+                    where id=cast(:id as uuid) and organization_id=cast(:org as uuid) for update
                 """), {"id": item_id, "org": org}))
                 if not current:
                     raise DomainError("NOT_FOUND", "Reconciliation item not found.", 404)
@@ -636,13 +636,13 @@ def create_v1_app(settings, service: str = "all"):
                 status_map = {"assign":"assigned","propose":"proposed","approve":"approved","resolve":"resolved","ignore":"ignored"}
                 c.execute(text("""
                     update public.reconciliation_items set
-                      status=:status::public.fmc_recon_status,
-                      assigned_to=case when :action='assign' then :assignee::uuid else assigned_to end,
-                      proposed_by=case when :action='propose' then :uid::uuid else proposed_by end,
-                      approved_by=case when :action='approve' then :uid::uuid else approved_by end,
+                      status=cast(:status as public.fmc_recon_status),
+                      assigned_to=case when :action='assign' then cast(:assignee as uuid) else assigned_to end,
+                      proposed_by=case when :action='propose' then cast(:uid as uuid) else proposed_by end,
+                      approved_by=case when :action='approve' then cast(:uid as uuid) else approved_by end,
                       resolution=case when :action in ('resolve','ignore') then jsonb_build_object('note',:note,'by',:uid) else resolution end,
                       resolved_at=case when :action in ('resolve','ignore') then now() else resolved_at end
-                    where id=:id::uuid and organization_id=:org::uuid
+                    where id=cast(:id as uuid) and organization_id=cast(:org as uuid)
                 """), {"status": status_map[body.action], "action": body.action,
                        "assignee": body.assignee, "uid": a.id, "note": body.note, "id": item_id, "org": org})
                 audit(c, request, org, a, f"reconciliation.{body.action}", "reconciliation_item", item_id,
@@ -657,7 +657,7 @@ def create_v1_app(settings, service: str = "all"):
                 return {"items": rows(c.execute(text("""
                     select id,actor_user_id::text,event_type,entity_type,entity_id,before_state,after_state,request_id,occurred_at
                     from public.audit_events
-                    where organization_id=:org::uuid and id>:after
+                    where organization_id=cast(:org as uuid) and id>:after
                     order by id limit :limit
                 """), {"org": org, "after": after, "limit": limit}))}
 
@@ -718,7 +718,7 @@ def create_v1_app(settings, service: str = "all"):
                 existing = one(c.execute(text("""
                     select id::text,quote,expires_at from public.booking_holds
                     where idempotency_key=:key and organization_id in (
-                      select v.organization_id from public.courts c join public.venues v on v.id=c.venue_id where c.id=:court::uuid
+                      select v.organization_id from public.courts c join public.venues v on v.id=c.venue_id where c.id=cast(:court as uuid)
                     )
                 """), {"key": idempotency_key, "court": body.court_id}))
                 if existing:
@@ -732,7 +732,7 @@ def create_v1_app(settings, service: str = "all"):
                 r = one(c.execute(text("""
                     insert into public.booking_holds
                       (organization_id,court_id,player_id,starts_at,ends_at,expires_at,idempotency_key,quote)
-                    values(:org::uuid,:court::uuid,:player::uuid,:a,:b,now()+interval '10 minutes',:key,cast(:quote as jsonb))
+                    values(cast(:org as uuid),cast(:court as uuid),cast(:player as uuid),:a,:b,now()+interval '10 minutes',:key,cast(:quote as jsonb))
                     returning id::text,starts_at,ends_at,expires_at,quote
                 """), {"org": court["organization_id"], "court": body.court_id, "player": player,
                        "a": start, "b": end, "key": idempotency_key, "quote": json.dumps(quote)}))
@@ -756,19 +756,19 @@ def create_v1_app(settings, service: str = "all"):
                     join public.courts c on c.id=h.court_id
                     join public.venues v on v.id=c.venue_id
                     join public.people p on p.id=h.player_id
-                    where h.id=:id::uuid for update
+                    where h.id=cast(:id as uuid) for update
                 """), {"id": hold_id}))
                 if not h or str(h["auth_user_id"]) != a.id:
                     raise DomainError("HOLD_NOT_FOUND", "Hold not found.", 404)
                 if h["expires_at"] <= datetime.now(h["expires_at"].tzinfo):
-                    c.execute(text("delete from public.booking_holds where id=:id::uuid"), {"id": hold_id})
+                    c.execute(text("delete from public.booking_holds where id=cast(:id as uuid)"), {"id": hold_id})
                     raise DomainError("HOLD_EXPIRED", "Hold has expired.", 409)
                 db.advisory_court_lock(c, str(h["court_id"]))
                 if db.active_conflict(c, str(h["court_id"]), h["starts_at"], h["ends_at"], ignore_hold=hold_id):
                     raise DomainError("SLOT_TAKEN", "This slot is no longer available.", 409)
                 existing = one(c.execute(text("""
                     select id::text,status::text from public.bookings
-                    where organization_id=:org::uuid and idempotency_key=:key
+                    where organization_id=cast(:org as uuid) and idempotency_key=:key
                 """), {"org": str(h["organization_id"]), "key": idempotency_key}))
                 if existing:
                     return existing
@@ -777,7 +777,7 @@ def create_v1_app(settings, service: str = "all"):
                     insert into public.bookings
                       (organization_id,venue_id,court_id,player_id,status,starts_at,ends_at,currency,
                        gross_amount_minor,source,idempotency_key,cancellation_policy_version,metadata)
-                    values(:org::uuid,:venue::uuid,:court::uuid,:player::uuid,'confirmed',:a,:b,:currency,
+                    values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:player as uuid),'confirmed',:a,:b,:currency,
                            :amount,'getacourt',:key,:policy,cast(:metadata as jsonb))
                     returning id::text,status::text,starts_at,ends_at,currency::text,gross_amount_minor
                 """), {"org": str(h["organization_id"]), "venue": str(h["venue_id"]), "court": str(h["court_id"]),
@@ -785,7 +785,7 @@ def create_v1_app(settings, service: str = "all"):
                        "currency": quote["currency"], "amount": quote["amount_minor"], "key": idempotency_key,
                        "policy": settings.terms_version or "unversioned",
                        "metadata": json.dumps({"participants": body.participants, "payment_status": "not_collected"})}))
-                c.execute(text("delete from public.booking_holds where id=:id::uuid"), {"id": hold_id})
+                c.execute(text("delete from public.booking_holds where id=cast(:id as uuid)"), {"id": hold_id})
                 db.emit(c, str(h["organization_id"]), a.id, "booking.confirmed", "booking", r["id"], after=r)
                 return r
 
@@ -800,7 +800,7 @@ def create_v1_app(settings, service: str = "all"):
                     join public.people p on p.id=b.player_id
                     join public.courts c on c.id=b.court_id
                     join public.venues v on v.id=b.venue_id
-                    where p.auth_user_id=:uid::uuid
+                    where p.auth_user_id=cast(:uid as uuid)
                     order by b.starts_at desc limit :limit
                 """), {"uid": a.id, "limit": limit}))}
 
@@ -811,7 +811,7 @@ def create_v1_app(settings, service: str = "all"):
                 b = one(c.execute(text("""
                     select b.id::text,b.organization_id::text,b.status::text,p.auth_user_id
                     from public.bookings b join public.people p on p.id=b.player_id
-                    where b.id=:id::uuid for update
+                    where b.id=cast(:id as uuid) for update
                 """), {"id": booking_id}))
                 if not b or str(b["auth_user_id"]) != a.id:
                     raise DomainError("BOOKING_NOT_FOUND", "Booking not found.", 404)
@@ -819,7 +819,7 @@ def create_v1_app(settings, service: str = "all"):
                     raise DomainError("BOOKING_STATE", "Booking cannot be cancelled in this state.", 409)
                 c.execute(text("""
                     update public.bookings set status='cancelled',updated_at=now()
-                    where id=:id::uuid
+                    where id=cast(:id as uuid)
                 """), {"id": booking_id})
                 db.emit(c, b["organization_id"], a.id, "booking.cancelled", "booking", booking_id,
                         before={"status": b["status"]}, after={"status": "cancelled"})
