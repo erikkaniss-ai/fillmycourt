@@ -72,13 +72,13 @@ class Settings:
             return self.secure and bool(self.apple_id and self.apple_team and self.apple_key_id and self.apple_private_key)
         return False
 
-    def validate(self):
+    def validate(self, require_public_origin: bool = True):
         u=urlsplit(self.origin)
-        if u.scheme not in ("http","https") or not u.netloc or u.path or u.query or u.fragment:
+        if require_public_origin and (u.scheme not in ("http","https") or not u.netloc or u.path or u.query or u.fragment):
             raise RuntimeError("GAC_PUBLIC_ORIGIN must be an origin without a path.")
         if self.environment in ("staging","production"):
-            if not self.secure or not self.database.startswith("postgresql"):
-                raise RuntimeError("Staging and production require HTTPS and a PostgreSQL database URL.")
+            if (require_public_origin and not self.secure) or not self.database.startswith("postgresql"):
+                raise RuntimeError("Managed environments require PostgreSQL; public APIs also require HTTPS.")
             if self.data_contract != "supabase-v1":
                 raise RuntimeError("Managed deployments require FMC_DATA_CONTRACT=supabase-v1.")
             if not self.supabase_url.startswith("https://") or not self.supabase_publishable_key:
