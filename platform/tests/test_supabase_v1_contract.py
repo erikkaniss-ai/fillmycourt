@@ -116,3 +116,14 @@ def test_player_profile_rejects_unsupported_sport(store):
                 insert into public.player_profiles(user_id,full_name,preferred_sports)
                 values(cast(:uid as uuid),'Player One',array['football'])
             """), {"uid": owner})
+
+
+def test_set_based_availability_returns_priced_slots(store):
+    owner, outsider, org, venue, court = seed(store)
+    day = datetime.now(timezone.utc).date().isoformat()
+    slots = store.availability(day, "17:00", "20:00", "padel", 90, "", "all", 50)
+    assert slots
+    assert any(s["id"] == court for s in slots)
+    match = next(s for s in slots if s["id"] == court)
+    assert match["amount_minor"] == 3000
+    assert match["duration_minutes"] == 90
