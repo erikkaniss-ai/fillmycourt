@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0d1726" />
+  <meta name="description" content="GetACourt helps racket-sport players find available courts across clubs and booking systems, then book in a few taps." />
+  <title>GetACourt — Find a court. Play now.</title>
+  <link rel="manifest" href="/getacourt/manifest.webmanifest" />
+  <link rel="stylesheet" href="/getacourt/assets/styles.css" />
+</head>
+<body data-mode="preview">
+  <div class="preview-strip" id="previewStrip">Preview environment · test bookings only</div>
+
+  <header class="site-header">
+    <a class="brand" href="/getacourt/" aria-label="GetACourt home">
+      <span class="brand-mark" aria-hidden="true"><span></span></span>
+      <span>GetA<span>Court</span></span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#discover">Discover</a>
+      <a href="#how">How it works</a>
+      <button class="nav-button" id="myBookingsButton" type="button">My bookings</button>
+    </nav>
+    <a class="club-link" href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">For clubs ↗</a>
+  </header>
+
+  <main>
+    <section class="hero" id="discover">
+      <div class="hero-copy">
+        <p class="eyebrow">RACKET SPORTS · REAL-TIME AVAILABILITY</p>
+        <h1>Find a court.<br><em>Play now.</em></h1>
+        <p class="hero-sub">Search available padel, tennis, squash, badminton and pickleball courts across clubs — without checking booking apps one by one.</p>
+        <div class="trust-line">
+          <span><b>One search</b> across providers</span>
+          <span><b>Live slots</b> when connected</span>
+          <span><b>Fast checkout</b> in one flow</span>
+        </div>
+      </div>
+
+      <form class="search-panel" id="searchForm">
+        <div class="sport-picker" role="group" aria-label="Sport">
+          <button type="button" class="sport-chip active" data-sport="padel">Padel</button>
+          <button type="button" class="sport-chip" data-sport="tennis">Tennis</button>
+          <button type="button" class="sport-chip" data-sport="squash">Squash</button>
+          <button type="button" class="sport-chip" data-sport="badminton">Badminton</button>
+          <button type="button" class="sport-chip" data-sport="pickleball">Pickleball</button>
+        </div>
+
+        <div class="search-grid">
+          <label class="field field-location">
+            <span>Where</span>
+            <input id="locationInput" name="location" value="Cascais" autocomplete="address-level2" placeholder="City, area or club" />
+          </label>
+          <label class="field">
+            <span>Date</span>
+            <input id="dateInput" name="date" type="date" />
+          </label>
+          <label class="field">
+            <span>From</span>
+            <input id="fromInput" name="from" type="time" value="17:00" step="1800" />
+          </label>
+          <label class="field">
+            <span>Until</span>
+            <input id="toInput" name="to" type="time" value="22:00" step="1800" />
+          </label>
+        </div>
+        <button class="search-cta" type="submit">
+          <span>Find available courts</span>
+          <span aria-hidden="true">→</span>
+        </button>
+        <p class="search-note">No membership required to search. Price and cancellation rules are shown before confirmation.</p>
+      </form>
+    </section>
+
+    <section class="results-shell" id="resultsSection" aria-live="polite">
+      <div class="results-head">
+        <div>
+          <p class="eyebrow">AVAILABLE NOW</p>
+          <h2 id="resultsTitle">Courts around Cascais</h2>
+        </div>
+        <div class="results-meta">
+          <span id="resultCount">Search to see live availability</span>
+          <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="filter-row">
+        <button type="button" class="filter-pill active" data-filter="all">All courts</button>
+        <button type="button" class="filter-pill" data-filter="indoor">Indoor</button>
+        <button type="button" class="filter-pill" data-filter="under35">Under €35</button>
+        <button type="button" class="filter-pill" data-filter="90min">90 min</button>
+      </div>
+      <div id="resultsGrid" class="results-grid">
+        <div class="empty-state">
+          <div class="empty-orbit"></div>
+          <h3>Pick a time. We’ll find the court.</h3>
+          <p>GetACourt searches available inventory and brings the useful slots into one clean view.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="principles" id="how">
+      <article>
+        <span class="step">01</span>
+        <h3>Search once</h3>
+        <p>Choose sport, place and time. Provider adapters normalize inventory into one result set.</p>
+      </article>
+      <article>
+        <span class="step">02</span>
+        <h3>Compare useful slots</h3>
+        <p>See the total price, duration, venue details and booking source before you commit.</p>
+      </article>
+      <article>
+        <span class="step">03</span>
+        <h3>Book without friction</h3>
+        <p>Native checkout where supported; verified provider hand-off where the source requires it.</p>
+      </article>
+    </section>
+
+    <section class="network-section">
+      <div class="network-card">
+        <div>
+          <p class="eyebrow">GETACOURT NETWORK</p>
+          <h2>One player layer.<br>Many booking systems.</h2>
+        </div>
+        <p>GetACourt is designed as the consumer discovery and booking layer. Clubs can keep their existing stack while FillMyCourt provides the operating and revenue infrastructure underneath.</p>
+        <div class="network-flow" aria-label="GetACourt platform flow">
+          <span>PLAYER</span><i>→</i><b>GetACourt</b><i>→</i><span>BOOKING CORE</span><i>→</i><span>CLUB / PROVIDER</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="brand footer-brand"><span class="brand-mark"><span></span></span><span>GetA<span>Court</span></span></div>
+    <p>Find a court. Play now.</p>
+    <p class="powered">Powered by <a href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">FillMyCourt</a></p>
+  </footer>
+
+  <dialog class="booking-dialog" id="bookingDialog">
+    <form method="dialog" class="dialog-shell" id="bookingForm">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <div class="dialog-progress"><span id="dialogProgress"></span></div>
+      <p class="eyebrow">BOOKING</p>
+      <h2 id="bookingHeading">Hold this court</h2>
+      <div id="bookingSummary" class="booking-summary"></div>
+      <div class="hold-banner" id="holdBanner" hidden>
+        Court held for <strong id="holdCountdown">08:00</strong>
+      </div>
+
+      <fieldset class="pay-options">
+        <legend>Payment</legend>
+        <label><input type="radio" name="paymentMode" value="full" checked /> <span><b>Pay full court</b><small>Fastest. Invite players after booking.</small></span></label>
+        <label><input type="radio" name="paymentMode" value="split" /> <span><b>Split with players</b><small>Booking owner guarantees the remaining balance.</small></span></label>
+      </fieldset>
+
+      <div class="checkout-grid">
+        <label class="field"><span>Name</span><input id="nameInput" name="name" autocomplete="name" required placeholder="Your name" /></label>
+        <label class="field"><span>Email</span><input id="emailInput" name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+      </div>
+      <label class="consent"><input type="checkbox" id="termsInput" required /> <span>I accept the venue cancellation policy and GetACourt booking terms.</span></label>
+      <button class="confirm-button" id="confirmBookingButton" type="submit">Confirm test booking</button>
+      <p class="payment-note">Preview mode: no card is charged. Production checkout will use a PSP token; GetACourt will not store raw card data.</p>
+    </form>
+  </dialog>
+
+  <dialog class="bookings-dialog" id="bookingsDialog">
+    <div class="dialog-shell bookings-shell">
+      <button class="dialog-close" id="closeBookingsButton" aria-label="Close">×</button>
+      <p class="eyebrow">YOUR PLAY</p>
+      <h2>My bookings</h2>
+      <div id="bookingsList" class="bookings-list"></div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/getacourt/assets/app.js" defer></script>
+</body>
+</html>
