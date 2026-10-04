@@ -125,7 +125,7 @@ class V1Store:
     def role(self, c, org_id: str, user_id: str) -> str | None:
         r = one(c.execute(text("""
             select role::text from public.organization_members
-            where organization_id=:org::uuid and user_id=:uid::uuid
+            where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
         """), {"org": org_id, "uid": user_id}))
         return r["role"] if r else None
 
@@ -143,7 +143,7 @@ class V1Store:
             insert into public.audit_events
               (organization_id,actor_user_id,event_type,entity_type,entity_id,before_state,after_state,request_id)
             values
-              (:org::uuid,:actor::uuid,:event_type,:entity_type,:entity_id,
+              (cast(:org as uuid),cast(:actor as uuid),:event_type,:entity_type,:entity_id,
                cast(:before as jsonb),cast(:after as jsonb),:request_id)
         """), {
             "org": org_id, "actor": actor_id, "event_type": event_type,
@@ -156,8 +156,8 @@ class V1Store:
             c.execute(text("""
                 insert into public.domain_events
                   (organization_id,aggregate_type,aggregate_id,event_type,payload)
-                values (:org::uuid,:kind,
-                        case when :entity_id ~* '^[0-9a-f-]{36}$' then :entity_id::uuid else null end,
+                values (cast(:org as uuid),:kind,
+                        case when :entity_id ~* '^[0-9a-f-]{36}$' then cast(:entity_id as uuid) else null end,
                         :event_type,cast(:payload as jsonb))
             """), {
                 "org": org_id, "kind": entity_type, "entity_id": entity_id or "",
@@ -171,14 +171,14 @@ class V1Store:
     def ensure_person(self, c, org_id: str, actor: Actor) -> str:
         existing = one(c.execute(text("""
             select id::text from public.people
-            where organization_id=:org::uuid and auth_user_id=:uid::uuid
+            where organization_id=cast(:org as uuid) and auth_user_id=cast(:uid as uuid)
             order by created_at limit 1
         """), {"org": org_id, "uid": actor.id}))
         if existing:
             return existing["id"]
         r = one(c.execute(text("""
             insert into public.people(organization_id,auth_user_id,full_name,email,source)
-            values(:org::uuid,:uid::uuid,null,:email,'getacourt')
+            values(cast(:org as uuid),cast(:uid as uuid),null,:email,'getacourt')
             returning id::text
         """), {"org": org_id, "uid": actor.id, "email": actor.email}))
         return r["id"]
@@ -189,17 +189,17 @@ class V1Store:
         q = one(c.execute(text("""
             select exists(
               select 1 from public.bookings
-              where court_id=:court::uuid
+              where court_id=cast(:court as uuid)
                 and status in ('held','pending_payment','confirmed')
                 and starts_at < :b and ends_at > :a
               union all
               select 1 from public.booking_holds
-              where court_id=:court::uuid and expires_at > now()
-                and (:ignore is null or id<>:ignore::uuid)
+              where court_id=cast(:court as uuid) and expires_at > now()
+                and (:ignore is null or id<>cast(:ignore as uuid))
                 and starts_at < :b and ends_at > :a
               union all
               select 1 from public.court_blocks
-              where court_id=:court::uuid and starts_at < :b and ends_at > :a
+              where court_id=cast(:court as uuid) and starts_at < :b and ends_at > :a
             ) as conflict
         """), p))
         return bool(q and q["conflict"])
@@ -209,7 +209,7 @@ class V1Store:
             select c.id::text,c.venue_id::text,c.sport,c.indoor,c.inventory_mode::text,
                    c.native_write_enabled,v.organization_id::text,v.currency::text,v.timezone,v.name venue_name
             from public.courts c join public.venues v on v.id=c.venue_id
-            where c.id=:court::uuid and c.active and v.active
+            where c.id=cast(:court as uuid) and c.active and v.active
         """), {"court": court_id}))
         if not court:
             raise DomainError("COURT_NOT_FOUND", "Court not found.", 404)
@@ -219,7 +219,7 @@ class V1Store:
         rate = one(c.execute(text("""
             select price_minor,currency::text
             from public.court_rates
-            where court_id=:court::uuid and active
+            where court_id=cast(:court as uuid) and active
               and (weekday is null or weekday=:weekday)
               and start_minute<=:minute and end_minute>:minute
             order by priority asc, created_at desc limit 1
@@ -263,7 +263,7 @@ class V1Store:
             c.execute(text("""
                 update public.jobs set status='done',result=cast(:result as jsonb),
                   lease_until=null,lease_token=null,error=null,updated_at=now()
-                where id=:id::uuid and lease_token=:lease::uuid
+                where id=cast(:id as uuid) and lease_token=cast(:lease as uuid)
             """), {"id": job_id, "lease": lease_token, "result": json.dumps(result)})
 
     def fail_job(self, job_id: str, lease_token: str, error: str):
@@ -273,5 +273,5 @@ class V1Store:
                 set status=case when attempts>=8 then 'dead' else 'failed' end,
                     error=:error, due_at=now()+least(attempts*attempts,60)*interval '1 minute',
                     lease_until=null,lease_token=null,updated_at=now()
-                where id=:id::uuid and lease_token=:lease::uuid
+                where id=cast(:id as uuid) and lease_token=cast(:lease as uuid)
             """), {"id": job_id, "lease": lease_token, "error": error[:1000]})
