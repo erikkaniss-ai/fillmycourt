@@ -64,7 +64,7 @@ def _connection(db: V1Store, connection_id: str):
     with db.trusted() as c:
         r = one(c.execute(text("""
             select id::text,organization_id::text,provider,status,capabilities,config
-            from public.provider_connections where id=:id::uuid
+            from public.provider_connections where id=cast(:id as uuid)
         """), {"id": connection_id}))
         if not r or r["status"] != "configured":
             raise DomainError("PROVIDER_NOT_CONFIGURED", "Provider connection is not configured.", 409)
@@ -77,7 +77,7 @@ def _mapping(db: V1Store, c, connection_id: str, external_court: str):
         from public.provider_mappings pm
         join public.courts ct on ct.id=pm.local_id
         join public.venues v on v.id=ct.venue_id
-        where pm.provider_connection_id=:pc::uuid
+        where pm.provider_connection_id=cast(:pc as uuid)
           and pm.entity_type='court' and pm.external_id=:external
     """), {"pc": connection_id, "external": external_court}))
 
@@ -89,7 +89,7 @@ def _observe(c, org: str, pc: str, stream: str, record: dict, complete=True):
     c.execute(text("""
         insert into public.provider_observations
           (organization_id,provider_connection_id,stream,external_id,fingerprint,complete,payload)
-        values(:org::uuid,:pc::uuid,:stream,nullif(:external,''),:fp,:complete,cast(:payload as jsonb))
+        values(cast(:org as uuid),cast(:pc as uuid),:stream,nullif(:external,''),:fp,:complete,cast(:payload as jsonb))
         on conflict(provider_connection_id,stream,fingerprint) do nothing
     """), {"org": org, "pc": pc, "stream": stream, "external": external,
            "fp": fp, "complete": complete, "payload": payload})
@@ -125,7 +125,7 @@ def _sync_playtomic(db: V1Store, job: dict):
                     c.execute(text("""
                         insert into public.people
                           (organization_id,external_key,full_name,email,phone,marketing_consent,source,source_updated_at)
-                        values(:org::uuid,:external,:name,nullif(:email,''),nullif(:phone,''),:consent,'playtomic',now())
+                        values(cast(:org as uuid),:external,:name,nullif(:email,''),nullif(:phone,''),:consent,'playtomic',now())
                         on conflict(organization_id,source,external_key) do update set
                           full_name=excluded.full_name,email=excluded.email,phone=excluded.phone,
                           marketing_consent=excluded.marketing_consent,source_updated_at=now(),updated_at=now()
@@ -139,7 +139,7 @@ def _sync_playtomic(db: V1Store, job: dict):
                         insert into public.payments
                           (organization_id,provider,external_reference,kind,status,currency,amount_minor,
                            fee_minor,payout_reference,occurred_at,metadata)
-                        values(:org::uuid,'playtomic',:external,:kind,:status,:currency,:amount,:fee,:payout,now(),cast(:metadata as jsonb))
+                        values(cast(:org as uuid),'playtomic',:external,:kind,:status,:currency,:amount,:fee,:payout,now(),cast(:metadata as jsonb))
                         on conflict(organization_id,provider,external_reference,kind) do update set
                           status=excluded.status,amount_minor=excluded.amount_minor,fee_minor=excluded.fee_minor,
                           payout_reference=excluded.payout_reference,metadata=excluded.metadata
@@ -158,7 +158,7 @@ def _sync_playtomic(db: V1Store, job: dict):
                             insert into public.bookings
                               (organization_id,venue_id,court_id,status,starts_at,ends_at,currency,
                                gross_amount_minor,source,external_reference,metadata)
-                            values(:org::uuid,:venue::uuid,:court::uuid,:status::public.fmc_booking_status,
+                            values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:status as public.fmc_booking_status),
                                    :starts,:ends,:currency,:amount,'playtomic',:external,cast(:metadata as jsonb))
                             on conflict(organization_id,source,external_reference) where external_reference is not null
                             do update set court_id=excluded.court_id,venue_id=excluded.venue_id,status=excluded.status,
@@ -171,7 +171,7 @@ def _sync_playtomic(db: V1Store, job: dict):
                                "external": rec["external_id"], "metadata": _json({"provider":"playtomic","shadow":True})})
             c.execute(text("""
                 insert into public.sync_cursors(provider_connection_id,stream,cursor,last_started_at,last_completed_at,last_error)
-                values(:pc::uuid,:stream,cast(:cursor as jsonb),now(),
+                values(cast(:pc as uuid),:stream,cast(:cursor as jsonb),now(),
                        case when :done then now() else null end,null)
                 on conflict(provider_connection_id,stream) do update set
                   cursor=excluded.cursor,last_started_at=coalesce(public.sync_cursors.last_started_at,now()),
@@ -188,7 +188,7 @@ def _sync_playtomic(db: V1Store, job: dict):
     with db.trusted() as c:
         c.execute(text("""
             update public.provider_connections set last_success_at=now(),last_error_at=null
-            where id=:id::uuid
+            where id=cast(:id as uuid)
         """), {"id": pc_id})
     return {"provider": "playtomic", "stream": stream, "records": total}
 
@@ -212,25 +212,25 @@ def _reconcile(db: V1Store, job: dict):
                    r.window_start,r.window_end,pc.provider
             from public.reconciliation_runs r
             left join public.provider_connections pc on pc.id=r.provider_connection_id
-            where r.id=:id::uuid for update
+            where r.id=cast(:id as uuid) for update
         """), {"id": run_id}))
         if not run:
             raise DomainError("RECON_NOT_FOUND", "Reconciliation run not found.", 404)
-        c.execute(text("update public.reconciliation_runs set status='running' where id=:id::uuid"), {"id": run_id})
-        c.execute(text("delete from public.reconciliation_items where run_id=:id::uuid"), {"id": run_id})
+        c.execute(text("update public.reconciliation_runs set status='running' where id=cast(:id as uuid)"), {"id": run_id})
+        c.execute(text("delete from public.reconciliation_items where run_id=cast(:id as uuid)"), {"id": run_id})
         if not run["provider_connection_id"]:
             raise DomainError("RECON_PROVIDER", "Reconciliation run has no provider connection.", 409)
         observations = rows(c.execute(text("""
             select distinct on (external_id) external_id,payload,observed_at
             from public.provider_observations
-            where provider_connection_id=:pc::uuid and stream='bookings' and external_id is not null
+            where provider_connection_id=cast(:pc as uuid) and stream='bookings' and external_id is not null
               and (:a is null or observed_at>=:a) and (:b is null or observed_at<=:b)
             order by external_id,observed_at desc
         """), {"pc": run["provider_connection_id"], "a": run["window_start"], "b": run["window_end"]}))
         internal = rows(c.execute(text("""
             select id::text,external_reference,status::text,starts_at,ends_at,gross_amount_minor,currency::text,source
             from public.bookings
-            where organization_id=:org::uuid
+            where organization_id=cast(:org as uuid)
               and source=:provider and external_reference is not null
               and (:a is null or starts_at>=:a) and (:b is null or starts_at<=:b)
         """), {"org": run["organization_id"], "provider": run["provider"],
@@ -260,7 +260,7 @@ def _reconcile(db: V1Store, job: dict):
             c.execute(text("""
                 insert into public.reconciliation_items
                   (organization_id,run_id,external_reference,category,severity,expected,observed)
-                values(:org::uuid,:run::uuid,:external,:category,:severity::public.fmc_recon_severity,
+                values(cast(:org as uuid),cast(:run as uuid),:external,:category,cast(:severity as public.fmc_recon_severity),
                        cast(:expected as jsonb),cast(:observed as jsonb))
             """), {"org": run["organization_id"], "run": run_id, "external": ext,
                    "category": category, "severity": severity,
@@ -269,7 +269,7 @@ def _reconcile(db: V1Store, job: dict):
         c.execute(text("""
             update public.reconciliation_runs
             set status='completed',summary=cast(:summary as jsonb),completed_at=now()
-            where id=:id::uuid
+            where id=cast(:id as uuid)
         """), {"id": run_id, "summary": _json(summary)})
         return summary
 
