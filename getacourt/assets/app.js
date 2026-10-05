@@ -3,7 +3,7 @@
   const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
   const state = {
     sport:"padel", venues:[], filter:"all", selected:null, hold:null, timer:null,
-    platform:{ bookingEnabled:false, authConfigured:false }, session:null, profile:null
+    platform:{ bookingEnabled:false, authConfigured:false }, session:null, profile:null, geo:null
   };
 
   const el = {
@@ -19,7 +19,8 @@
     authEmail:q("#authEmail"), authStatus:q("#authStatus"), closeAuth:q("#closeAuthButton"),
     profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
     profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
-    closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton")
+    closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
+    nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote")
   };
 
   const now = new Date();
@@ -109,17 +110,44 @@
   function loading(){el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
   async function search(){
     const p={sport:state.sport,location:el.location.value.trim()||"Cascais",date:el.date.value,from:el.from.value,to:el.to.value};
+    if(state.geo){p.lat=String(state.geo.lat);p.lon=String(state.geo.lon);}
     loading();
     try{
       const data=await api("/api/gac/search?"+new URLSearchParams(p).toString());
       state.venues=data.venues||[];
+      if(el.radiusNote){
+        const s=data.search||{};
+        el.radiusNote.textContent=s.radiusUsedKm
+          ? (s.expanded ? "Expanded search to "+s.radiusUsedKm+" km based on availability." : "Searching within "+s.radiusUsedKm+" km.")
+          : "";
+      }
     }catch(err){
       state.venues=[];
+      if(el.radiusNote) el.radiusNote.textContent="";
       toast(err.message||"Live availability is temporarily unavailable.");
     }
-    el.title.textContent="Courts around "+p.location;
+    el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
     q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
+  }
+
+  function useCurrentLocation(){
+    if(!navigator.geolocation){toast("Location is not available in this browser.");return;}
+    el.nearMe.disabled=true;el.nearMe.textContent="Locating…";
+    navigator.geolocation.getCurrentPosition(
+      pos=>{
+        state.geo={lat:pos.coords.latitude,lon:pos.coords.longitude};
+        el.location.value="Current location";
+        el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
+        if(el.radiusNote) el.radiusNote.textContent="Starting with nearby courts and expanding only if needed.";
+        search();
+      },
+      ()=>{
+        el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
+        toast("Could not access your location. Search by area instead.");
+      },
+      {enableHighAccuracy:false,timeout:8000,maximumAge:300000}
+    );
   }
   function filteredSlots(v){
     let slots=(v.slots||[]).filter(s=>s.status==="available");
@@ -310,6 +338,8 @@
   qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{qa(".filter-pill").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.filter=b.dataset.filter;render();}));
   el.form.addEventListener("submit",e=>{e.preventDefault();search();});
   el.refresh.addEventListener("click",search);
+  el.nearMe?.addEventListener("click",useCurrentLocation);
+  el.location.addEventListener("input",()=>{if(el.location.value!=="Current location"){state.geo=null;if(el.radiusNote)el.radiusNote.textContent="";}});
   el.bookingForm.addEventListener("submit",confirm);
   el.dialog.addEventListener("close",()=>{clearInterval(state.timer);if(el.dialog.returnValue==="cancel")reset();});
   el.myBookings.addEventListener("click",loadBookings);
