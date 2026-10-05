@@ -359,3 +359,11 @@ main { overflow: hidden; }
   .preference-grid { grid-template-columns:1fr; }
   .profile-actions { grid-template-columns:1fr; }
 }
+
+.location-entry{display:flex;gap:8px;align-items:center}
+.location-entry input{flex:1;min-width:0}
+.near-me-button{border:1px solid rgba(7,30,51,.16);background:#fff;border-radius:10px;padding:10px 12px;font:inherit;font-weight:700;white-space:nowrap;cursor:pointer}
+.near-me-button:hover{border-color:rgba(18,103,229,.45)}
+.near-me-button:disabled{opacity:.55;cursor:progress}
+.radius-note{display:block;min-height:16px;margin-top:6px;color:var(--muted,#64748b);font-size:11px;line-height:1.35}
+@media(max-width:620px){.location-entry{align-items:stretch}.near-me-button{padding-inline:10px}}
