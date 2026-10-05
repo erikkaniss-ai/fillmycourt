@@ -101,4 +101,6 @@ def test_fill_today_utilisation_summary(fill_today):
     assert body["summary"]["revenue_minor"] == 3600
     assert body["summary"]["empty_minutes"] == 900
     assert body["courts"][0]["court_id"] == court_id
+    assert body["courts"][0]["open_start_minute"] == 360
+    assert body["courts"][0]["open_end_minute"] == 1410
     assert body["courts"][0]["utilization_pct"] == pytest.approx(8.6, abs=0.1)
