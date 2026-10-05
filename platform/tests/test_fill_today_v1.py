@@ -105,6 +105,9 @@ def test_fill_today_utilisation_summary(fill_today):
     assert body["courts"][0]["court_id"] == court_id
     assert body["courts"][0]["open_start_minute"] == 360
     assert body["courts"][0]["open_end_minute"] == 1410
+    assert body["courts"][0]["bookings"] == 1
+    assert body["courts"][0]["cancellations"] == 1
+    assert body["courts"][0]["revenue_minor"] == 3600
     assert [(w["start_minute"], w["end_minute"]) for w in body["courts"][0]["sellable_windows"]] == [(360, 1410)]
     assert body["courts"][0]["utilization_pct"] == pytest.approx(8.6, abs=0.1)
     assert body["empty_windows"]
