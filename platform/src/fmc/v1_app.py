@@ -822,16 +822,75 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                       select fb.*,
                              fb.starts_at - (fb.rn * interval '30 minutes') grp
                       from free_buckets fb
+                    ),
+                    windows as (
+                      select court_id,court_name,
+                             min(starts_at) starts_at,max(ends_at) ends_at,
+                             count(*)::int*30 duration_minutes
+                      from islands
+                      group by court_id,court_name,grp
+                      having count(*) >= 2
+                    ),
+                    opportunities as (
+                      select w.court_id,w.starts_at window_start,d.duration_minutes,gs starts_at,
+                             ((rate.price_minor*d.duration_minutes+59)/60)::int amount_minor,
+                             rate.currency::text currency
+                      from windows w
+                      cross join (values (60),(90)) d(duration_minutes)
+                      cross join lateral generate_series(
+                        w.starts_at,
+                        w.ends_at-make_interval(mins=>d.duration_minutes),
+                        interval '30 minutes'
+                      ) gs
+                      join lateral (
+                        select r.price_minor,r.currency
+                        from public.court_rates r
+                        where r.court_id=w.court_id and r.active
+                          and (
+                            r.weekday is null or
+                            r.weekday=(extract(isodow from (gs at time zone :tz))::int-1)
+                          )
+                          and r.start_minute<=(
+                            extract(hour from (gs at time zone :tz))::int*60
+                            + extract(minute from (gs at time zone :tz))::int
+                          )
+                          and r.end_minute>(
+                            extract(hour from (gs at time zone :tz))::int*60
+                            + extract(minute from (gs at time zone :tz))::int
+                          )
+                        order by r.priority asc,r.created_at desc
+                        limit 1
+                      ) rate on true
                     )
-                    select court_id::text,court_name,
-                           min(starts_at) starts_at,max(ends_at) ends_at,
-                           count(*)::int*30 duration_minutes
-                    from islands
-                    group by court_id,court_name,grp
-                    having count(*) >= 2
-                    order by duration_minutes desc,starts_at
+                    select w.court_id::text,w.court_name,w.starts_at,w.ends_at,w.duration_minutes,
+                           count(*) filter (where o.duration_minutes=60)::int bookable_60_count,
+                           min(o.amount_minor) filter (where o.duration_minutes=60)::int min_60_amount_minor,
+                           max(o.amount_minor) filter (where o.duration_minutes=60)::int max_60_amount_minor,
+                           count(*) filter (where o.duration_minutes=90)::int bookable_90_count,
+                           min(o.amount_minor) filter (where o.duration_minutes=90)::int min_90_amount_minor,
+                           max(o.amount_minor) filter (where o.duration_minutes=90)::int max_90_amount_minor,
+                           (array_agg(o.amount_minor order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
+                             filter (where o.amount_minor is not null))[1]::int best_amount_minor,
+                           (array_agg(o.duration_minutes order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
+                             filter (where o.amount_minor is not null))[1]::int best_duration_minutes,
+                           (array_agg(o.starts_at order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
+                             filter (where o.amount_minor is not null))[1] best_starts_at,
+                           (array_agg(o.currency order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
+                             filter (where o.amount_minor is not null))[1] currency
+                    from windows w
+                    left join opportunities o
+                      on o.court_id=w.court_id and o.window_start=w.starts_at
+                    group by w.court_id,w.court_name,w.starts_at,w.ends_at,w.duration_minutes
+                    order by w.duration_minutes desc,w.starts_at
                     limit 30
                 """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
+                bookable_60_starts = sum(int(x.get("bookable_60_count") or 0) for x in empty_windows)
+                bookable_90_starts = sum(int(x.get("bookable_90_count") or 0) for x in empty_windows)
+                best_quote = max(
+                    (x for x in empty_windows if x.get("best_amount_minor") is not None),
+                    key=lambda x: int(x.get("best_amount_minor") or 0),
+                    default=None,
+                )
                 financial = one(c.execute(text("""
                     select
                       count(*) filter (where status in ('confirmed','pending_payment'))::int bookings,
@@ -867,6 +926,13 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         "bookings": int(financial.get("bookings") or 0),
                         "cancellations": int(financial.get("cancellations") or 0),
                         "revenue_minor": int(financial.get("revenue_minor") or 0),
+                        "bookable_60_starts": bookable_60_starts,
+                        "bookable_90_starts": bookable_90_starts,
+                        "highest_single_quote_minor": int((best_quote or {}).get("best_amount_minor") or 0),
+                        "highest_single_quote_duration_minutes": (
+                            int((best_quote or {}).get("best_duration_minutes"))
+                            if (best_quote or {}).get("best_duration_minutes") is not None else None
+                        ),
                     },
                     "courts": court_rows,
                     "empty_windows": empty_windows,
