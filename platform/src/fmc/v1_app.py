@@ -725,7 +725,28 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                              select 1 from public.court_blocks bl
                              where bl.court_id=ob.court_id
                                and bl.starts_at<ob.ends_at and bl.ends_at>ob.starts_at
-                           ))::int*30 blocked_minutes
+                           ))::int*30 blocked_minutes,
+                           (
+                             select count(*)::int
+                             from public.bookings bk
+                             where bk.court_id=ob.court_id
+                               and bk.status in ('confirmed','pending_payment')
+                               and bk.starts_at>=:begin and bk.starts_at<:finish
+                           ) bookings,
+                           (
+                             select count(*)::int
+                             from public.bookings bk
+                             where bk.court_id=ob.court_id
+                               and bk.status='cancelled'
+                               and bk.starts_at>=:begin and bk.starts_at<:finish
+                           ) cancellations,
+                           (
+                             select coalesce(sum(bk.gross_amount_minor),0)::int
+                             from public.bookings bk
+                             where bk.court_id=ob.court_id
+                               and bk.status in ('confirmed','pending_payment')
+                               and bk.starts_at>=:begin and bk.starts_at<:finish
+                           ) revenue_minor
                     from open_buckets ob
                     group by ob.court_id,ob.court_name
                     order by ob.court_name
