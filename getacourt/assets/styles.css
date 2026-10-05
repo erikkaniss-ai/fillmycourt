@@ -404,3 +404,11 @@ main { overflow: hidden; }
 .venue-court-head span{font-size:11px;color:var(--muted,#64748b)}
 .venue-slot-list{margin-top:0}
 @media(max-width:620px){.venue-detail-title{flex-direction:column}.venue-detail-title h2{font-size:24px}}
+
+.quick-picks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 18px}
+.quick-pick{border:1px solid rgba(7,30,51,.1);border-radius:13px;background:#fff;padding:13px 14px;text-align:left;display:grid;gap:3px;cursor:pointer}
+.quick-pick:hover{border-color:rgba(18,103,229,.35);box-shadow:0 8px 24px rgba(7,30,51,.06)}
+.quick-pick span{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:#1267e5;font-weight:800}
+.quick-pick strong{font-size:14px;color:#071e33}
+.quick-pick small{font-size:11px;color:var(--muted,#64748b)}
+@media(max-width:720px){.quick-picks{grid-template-columns:1fr}.quick-pick{grid-template-columns:auto 1fr;align-items:center}.quick-pick small{grid-column:1/-1}}
