@@ -15,6 +15,7 @@
     <nav>
       <button class="nav-item active" data-view="today">Today</button>
       <button class="nav-item" data-view="calendar">Calendar</button>
+      <button class="nav-item" data-view="revenue">Revenue & Capacity</button>
     </nav>
     <div class="side-foot"><span>Revenue infrastructure for racket clubs.</span><a href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">Public site ↗</a></div>
   </aside>
@@ -59,6 +60,18 @@
         <section class="panel">
           <div class="panel-head"><div><p class="eyebrow">SHARED BOOKING TRUTH</p><h2>Day calendar</h2></div></div>
           <div id="calendarTimeline" class="calendar-timeline"></div>
+        </section>
+      </section>
+
+      <section id="revenueView" hidden>
+        <div id="revenueKpis" class="kpi-grid"></div>
+        <section class="panel">
+          <div class="panel-head">
+            <div><p class="eyebrow">EMPTY CAPACITY CONTROL ROOM</p><h2>Opportunity queue</h2></div>
+            <span class="badge">Visibility only · no pricing writes</span>
+          </div>
+          <p class="muted control-room-note">Longest unsold sellable windows are surfaced first. Pricing and promotion controls will only be added against an explicit authoritative pricing contract.</p>
+          <div id="opportunityQueue" class="opportunity-queue"></div>
         </section>
       </section>
     </section>
