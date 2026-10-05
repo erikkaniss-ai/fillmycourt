@@ -6,12 +6,14 @@ from datetime import datetime, timedelta
 import hashlib
 import io
 import json
+from pathlib import Path
 import re
 import uuid
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -1165,6 +1167,11 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 db.emit(c, b["organization_id"], a.id, "booking.cancelled", "booking", booking_id,
                         before={"status": b["status"]}, after={"status": "cancelled"})
                 return {"id": booking_id, "status": "cancelled"}
+
+    if service in ("operations", "all"):
+        fill_ui = Path(__file__).resolve().parents[2] / "public" / "fill"
+        if fill_ui.exists():
+            app.mount("/fill", StaticFiles(directory=str(fill_ui), html=True), name="fill-v1")
 
     return app
 
