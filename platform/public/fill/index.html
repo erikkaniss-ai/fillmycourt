@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#071e33">
+  <title>FillMyCourt — Operator workspace</title>
+  <link rel="stylesheet" href="/fill/styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">F</span><div><strong>FillMyCourt</strong><small>OPERATOR WORKSPACE</small></div></div>
+    <label class="workspace-label">Workspace<select id="orgSelect"><option value="">Choose organisation</option></select></label>
+    <nav>
+      <button class="nav-item active" data-view="today">Today</button>
+      <button class="nav-item" data-view="calendar">Calendar</button>
+    </nav>
+    <div class="side-foot"><span>Revenue infrastructure for racket clubs.</span><a href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">Public site ↗</a></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div><p class="eyebrow">FILL · OPERATIONS</p><h1 id="pageTitle">Today</h1></div>
+      <div class="top-actions"><span id="identity">Not signed in</span><button id="signOut" class="button secondary" hidden>Sign out</button></div>
+    </header>
+
+    <section id="authGate" class="auth-gate">
+      <div class="auth-card">
+        <p class="eyebrow">SECURE OPERATOR ACCESS</p>
+        <h2>Sign in required</h2>
+        <p>This staging interface only reads operator data with a valid Supabase bearer session. No club data is exposed anonymously.</p>
+        <p class="muted">Email sign-in will be connected once project mail delivery is active. The UI already accepts a valid Supabase session returned in the URL hash.</p>
+      </div>
+    </section>
+
+    <section id="workspace" hidden>
+      <div class="toolbar">
+        <label>Date<input id="dateInput" type="date"></label>
+        <button id="refreshButton" class="button primary">Refresh</button>
+      </div>
+      <div id="error" class="error" hidden></div>
+
+      <section id="todayView">
+        <div id="kpis" class="kpi-grid"></div>
+        <div class="content-grid">
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">CAPACITY</p><h2>Court utilisation</h2></div><span id="utilisationBadge" class="badge">—</span></div>
+            <div id="courtUtilisation" class="court-utilisation"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><p class="eyebrow">ATTENTION</p><h2>Empty capacity</h2></div></div>
+            <div id="emptyCapacity" class="empty-capacity"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="calendarView" hidden>
+        <section class="panel">
+          <div class="panel-head"><div><p class="eyebrow">SHARED BOOKING TRUTH</p><h2>Day calendar</h2></div></div>
+          <div id="calendarTimeline" class="calendar-timeline"></div>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="/fill/app.js" defer></script>
+</body>
+</html>
