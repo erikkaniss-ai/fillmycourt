@@ -887,13 +887,20 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     where b.organization_id=cast(:org as uuid) and b.starts_at<:finish and b.ends_at>:begin
                     order by b.starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
+                holds = rows(c.execute(text("""
+                    select id::text,court_id::text,player_id::text,starts_at,ends_at,expires_at
+                    from public.booking_holds
+                    where organization_id=cast(:org as uuid)
+                      and expires_at>now() and starts_at<:finish and ends_at>:begin
+                    order by starts_at
+                """), {"org": org, "begin": begin, "finish": finish}))
                 blocks = rows(c.execute(text("""
                     select id::text,court_id::text,starts_at,ends_at,reason
                     from public.court_blocks
                     where organization_id=cast(:org as uuid) and starts_at<:finish and ends_at>:begin
                     order by starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
-                return {"bookings": bookings, "blocks": blocks}
+                return {"bookings": bookings, "holds": holds, "blocks": blocks}
 
         @app.get("/api/fmc/{org}/providers")
         def providers(org: str, request: Request):

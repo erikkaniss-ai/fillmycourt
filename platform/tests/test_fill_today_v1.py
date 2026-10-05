@@ -149,3 +149,44 @@ def test_fill_today_preserves_split_sellable_windows(fill_today):
         (360, 720),
         (780, 1410),
     ]
+
+
+
+def test_fill_calendar_returns_active_holds(fill_today):
+    url, store, user_id, org_id, court_id = fill_today
+    with store.trusted() as c:
+        c.execute(text("""
+            insert into public.booking_holds(organization_id,court_id,starts_at,ends_at,expires_at,idempotency_key)
+            values(cast(:org as uuid),cast(:court as uuid),
+                   '2026-10-05 15:00:00+01','2026-10-05 16:00:00+01',
+                   '2099-01-01 00:00:00+00','calendar-active-hold')
+        """), {"org": org_id, "court": court_id})
+        c.execute(text("""
+            insert into public.booking_holds(organization_id,court_id,starts_at,ends_at,expires_at,idempotency_key)
+            values(cast(:org as uuid),cast(:court as uuid),
+                   '2026-10-05 16:00:00+01','2026-10-05 17:00:00+01',
+                   '2000-01-01 00:00:00+00','calendar-expired-hold')
+        """), {"org": org_id, "court": court_id})
+
+    settings = Settings(
+        origin="https://fill.test",
+        environment="test",
+        database=url,
+        supabase_url="https://example.supabase.co",
+        supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+    r = client.get(
+        f"/api/fmc/{org_id}/calendar",
+        params={
+            "start": "2026-10-05T00:00:00+01:00",
+            "end": "2026-10-06T00:00:00+01:00",
+        },
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["holds"]) == 1
+    assert body["holds"][0]["court_id"] == court_id
+    assert body["holds"][0]["expires_at"]
