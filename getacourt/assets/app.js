@@ -23,8 +23,8 @@
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
     nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote"),
     sortSelect:q("#sortSelect"), listView:q("#listViewButton"), mapView:q("#mapViewButton"),
-    resultsMap:q("#resultsMap"), venueDialog:q("#venueDialog"), venueDialogContent:q("#venueDialogContent"),
-    closeVenue:q("#closeVenueButton")
+    resultsMap:q("#resultsMap"), quickPicks:q("#quickPicks"), venueDialog:q("#venueDialog"),
+    venueDialogContent:q("#venueDialogContent"), closeVenue:q("#closeVenueButton")
   };
 
   const now = new Date();
@@ -223,14 +223,33 @@
     state.map.fitBounds(bounds,{padding:[28,28],maxZoom:14});
     setTimeout(()=>state.map.invalidateSize(),0);
   }
+  function renderQuickPicks(venues){
+    if(!el.quickPicks) return;
+    const all=[];
+    venues.forEach(v=>filteredSlots(v).forEach(s=>all.push({v,s})));
+    if(!all.length){el.quickPicks.hidden=true;el.quickPicks.innerHTML="";return;}
+    const byEarliest=all.slice().sort((a,b)=>a.s.startsAt.localeCompare(b.s.startsAt))[0];
+    const byPrice=all.slice().sort((a,b)=>a.s.price-b.s.price||a.s.startsAt.localeCompare(b.s.startsAt))[0];
+    const byDistance=all.slice().sort((a,b)=>(a.v.distanceKm??9999)-(b.v.distanceKm??9999)||a.s.startsAt.localeCompare(b.s.startsAt))[0];
+    const picks=[["Best match",byDistance],["Earliest",byEarliest],["Lowest price",byPrice]];
+    const seen=new Set();
+    el.quickPicks.innerHTML=picks.filter(([,x])=>x&& !seen.has(x.s.id) && seen.add(x.s.id)).map(([label,x])=>
+      '<button class="quick-pick" type="button" data-v="'+esc(x.v.id)+'" data-s="'+esc(x.s.id)+'">'+
+      '<span>'+esc(label)+'</span><strong>'+esc(x.s.time)+' · '+money(x.s.price,x.s.currency)+'</strong><small>'+esc(x.v.name)+(x.v.distanceKm==null?"":" · "+Number(x.v.distanceKm).toFixed(1)+" km")+'</small></button>'
+    ).join("");
+    el.quickPicks.hidden=!el.quickPicks.innerHTML;
+    qa(".quick-pick",el.quickPicks).forEach(b=>b.addEventListener("click",()=>openVenue(b.dataset.v)));
+  }
   function render(){
     const venues=sortedVenues();
     const n=venues.reduce((a,v)=>a+filteredSlots(v).length,0);
     el.count.textContent=n+" available slot"+(n===1?"":"s")+" · "+venues.length+" venue"+(venues.length===1?"":"s");
     if(!venues.length){
+      renderQuickPicks([]);
       el.grid.innerHTML='<div class="empty-state"><div class="empty-orbit"></div><h3>No live courts match this search</h3><p>There is no connected native inventory for this time window yet. GetACourt no longer fabricates preview availability.</p></div>';
       return;
     }
+    renderQuickPicks(venues);
     el.grid.innerHTML="";
     venues.forEach(v=>{
       const card=document.createElement("article");card.className="venue-card";
