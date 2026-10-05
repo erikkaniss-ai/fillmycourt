@@ -18,3 +18,15 @@
 .timeline-legend span{display:flex;align-items:center;gap:6px}
 .timeline-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .legend-open{background:#edf3f8}.legend-booked{background:var(--blue)}.legend-held{background:#d8ebff}.legend-blocked{background:#f8dca6}.legend-closed{background:#eef2f6;border:1px solid #d8e0e8}
+
+.control-room-note{margin:-6px 0 16px;max-width:850px}
+.opportunity-queue{display:grid;gap:8px}
+.opportunity-item{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:13px 0;border-top:1px solid #edf2f6}
+.opportunity-main{display:flex;align-items:center;gap:12px;min-width:0}
+.opportunity-main strong,.opportunity-main small{display:block}
+.opportunity-main small{margin-top:2px;color:var(--muted);font-size:11px}
+.opportunity-rank{display:grid;place-items:center;min-width:34px;height:28px;border-radius:8px;background:var(--soft);color:#1558a6;font-size:10px;font-weight:800}
+.opportunity-value{text-align:right}
+.opportunity-value strong{display:block;font-size:14px}
+.opportunity-value span{display:inline-block;margin-top:2px;font-size:9px;font-weight:800;letter-spacing:1px;color:var(--blue)}
+@media(max-width:720px){.opportunity-item{align-items:flex-start}.opportunity-value{min-width:70px}}
