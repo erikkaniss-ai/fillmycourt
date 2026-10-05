@@ -42,8 +42,9 @@ def fill_today():
         c.execute(text("""
             insert into public.venues(id,organization_id,name,timezone,currency,address)
             values(cast(:venue as uuid),cast(:org as uuid),'Today Venue','Europe/Lisbon','EUR',
-                   '{"city":"Cascais","lat":38.6979,"lon":-9.4215}'::jsonb)
-        """), {"venue": venue_id, "org": org_id})
+                   cast(:address as jsonb))
+        """), {"venue": venue_id, "org": org_id,
+                "address": '{"city":"Cascais","lat":38.6979,"lon":-9.4215}'})
         c.execute(text("""
             insert into public.courts(id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled)
             values(cast(:court as uuid),cast(:venue as uuid),'Today Court','padel',true,'native',true)
