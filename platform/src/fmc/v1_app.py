@@ -916,13 +916,19 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
 
         @app.get("/api/availability")
         def availability(date: str, time: str, sport: str = "padel", duration: int = 90,
-                         end_time: str = "23:00", location: str = "", indoor: str = "all"):
+                         end_time: str = "23:00", location: str = "", indoor: str = "all",
+                         lat: float | None = None, lon: float | None = None,
+                         radius_km: float = Query(25, gt=0, le=200)):
             if sport not in SPORTS:
                 raise DomainError("SPORT", "Unsupported sport.", 422)
             if duration not in (30, 60, 90, 120, 150, 180, 240):
                 raise DomainError("DURATION", "Unsupported duration.", 422)
             if indoor.lower() not in ("all", "true", "false"):
                 raise DomainError("INDOOR", "Use all, true or false.", 422)
+            if (lat is None) != (lon is None):
+                raise DomainError("LOCATION_COORDS", "Provide both lat and lon.", 422)
+            if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise DomainError("LOCATION_COORDS", "Latitude/longitude are out of range.", 422)
             try:
                 datetime.strptime(date, "%Y-%m-%d")
                 sh, sm = map(int, time.split(":"))
@@ -933,8 +939,10 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     raise ValueError
             except Exception:
                 raise DomainError("DATE_TIME", "Use YYYY-MM-DD and an increasing HH:MM time range.", 422)
-            slots = db.availability(date, time, end_time, sport, duration, location, indoor, 200)
-            return {"slots": slots, "count": len(slots)}
+            slots = db.availability(date, time, end_time, sport, duration, location, indoor, 200,
+                                    lat=lat, lon=lon, radius_km=radius_km)
+            return {"slots": slots, "count": len(slots),
+                    "search": {"lat": lat, "lon": lon, "radius_km": radius_km if lat is not None else None}}
 
         @app.post("/api/holds", status_code=201)
         def hold(body: HoldIn, request: Request, idempotency_key: str | None = Header(default=None)):
