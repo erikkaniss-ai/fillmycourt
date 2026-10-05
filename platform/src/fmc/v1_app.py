@@ -730,6 +730,65 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     group by ob.court_id,ob.court_name
                     order by ob.court_name
                 """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
+                empty_windows = rows(c.execute(text("""
+                    with active_courts as (
+                      select c.id,c.name
+                      from public.courts c
+                      join public.venues v on v.id=c.venue_id
+                      where v.organization_id=cast(:org as uuid) and c.active and v.active
+                    ),
+                    buckets as (
+                      select ac.id court_id,ac.name court_name,gs starts_at,gs+interval '30 minutes' ends_at,
+                             (extract(hour from (gs at time zone :tz))::int*60
+                              + extract(minute from (gs at time zone :tz))::int) local_minute
+                      from active_courts ac
+                      cross join generate_series(:begin,:finish-interval '30 minutes',interval '30 minutes') gs
+                    ),
+                    open_buckets as (
+                      select b.*
+                      from buckets b
+                      where exists (
+                        select 1 from public.court_rates r
+                        where r.court_id=b.court_id and r.active
+                          and (r.weekday is null or r.weekday=:weekday)
+                          and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
+                      )
+                    ),
+                    free_buckets as (
+                      select ob.*,
+                             row_number() over(partition by ob.court_id order by ob.starts_at) rn
+                      from open_buckets ob
+                      where not exists (
+                        select 1 from public.bookings bk
+                        where bk.court_id=ob.court_id
+                          and bk.status in ('confirmed','pending_payment')
+                          and bk.starts_at<ob.ends_at and bk.ends_at>ob.starts_at
+                      )
+                      and not exists (
+                        select 1 from public.booking_holds h
+                        where h.court_id=ob.court_id and h.expires_at>now()
+                          and h.starts_at<ob.ends_at and h.ends_at>ob.starts_at
+                      )
+                      and not exists (
+                        select 1 from public.court_blocks bl
+                        where bl.court_id=ob.court_id
+                          and bl.starts_at<ob.ends_at and bl.ends_at>ob.starts_at
+                      )
+                    ),
+                    islands as (
+                      select fb.*,
+                             fb.starts_at - (fb.rn * interval '30 minutes') grp
+                      from free_buckets fb
+                    )
+                    select court_id::text,court_name,
+                           min(starts_at) starts_at,max(ends_at) ends_at,
+                           count(*)::int*30 duration_minutes
+                    from islands
+                    group by court_id,court_name,grp
+                    having count(*) >= 2
+                    order by duration_minutes desc,starts_at
+                    limit 30
+                """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
                 financial = one(c.execute(text("""
                     select
                       count(*) filter (where status in ('confirmed','pending_payment'))::int bookings,
@@ -764,6 +823,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         "revenue_minor": int(financial.get("revenue_minor") or 0),
                     },
                     "courts": court_rows,
+                    "empty_windows": empty_windows,
                 }
 
         @app.get("/api/fmc/{org}/calendar")
