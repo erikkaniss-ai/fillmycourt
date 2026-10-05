@@ -271,7 +271,7 @@ class V1Store:
                 ),
                 court_base as (
                   select cr.*,
-                         case when :lat is not null and :lon is not null
+                         case when cast(:lat as double precision) is not null and cast(:lon as double precision) is not null
                                    and cr.venue_lat is not null and cr.venue_lon is not null
                               then 6371.0 * 2.0 * asin(sqrt(
                                 power(sin(radians(cr.venue_lat - cast(:lat as double precision))/2.0),2)
@@ -284,10 +284,10 @@ class V1Store:
                 filtered as (
                   select * from court_base
                   where (
-                    (:lat is not null and :lon is not null
+                    (cast(:lat as double precision) is not null and cast(:lon as double precision) is not null
                      and distance_km is not null and distance_km <= :radius_km)
                     or
-                    ((:lat is null or :lon is null)
+                    ((cast(:lat as double precision) is null or cast(:lon as double precision) is null)
                      and (:location='' or lower(venue_name) like :loc or lower(address::text) like :loc))
                   )
                 ),
