@@ -134,9 +134,9 @@ def test_radius_availability_filters_geocoded_venues(store):
     with store.trusted() as c:
         c.execute(text("""
             update public.venues
-            set address='{"city":"Cascais","lat":38.6979,"lon":-9.4215}'::jsonb
+            set address=cast(:address as jsonb)
             where id=cast(:venue as uuid)
-        """), {"venue": venue})
+        """), {"venue": venue, "address": '{"city":"Cascais","lat":38.6979,"lon":-9.4215}'})
     day = datetime.now(timezone.utc).date().isoformat()
     nearby = store.availability(day, "17:00", "20:00", "padel", 90, "", "all", 50,
                                 lat=38.6979, lon=-9.4215, radius_km=5)
