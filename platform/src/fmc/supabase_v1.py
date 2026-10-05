@@ -236,7 +236,8 @@ class V1Store:
         return court, {"amount_minor": amount, "currency": rate["currency"], "duration_minutes": duration_minutes}
 
     def availability(self, date: str, start_time: str, end_time: str, sport: str,
-                     duration: int, location: str = "", indoor: str = "all", limit: int = 200):
+                     duration: int, location: str = "", indoor: str = "all", limit: int = 200,
+                     lat: float | None = None, lon: float | None = None, radius_km: float = 25):
         params = {
             "date": date,
             "time": start_time,
@@ -247,20 +248,48 @@ class V1Store:
             "loc": f"%{location.strip().lower()}%",
             "indoor": indoor.lower(),
             "limit": limit,
+            "lat": lat,
+            "lon": lon,
+            "radius_km": radius_km,
         }
         with self.trusted() as c:
             return rows(c.execute(text("""
-                with court_base as (
+                with court_raw as (
                   select c.id,c.name,c.sport,c.indoor,c.venue_id,
-                         v.name venue_name,v.timezone,v.currency,v.address,v.organization_id
+                         v.name venue_name,v.timezone,v.currency,v.address,v.organization_id,
+                         case when coalesce(v.address->>'lat','') ~ '^-?[0-9]+([.][0-9]+)?$'
+                              then (v.address->>'lat')::double precision end as venue_lat,
+                         case when coalesce(v.address->>'lon','') ~ '^-?[0-9]+([.][0-9]+)?$'
+                              then (v.address->>'lon')::double precision end as venue_lon
                   from public.courts c
                   join public.venues v on v.id=c.venue_id
                   where c.active and v.active and c.sport=:sport
                     and c.inventory_mode='native' and c.native_write_enabled
-                    and (:location='' or lower(v.name) like :loc or lower(v.address::text) like :loc)
                     and (:indoor='all'
                          or (:indoor='true' and c.indoor is true)
                          or (:indoor='false' and c.indoor is false))
+                ),
+                court_base as (
+                  select cr.*,
+                         case when :lat is not null and :lon is not null
+                                   and cr.venue_lat is not null and cr.venue_lon is not null
+                              then 6371.0 * 2.0 * asin(sqrt(
+                                power(sin(radians(cr.venue_lat - cast(:lat as double precision))/2.0),2)
+                                + cos(radians(cast(:lat as double precision))) * cos(radians(cr.venue_lat))
+                                * power(sin(radians(cr.venue_lon - cast(:lon as double precision))/2.0),2)
+                              ))
+                         end as distance_km
+                  from court_raw cr
+                ),
+                filtered as (
+                  select * from court_base
+                  where (
+                    (:lat is not null and :lon is not null
+                     and distance_km is not null and distance_km <= :radius_km)
+                    or
+                    ((:lat is null or :lon is null)
+                     and (:location='' or lower(venue_name) like :loc or lower(address::text) like :loc))
+                  )
                 ),
                 candidates as (
                   select cb.*,
@@ -269,7 +298,7 @@ class V1Store:
                          (extract(isodow from (gs at time zone cb.timezone))::int - 1) as weekday,
                          (extract(hour from (gs at time zone cb.timezone))::int * 60
                           + extract(minute from (gs at time zone cb.timezone))::int) as local_minute
-                  from court_base cb
+                  from filtered cb
                   cross join lateral generate_series(
                     (cast(:date as date) + cast(:time as time)) at time zone cb.timezone,
                     ((cast(:date as date) + cast(:end_time as time)) at time zone cb.timezone)
@@ -279,7 +308,7 @@ class V1Store:
                 )
                 select x.id::text,x.name,x.sport,x.indoor,x.venue_id::text,
                        x.venue_name,x.timezone,x.currency::text,x.address,x.organization_id::text,
-                       x.starts_at,x.ends_at,
+                       x.distance_km,x.starts_at,x.ends_at,
                        ((rate.price_minor * cast(:duration as int) + 59) / 60)::int as amount_minor,
                        cast(:duration as int) as duration_minutes
                 from candidates x
@@ -309,7 +338,7 @@ class V1Store:
                   where bl.court_id=x.id
                     and bl.starts_at<x.ends_at and bl.ends_at>x.starts_at
                 )
-                order by x.venue_name,x.name,x.starts_at
+                order by x.distance_km nulls last,x.venue_name,x.name,x.starts_at
                 limit :limit
             """), params))
 
