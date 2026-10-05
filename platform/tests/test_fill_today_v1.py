@@ -112,6 +112,18 @@ def test_fill_today_utilisation_summary(fill_today):
     assert longest["court_id"] == court_id
     assert longest["duration_minutes"] >= 120
     assert longest["starts_at"] < longest["ends_at"]
+    assert longest["bookable_60_count"] > 0
+    assert longest["bookable_90_count"] > 0
+    assert longest["min_60_amount_minor"] == 2400
+    assert longest["max_60_amount_minor"] == 2400
+    assert longest["min_90_amount_minor"] == 3600
+    assert longest["max_90_amount_minor"] == 3600
+    assert longest["best_amount_minor"] == 3600
+    assert longest["best_duration_minutes"] == 90
+    assert body["summary"]["bookable_60_starts"] >= longest["bookable_60_count"]
+    assert body["summary"]["bookable_90_starts"] >= longest["bookable_90_count"]
+    assert body["summary"]["highest_single_quote_minor"] == 3600
+    assert body["summary"]["highest_single_quote_duration_minutes"] == 90
 
 
 
@@ -190,3 +202,36 @@ def test_fill_calendar_returns_active_holds(fill_today):
     assert len(body["holds"]) == 1
     assert body["holds"][0]["court_id"] == court_id
     assert body["holds"][0]["expires_at"]
+
+
+
+def test_fill_today_opportunity_quotes_follow_rate_priority(fill_today):
+    url, store, user_id, org_id, court_id = fill_today
+    with store.trusted() as c:
+        c.execute(text("""
+            insert into public.court_rates(organization_id,court_id,weekday,start_minute,end_minute,
+                                           price_minor,currency,priority)
+            values(cast(:org as uuid),cast(:court as uuid),null,1080,1410,4000,'EUR',10)
+        """), {"org": org_id, "court": court_id})
+
+    settings = Settings(
+        origin="https://fill.test",
+        environment="test",
+        database=url,
+        supabase_url="https://example.supabase.co",
+        supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+    r = client.get(
+        f"/api/fmc/{org_id}/today",
+        params={"date": "2026-10-05"},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert r.status_code == 200, r.text
+    windows = r.json()["empty_windows"]
+    evening = next(w for w in windows if w["best_amount_minor"] == 6000)
+    assert evening["max_60_amount_minor"] == 4000
+    assert evening["max_90_amount_minor"] == 6000
+    assert evening["best_duration_minutes"] == 90
+    assert r.json()["summary"]["highest_single_quote_minor"] == 6000
