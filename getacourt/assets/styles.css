@@ -390,3 +390,17 @@ main { overflow: hidden; }
   .sort-control select{flex:1}
   .results-map{min-height:360px;height:58vh;border-radius:14px}
 }
+
+.venue-actions{display:flex;justify-content:flex-end;margin:12px 0 2px}
+.venue-detail-button{border:0;background:transparent;color:#1267e5;font:inherit;font-weight:750;padding:4px 0;cursor:pointer}
+.venue-detail-button:hover{text-decoration:underline}
+.venue-shell{max-width:760px}
+.venue-detail-title{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:12px}
+.venue-detail-title h2{margin:0 0 4px;font-size:28px;letter-spacing:-.6px}
+.venue-detail-title p,.venue-detail-title span{margin:0;color:var(--muted,#64748b);font-size:12px}
+.venue-detail-note{margin:16px 0;color:var(--muted,#64748b);font-size:12px}
+.venue-court-group{padding:16px 0;border-top:1px solid rgba(7,30,51,.09)}
+.venue-court-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px}
+.venue-court-head span{font-size:11px;color:var(--muted,#64748b)}
+.venue-slot-list{margin-top:0}
+@media(max-width:620px){.venue-detail-title{flex-direction:column}.venue-detail-title h2{font-size:24px}}
