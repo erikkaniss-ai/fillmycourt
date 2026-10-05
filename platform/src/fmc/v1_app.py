@@ -152,11 +152,11 @@ class PlayerProfileIn(BaseModel):
     marketing_consent: bool | None = None
 
 
-def create_v1_app(settings, service: str = "all"):
+def create_v1_app(settings, service: str = "all", auth_override=None):
     if service not in ("all", "core", "operations"):
         raise RuntimeError("Unknown service mode")
     db = V1Store(settings.database)
-    auth = SupabaseAuth(settings.supabase_url, settings.supabase_publishable_key)
+    auth = auth_override or SupabaseAuth(settings.supabase_url, settings.supabase_publishable_key)
     app = FastAPI(title="FillMyCourt shared platform", version="0.5.0",
                   docs_url=None, redoc_url=None, openapi_url=None)
 
