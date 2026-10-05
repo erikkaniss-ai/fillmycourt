@@ -2,7 +2,8 @@
   const q = (s, r = document) => r.querySelector(s);
   const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
   const state = {
-    sport:"padel", venues:[], filter:"all", selected:null, hold:null, timer:null,
+    sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
+    selected:null, hold:null, timer:null, map:null, mapLayer:null,
     platform:{ bookingEnabled:false, authConfigured:false }, session:null, profile:null, geo:null
   };
 
@@ -20,7 +21,9 @@
     profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
     profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
-    nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote")
+    nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote"),
+    sortSelect:q("#sortSelect"), listView:q("#listViewButton"), mapView:q("#mapViewButton"),
+    resultsMap:q("#resultsMap")
   };
 
   const now = new Date();
@@ -157,8 +160,70 @@
     return slots;
   }
   function visible(v){return filteredSlots(v).length>0;}
+  function earliest(v){
+    const slots=filteredSlots(v);
+    return slots.length ? Math.min(...slots.map(s=>new Date(s.startsAt).getTime())) : Number.POSITIVE_INFINITY;
+  }
+  function lowestPrice(v){
+    const slots=filteredSlots(v);
+    return slots.length ? Math.min(...slots.map(s=>Number(s.price))) : Number.POSITIVE_INFINITY;
+  }
+  function sortedVenues(){
+    const venues=state.venues.filter(visible).slice();
+    if(state.sort==="distance"){
+      venues.sort((a,b)=>(a.distanceKm??Number.POSITIVE_INFINITY)-(b.distanceKm??Number.POSITIVE_INFINITY)||earliest(a)-earliest(b));
+    }else if(state.sort==="time"){
+      venues.sort((a,b)=>earliest(a)-earliest(b)||(a.distanceKm??9999)-(b.distanceKm??9999));
+    }else if(state.sort==="price"){
+      venues.sort((a,b)=>lowestPrice(a)-lowestPrice(b)||earliest(a)-earliest(b));
+    }else{
+      const score=v=>(v.distanceKm==null?1000:v.distanceKm*10)+earliest(v)/3600000+lowestPrice(v)/20;
+      venues.sort((a,b)=>score(a)-score(b));
+    }
+    return venues;
+  }
+  function updateView(){
+    const mapMode=state.view==="map";
+    el.grid.hidden=mapMode;
+    el.resultsMap.hidden=!mapMode;
+    el.listView?.classList.toggle("active",!mapMode);
+    el.mapView?.classList.toggle("active",mapMode);
+    el.listView?.setAttribute("aria-pressed",String(!mapMode));
+    el.mapView?.setAttribute("aria-pressed",String(mapMode));
+    if(mapMode) requestAnimationFrame(renderMap);
+  }
+  function renderMap(){
+    if(!el.resultsMap||!window.L) return;
+    const venues=sortedVenues().filter(v=>Number.isFinite(v.lat)&&Number.isFinite(v.lon));
+    if(!venues.length){
+      state.view="list";
+      updateView();
+      toast("Map view is available when venue coordinates are connected.");
+      return;
+    }
+    if(!state.map){
+      state.map=L.map(el.resultsMap,{zoomControl:true,scrollWheelZoom:false});
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+        maxZoom:19,
+        attribution:"&copy; OpenStreetMap contributors"
+      }).addTo(state.map);
+      state.mapLayer=L.layerGroup().addTo(state.map);
+    }
+    state.mapLayer.clearLayers();
+    const bounds=[];
+    venues.forEach(v=>{
+      bounds.push([v.lat,v.lon]);
+      const slots=filteredSlots(v).slice(0,3);
+      const distance=v.distanceKm==null?"":(" · "+Number(v.distanceKm).toFixed(1)+" km");
+      const popup='<div class="map-popup"><strong>'+esc(v.name)+'</strong><small>'+esc(v.area||"")+"'+distance+'</small>'+
+        slots.map(s=>'<button type="button" class="map-slot" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'">'+esc(s.time)+' · '+esc(s.duration)+' min · '+money(s.price,s.currency)+'</button>').join("")+'</div>';
+      L.marker([v.lat,v.lon]).addTo(state.mapLayer).bindPopup(popup);
+    });
+    state.map.fitBounds(bounds,{padding:[28,28],maxZoom:14});
+    setTimeout(()=>state.map.invalidateSize(),0);
+  }
   function render(){
-    const venues=state.venues.filter(visible);
+    const venues=sortedVenues();
     const n=venues.reduce((a,v)=>a+filteredSlots(v).length,0);
     el.count.textContent=n+" available slot"+(n===1?"":"s")+" · "+venues.length+" venue"+(venues.length===1?"":"s");
     if(!venues.length){
@@ -180,6 +245,7 @@
       el.grid.appendChild(card);
     });
     qa(".slot",el.grid).forEach(b=>b.addEventListener("click",()=>selectSlot(b.dataset.v,b.dataset.s)));
+    updateView();
   }
 
   async function requireSignedIn(){
@@ -338,6 +404,13 @@
   qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{qa(".filter-pill").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.filter=b.dataset.filter;render();}));
   el.form.addEventListener("submit",e=>{e.preventDefault();search();});
   el.refresh.addEventListener("click",search);
+  el.sortSelect?.addEventListener("change",()=>{state.sort=el.sortSelect.value;render();});
+  el.listView?.addEventListener("click",()=>{state.view="list";updateView();});
+  el.mapView?.addEventListener("click",()=>{state.view="map";updateView();});
+  el.resultsMap?.addEventListener("click",e=>{
+    const b=e.target.closest(".map-slot");
+    if(b) selectSlot(b.dataset.v,b.dataset.s);
+  });
   el.nearMe?.addEventListener("click",useCurrentLocation);
   el.location.addEventListener("input",()=>{if(el.location.value!=="Current location"){state.geo=null;if(el.radiusNote)el.radiusNote.textContent="";}});
   el.bookingForm.addEventListener("submit",confirm);
