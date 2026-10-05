@@ -4,7 +4,7 @@
   const state = {
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
-    platform:{ bookingEnabled:false, authConfigured:false }, session:null, profile:null, geo:null
+    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, onlinePayments:false }, session:null, profile:null, geo:null
   };
 
   const el = {
@@ -17,14 +17,16 @@
     bookingsList:q("#bookingsList"), myBookings:q("#myBookingsButton"),
     closeBookings:q("#closeBookingsButton"), toast:q("#toast"),
     authButton:q("#authButton"), authDialog:q("#authDialog"), authForm:q("#authForm"),
-    authEmail:q("#authEmail"), authStatus:q("#authStatus"), closeAuth:q("#closeAuthButton"),
+    authEmail:q("#authEmail"), authStatus:q("#authStatus"), authSubmit:q("#authSubmitButton"), closeAuth:q("#closeAuthButton"),
     profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
     profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
     nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote"),
     sortSelect:q("#sortSelect"), listView:q("#listViewButton"), mapView:q("#mapViewButton"),
     resultsMap:q("#resultsMap"), quickPicks:q("#quickPicks"), venueDialog:q("#venueDialog"),
-    venueDialogContent:q("#venueDialogContent"), closeVenue:q("#closeVenueButton")
+    venueDialogContent:q("#venueDialogContent"), closeVenue:q("#closeVenueButton"),
+    bookingIdentityLabel:q("#bookingIdentityLabel"), bookingIdentityNote:q("#bookingIdentityNote"),
+    bookingIdentityAction:q("#bookingIdentityAction"), bookingPaymentStatus:q("#bookingPaymentStatus")
   };
 
   const now = new Date();
@@ -85,6 +87,32 @@
     const label=state.profile?.full_name||email;
     el.authButton.textContent=label ? label : "Sign in";
     el.authButton.title=label ? "Signed in · open player profile" : "Sign in";
+    renderBookingIdentity();
+  }
+
+  function renderBookingIdentity(){
+    if(!el.bookingIdentityLabel||!el.bookingIdentityNote||!el.bookingIdentityAction) return;
+    const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
+    const email=payload.email||"";
+    if(state.session?.accessToken){
+      el.bookingIdentityLabel.textContent=state.profile?.full_name||email||"Signed in";
+      el.bookingIdentityNote.textContent=state.profile
+        ? ((email?email+" · ":"")+"player profile ready")
+        : ((email?email+" · ":"")+"complete your player profile before live booking");
+      el.bookingIdentityAction.textContent=state.profile?"Edit profile":"Complete profile";
+      el.bookingIdentityAction.disabled=false;
+      return;
+    }
+    el.bookingIdentityLabel.textContent="Not signed in";
+    if(state.platform.emailSignInEnabled){
+      el.bookingIdentityNote.textContent="Sign in before a live court hold can be created.";
+      el.bookingIdentityAction.textContent="Sign in";
+      el.bookingIdentityAction.disabled=false;
+    }else{
+      el.bookingIdentityNote.textContent="Email sign-in delivery is not enabled in this staging environment.";
+      el.bookingIdentityAction.textContent="Sign-in pending";
+      el.bookingIdentityAction.disabled=true;
+    }
   }
 
   async function api(path,options={},auth=false){
@@ -106,9 +134,11 @@
 
   async function loadPlatform(){
     try{state.platform=await api("/api/gac/platform-config");}
-    catch{state.platform={bookingEnabled:false,authConfigured:false};}
+    catch{state.platform={bookingEnabled:false,authConfigured:false,emailSignInEnabled:false,onlinePayments:false};}
     const strip=q("#previewStrip");
-    if(strip) strip.textContent="Staging environment · "+(state.platform.bookingEnabled?"native booking enabled":"bookings disabled");
+    if(strip) strip.textContent="Staging environment · "+(state.platform.bookingEnabled?"native booking enabled":"bookings disabled")+(state.platform.emailSignInEnabled?"":" · email sign-in pending");
+    if(el.bookingPaymentStatus) el.bookingPaymentStatus.textContent=state.platform.onlinePayments?"Online payment enabled":"Online payments disabled in staging";
+    renderBookingIdentity();
   }
 
   function loading(){el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
@@ -319,6 +349,7 @@
     const button=q("#confirmBookingButton");
     button.onclick=null;
     el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
+    renderBookingIdentity();
     if(!state.platform.bookingEnabled){
       q("#bookingHeading").textContent="Booking preview";
       el.summary.innerHTML+="<span>Preview only · no hold, club CRM record or payment will be created.</span>";
@@ -454,13 +485,26 @@
   }
 
   function openAuth(message=""){
-    if(message) el.authStatus.textContent=message;
+    const enabled=state.platform.emailSignInEnabled===true;
+    if(el.authSubmit) el.authSubmit.disabled=!enabled;
+    el.authEmail.disabled=!enabled;
+    if(!enabled){
+      el.authStatus.textContent="Email sign-in delivery is not enabled in this staging environment.";
+    }else if(message){
+      el.authStatus.textContent=message;
+    }else{
+      el.authStatus.textContent="Use a secure email link to sign in to GetACourt.";
+    }
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
     if(payload.email) el.authEmail.value=payload.email;
     el.authDialog.showModal();
   }
   async function sendMagicLink(e){
     e.preventDefault();
+    if(!state.platform.emailSignInEnabled){
+      el.authStatus.textContent="Email sign-in delivery is not enabled in this staging environment.";
+      return;
+    }
     const email=el.authEmail.value.trim().toLowerCase();if(!email)return;
     el.authStatus.textContent="Sending secure sign-in link…";
     try{
@@ -487,6 +531,7 @@
   el.myBookings.addEventListener("click",loadBookings);
   el.closeBookings.addEventListener("click",()=>el.bookingsDialog.close());
   el.authButton.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth(""));
+  el.bookingIdentityAction?.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth("Sign in before live booking."));
   el.authForm.addEventListener("submit",sendMagicLink);
   el.closeAuth.addEventListener("click",()=>el.authDialog.close());
   el.profileForm.addEventListener("submit",saveProfile);

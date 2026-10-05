@@ -185,6 +185,22 @@
         Court held for <strong id="holdCountdown">08:00</strong>
       </div>
 
+      <div class="booking-account-card">
+        <div>
+          <span>PLAYER ACCOUNT</span>
+          <strong id="bookingIdentityLabel">Not signed in</strong>
+          <small id="bookingIdentityNote">A player account is required before live booking.</small>
+        </div>
+        <button class="ghost-button booking-account-action" id="bookingIdentityAction" type="button">Sign in</button>
+      </div>
+
+      <div class="booking-policy-card">
+        <strong>Before confirmation</strong>
+        <div><span>Final price</span><b>Authoritative Core quote</b></div>
+        <div><span>Cancellation</span><b>Venue policy shown before confirmation</b></div>
+        <div><span>Payment</span><b id="bookingPaymentStatus">Online payments disabled in staging</b></div>
+      </div>
+
       <p class="checkout-section-label">Player details</p>
       <div class="checkout-grid">
         <label class="field"><span>Name</span><input id="nameInput" name="name" autocomplete="name" required placeholder="Your name" /></label>
@@ -217,9 +233,9 @@
       <button class="dialog-close" id="closeAuthButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER ACCOUNT</p>
       <h2>Sign in to GetACourt</h2>
-      <p class="payment-note" id="authStatus">Use a secure email link. Google and Apple sign-in will be enabled after provider credentials are configured.</p>
+      <p class="payment-note" id="authStatus">Email sign-in is available only when staging mail delivery is explicitly enabled.</p>
       <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
-      <button class="confirm-button" type="submit">Continue with email</button>
+      <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
     </form>
   </dialog>
 
