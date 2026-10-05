@@ -308,7 +308,7 @@ class V1Store:
                 )
                 select x.id::text,x.name,x.sport,x.indoor,x.venue_id::text,
                        x.venue_name,x.timezone,x.currency::text,x.address,x.organization_id::text,
-                       x.distance_km,x.starts_at,x.ends_at,
+                       x.venue_lat,x.venue_lon,x.distance_km,x.starts_at,x.ends_at,
                        ((rate.price_minor * cast(:duration as int) + 59) / 60)::int as amount_minor,
                        cast(:duration as int) as duration_minutes
                 from candidates x
