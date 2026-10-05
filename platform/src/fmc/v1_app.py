@@ -730,6 +730,49 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     group by ob.court_id,ob.court_name
                     order by ob.court_name
                 """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
+                sellable_windows = rows(c.execute(text("""
+                    with active_courts as (
+                      select c.id,c.name
+                      from public.courts c
+                      join public.venues v on v.id=c.venue_id
+                      where v.organization_id=cast(:org as uuid) and c.active and v.active
+                    ),
+                    buckets as (
+                      select ac.id court_id,ac.name court_name,gs starts_at,gs+interval '30 minutes' ends_at,
+                             (extract(hour from (gs at time zone :tz))::int*60
+                              + extract(minute from (gs at time zone :tz))::int) local_minute
+                      from active_courts ac
+                      cross join generate_series(:begin,:finish-interval '30 minutes',interval '30 minutes') gs
+                    ),
+                    open_buckets as (
+                      select b.*
+                      from buckets b
+                      where exists (
+                        select 1 from public.court_rates r
+                        where r.court_id=b.court_id and r.active
+                          and (r.weekday is null or r.weekday=:weekday)
+                          and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
+                      )
+                    ),
+                    numbered as (
+                      select ob.*,row_number() over(partition by ob.court_id order by ob.starts_at) rn
+                      from open_buckets ob
+                    ),
+                    islands as (
+                      select n.*,n.starts_at-(n.rn*interval '30 minutes') grp
+                      from numbered n
+                    )
+                    select court_id::text,court_name,
+                           min(starts_at) starts_at,max(ends_at) ends_at,
+                           min(local_minute)::int start_minute,
+                           (max(local_minute)+30)::int end_minute
+                    from islands
+                    group by court_id,court_name,grp
+                    order by court_name,starts_at
+                """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
+                windows_by_court = {}
+                for window in sellable_windows:
+                    windows_by_court.setdefault(window["court_id"], []).append(window)
                 empty_windows = rows(c.execute(text("""
                     with active_courts as (
                       select c.id,c.name
@@ -803,12 +846,15 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 held = sum(int(x["held_minutes"] or 0) for x in court_rows)
                 blocked = sum(int(x["blocked_minutes"] or 0) for x in court_rows)
                 for x in court_rows:
+                    x["sellable_windows"] = windows_by_court.get(x["court_id"], [])
                     cap = int(x["capacity_minutes"] or 0)
                     used = int(x["booked_minutes"] or 0)
                     x["utilization_pct"] = round((used / cap * 100) if cap else 0, 1)
                     x["empty_minutes"] = max(0, cap - used - int(x["held_minutes"] or 0) - int(x["blocked_minutes"] or 0))
                 return {
                     "date": date,
+                    "day_start": begin.isoformat(),
+                    "day_end": finish.isoformat(),
                     "timezone": orgrow["timezone"],
                     "currency": orgrow["currency"],
                     "summary": {

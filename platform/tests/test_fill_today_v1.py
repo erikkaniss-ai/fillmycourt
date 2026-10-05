@@ -93,6 +93,8 @@ def test_fill_today_utilisation_summary(fill_today):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["timezone"] == "Europe/Lisbon"
+    assert body["day_start"].startswith("2026-10-05T00:00:00")
+    assert body["day_end"].startswith("2026-10-06T00:00:00")
     assert body["summary"]["capacity_minutes"] == 1050
     assert body["summary"]["booked_minutes"] == 90
     assert body["summary"]["blocked_minutes"] == 60
@@ -103,9 +105,47 @@ def test_fill_today_utilisation_summary(fill_today):
     assert body["courts"][0]["court_id"] == court_id
     assert body["courts"][0]["open_start_minute"] == 360
     assert body["courts"][0]["open_end_minute"] == 1410
+    assert [(w["start_minute"], w["end_minute"]) for w in body["courts"][0]["sellable_windows"]] == [(360, 1410)]
     assert body["courts"][0]["utilization_pct"] == pytest.approx(8.6, abs=0.1)
     assert body["empty_windows"]
     longest = body["empty_windows"][0]
     assert longest["court_id"] == court_id
     assert longest["duration_minutes"] >= 120
     assert longest["starts_at"] < longest["ends_at"]
+
+
+
+def test_fill_today_preserves_split_sellable_windows(fill_today):
+    url, store, user_id, org_id, court_id = fill_today
+    with store.trusted() as c:
+        c.execute(text("""
+            update public.court_rates
+            set end_minute=720
+            where court_id=cast(:court as uuid)
+        """), {"court": court_id})
+        c.execute(text("""
+            insert into public.court_rates(organization_id,court_id,weekday,start_minute,end_minute,
+                                           price_minor,currency,priority)
+            values(cast(:org as uuid),cast(:court as uuid),null,780,1410,2400,'EUR',100)
+        """), {"org": org_id, "court": court_id})
+
+    settings = Settings(
+        origin="https://fill.test",
+        environment="test",
+        database=url,
+        supabase_url="https://example.supabase.co",
+        supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+    r = client.get(
+        f"/api/fmc/{org_id}/today",
+        params={"date": "2026-10-05"},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert r.status_code == 200, r.text
+    court = r.json()["courts"][0]
+    assert [(w["start_minute"], w["end_minute"]) for w in court["sellable_windows"]] == [
+        (360, 720),
+        (780, 1410),
+    ]
