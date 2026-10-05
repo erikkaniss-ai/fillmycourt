@@ -45,6 +45,8 @@ function normalize(payloads) {
       }
       const venue = byVenue.get(venueId);
       if (slot.distance_km != null) venue.distanceKm = Number(slot.distance_km);
+      if (slot.venue_lat != null) venue.lat = Number(slot.venue_lat);
+      if (slot.venue_lon != null) venue.lon = Number(slot.venue_lon);
       const courtTag = slot.name || "Court";
       if (!venue.tags.includes(courtTag)) venue.tags.push(courtTag);
       const start = new Date(slot.starts_at);
