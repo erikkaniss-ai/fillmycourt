@@ -302,11 +302,20 @@
   function setCheckoutEnabled(enabled){
     qa("input",el.bookingForm).forEach(x=>x.disabled=!enabled);
   }
+  function setBookingStep(step){
+    const order=["court","player","confirm"],active=Math.max(0,order.indexOf(step));
+    qa("[data-booking-step]",el.dialog).forEach(node=>{
+      const i=order.indexOf(node.dataset.bookingStep);
+      node.classList.toggle("active",i===active);
+      node.classList.toggle("done",i<active||step==="done");
+      node.classList.toggle("locked",i>active&&step!=="done");
+    });
+  }
   async function selectSlot(venueId,slotId){
     const venue=state.venues.find(v=>v.id===venueId);
     const slot=venue&&venue.slots.find(s=>s.id===slotId);
     if(!venue||!slot) return;
-    state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="12%";
+    state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="18%";setBookingStep("court");
     const button=q("#confirmBookingButton");
     button.onclick=null;
     el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
@@ -331,7 +340,7 @@
     const s=state.selected.slot;
     try{
       state.hold=await api("/api/gac/hold",{method:"POST",headers:{"content-type":"application/json","idempotency-key":uid()},body:JSON.stringify({courtId:s.courtId,startsAt:s.startsAt,duration:s.duration})},true);
-      el.holdBanner.hidden=false;el.progress.style.width="52%";countdown(state.hold.expiresAt);
+      el.holdBanner.hidden=false;el.progress.style.width="55%";setBookingStep("player");countdown(state.hold.expiresAt);
     }catch(err){toast(err.message||"Could not hold this court.");el.dialog.close();reset();}
   }
   function countdown(expiresAt){
@@ -344,15 +353,16 @@
     const name=el.name.value.trim(),email=el.email.value.trim().toLowerCase();if(!name||!email)return;
     localStorage.setItem("gac.name",name);localStorage.setItem("gac.email",email);
     try{
+      setBookingStep("confirm");el.progress.style.width="82%";
       const booking=await api("/api/gac/book",{method:"POST",headers:{"content-type":"application/json","idempotency-key":uid()},body:JSON.stringify({holdId:state.hold.holdId,participants:1,acceptPolicy:q("#termsInput").checked})},true);
-      clearInterval(state.timer);el.progress.style.width="100%";el.holdBanner.hidden=true;
+      clearInterval(state.timer);el.progress.style.width="100%";setBookingStep("done");el.holdBanner.hidden=true;
       el.summary.innerHTML="<strong>Booked · "+esc(booking.reference||booking.bookingId)+"</strong><span>"+esc(state.selected.venue.name)+" · "+prettyDate(state.selected.slot.date)+" · "+esc(state.selected.slot.time)+"</span>";
       q("#bookingHeading").textContent="You’re on court.";
       const done=q("#confirmBookingButton");done.textContent="Done";done.type="button";done.onclick=()=>{el.dialog.close();reset();search();};
       toast("Booking confirmed.");
-    }catch(err){toast(err.message||"Could not confirm booking.");}
+    }catch(err){setBookingStep("player");el.progress.style.width="55%";toast(err.message||"Could not confirm booking.");}
   }
-  function reset(){state.selected=null;state.hold=null;el.progress.style.width="12%";setCheckoutEnabled(true);const button=q("#confirmBookingButton");button.disabled=false;button.type="submit";button.textContent="Confirm booking";button.onclick=null;}
+  function reset(){state.selected=null;state.hold=null;el.progress.style.width="18%";setBookingStep("court");setCheckoutEnabled(true);const button=q("#confirmBookingButton");button.disabled=false;button.type="submit";button.textContent="Confirm booking";button.onclick=null;}
   async function loadBookings(){
     if(!(await requireSignedIn())) return;
     try{

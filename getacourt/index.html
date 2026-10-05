@@ -175,21 +175,28 @@
       <div class="dialog-progress"><span id="dialogProgress"></span></div>
       <p class="eyebrow">BOOKING</p>
       <h2 id="bookingHeading">Hold this court</h2>
+      <div class="checkout-steps" aria-label="Booking steps">
+        <div class="checkout-step active" data-booking-step="court"><span>1</span><b>Court</b><small>Review slot</small></div>
+        <div class="checkout-step" data-booking-step="player"><span>2</span><b>Player</b><small>Identity & details</small></div>
+        <div class="checkout-step" data-booking-step="confirm"><span>3</span><b>Confirm</b><small>Terms & payment</small></div>
+      </div>
       <div id="bookingSummary" class="booking-summary"></div>
       <div class="hold-banner" id="holdBanner" hidden>
         Court held for <strong id="holdCountdown">08:00</strong>
       </div>
 
-      <fieldset class="pay-options">
-        <legend>Payment</legend>
-        <label><input type="radio" name="paymentMode" value="full" checked /> <span><b>Pay full court</b><small>Fastest. Invite players after booking.</small></span></label>
-        <label><input type="radio" name="paymentMode" value="split" /> <span><b>Split with players</b><small>Booking owner guarantees the remaining balance.</small></span></label>
-      </fieldset>
-
+      <p class="checkout-section-label">Player details</p>
       <div class="checkout-grid">
         <label class="field"><span>Name</span><input id="nameInput" name="name" autocomplete="name" required placeholder="Your name" /></label>
         <label class="field"><span>Email</span><input id="emailInput" name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
       </div>
+
+      <fieldset class="pay-options">
+        <legend>Payment preference</legend>
+        <label><input type="radio" name="paymentMode" value="full" checked /> <span><b>Pay full court</b><small>Fastest. Invite players after booking.</small></span></label>
+        <label><input type="radio" name="paymentMode" value="split" /> <span><b>Split with players</b><small>Booking owner guarantees the remaining balance.</small></span></label>
+      </fieldset>
+
       <label class="consent"><input type="checkbox" id="termsInput" required /> <span>I accept the venue cancellation policy and GetACourt booking terms.</span></label>
       <button class="confirm-button" id="confirmBookingButton" type="submit">Confirm booking</button>
       <p class="payment-note">Online payments are disabled in staging. GetACourt does not store raw card data.</p>
