@@ -707,6 +707,8 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                       )
                     )
                     select ob.court_id::text,ob.court_name,
+                           min(ob.local_minute)::int open_start_minute,
+                           (max(ob.local_minute)+30)::int open_end_minute,
                            count(*)::int*30 capacity_minutes,
                            count(*) filter (where exists (
                              select 1 from public.bookings bk
