@@ -661,6 +661,107 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                       before=court, after={"native_write_enabled":False})
                 return {"id": court_id, "native_write_enabled": False}
 
+        @app.get("/api/fmc/{org}/today")
+        def today(org: str, request: Request, date: str):
+            a = who(request)
+            try:
+                day = datetime.strptime(date, "%Y-%m-%d").date()
+            except Exception:
+                raise DomainError("DATE", "Use YYYY-MM-DD.", 422)
+            with db.user(a.id) as c:
+                role(c, org, a)
+                orgrow = one(c.execute(text("""
+                    select timezone,default_currency::text currency
+                    from public.organizations where id=cast(:org as uuid)
+                """), {"org": org}))
+                if not orgrow:
+                    raise DomainError("ORG_NOT_FOUND", "Organization not found.", 404)
+                tz = ZoneInfo(orgrow["timezone"])
+                begin = datetime(day.year, day.month, day.day, tzinfo=tz)
+                finish = begin + timedelta(days=1)
+                weekday = day.weekday()
+                court_rows = rows(c.execute(text("""
+                    with active_courts as (
+                      select c.id,c.name
+                      from public.courts c
+                      join public.venues v on v.id=c.venue_id
+                      where v.organization_id=cast(:org as uuid) and c.active and v.active
+                    ),
+                    buckets as (
+                      select ac.id court_id,ac.name court_name,gs starts_at,gs+interval '30 minutes' ends_at,
+                             (extract(hour from (gs at time zone :tz))::int*60
+                              + extract(minute from (gs at time zone :tz))::int) local_minute
+                      from active_courts ac
+                      cross join generate_series(:begin,:finish-interval '30 minutes',interval '30 minutes') gs
+                    ),
+                    open_buckets as (
+                      select b.*
+                      from buckets b
+                      where exists (
+                        select 1 from public.court_rates r
+                        where r.court_id=b.court_id and r.active
+                          and (r.weekday is null or r.weekday=:weekday)
+                          and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
+                      )
+                    )
+                    select ob.court_id::text,ob.court_name,
+                           count(*)::int*30 capacity_minutes,
+                           count(*) filter (where exists (
+                             select 1 from public.bookings bk
+                             where bk.court_id=ob.court_id
+                               and bk.status in ('confirmed','pending_payment')
+                               and bk.starts_at<ob.ends_at and bk.ends_at>ob.starts_at
+                           ))::int*30 booked_minutes,
+                           count(*) filter (where exists (
+                             select 1 from public.booking_holds h
+                             where h.court_id=ob.court_id and h.expires_at>now()
+                               and h.starts_at<ob.ends_at and h.ends_at>ob.starts_at
+                           ))::int*30 held_minutes,
+                           count(*) filter (where exists (
+                             select 1 from public.court_blocks bl
+                             where bl.court_id=ob.court_id
+                               and bl.starts_at<ob.ends_at and bl.ends_at>ob.starts_at
+                           ))::int*30 blocked_minutes
+                    from open_buckets ob
+                    group by ob.court_id,ob.court_name
+                    order by ob.court_name
+                """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
+                financial = one(c.execute(text("""
+                    select
+                      count(*) filter (where status in ('confirmed','pending_payment'))::int bookings,
+                      count(*) filter (where status='cancelled')::int cancellations,
+                      coalesce(sum(gross_amount_minor) filter (where status in ('confirmed','pending_payment')),0)::int revenue_minor
+                    from public.bookings
+                    where organization_id=cast(:org as uuid)
+                      and starts_at>=:begin and starts_at<:finish
+                """), {"org": org, "begin": begin, "finish": finish})) or {}
+                capacity = sum(int(x["capacity_minutes"] or 0) for x in court_rows)
+                booked = sum(int(x["booked_minutes"] or 0) for x in court_rows)
+                held = sum(int(x["held_minutes"] or 0) for x in court_rows)
+                blocked = sum(int(x["blocked_minutes"] or 0) for x in court_rows)
+                for x in court_rows:
+                    cap = int(x["capacity_minutes"] or 0)
+                    used = int(x["booked_minutes"] or 0)
+                    x["utilization_pct"] = round((used / cap * 100) if cap else 0, 1)
+                    x["empty_minutes"] = max(0, cap - used - int(x["held_minutes"] or 0) - int(x["blocked_minutes"] or 0))
+                return {
+                    "date": date,
+                    "timezone": orgrow["timezone"],
+                    "currency": orgrow["currency"],
+                    "summary": {
+                        "capacity_minutes": capacity,
+                        "booked_minutes": booked,
+                        "held_minutes": held,
+                        "blocked_minutes": blocked,
+                        "empty_minutes": max(0, capacity - booked - held - blocked),
+                        "utilization_pct": round((booked / capacity * 100) if capacity else 0, 1),
+                        "bookings": int(financial.get("bookings") or 0),
+                        "cancellations": int(financial.get("cancellations") or 0),
+                        "revenue_minor": int(financial.get("revenue_minor") or 0),
+                    },
+                    "courts": court_rows,
+                }
+
         @app.get("/api/fmc/{org}/calendar")
         def calendar(org: str, request: Request, start: str, end: str):
             a = who(request)
