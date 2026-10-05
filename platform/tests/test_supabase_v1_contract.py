@@ -127,3 +127,24 @@ def test_set_based_availability_returns_priced_slots(store):
     match = next(s for s in slots if s["id"] == court)
     assert match["amount_minor"] == 3000
     assert match["duration_minutes"] == 90
+
+
+def test_radius_availability_filters_geocoded_venues(store):
+    owner, outsider, org, venue, court = seed(store)
+    with store.trusted() as c:
+        c.execute(text("""
+            update public.venues
+            set address='{"city":"Cascais","lat":38.6979,"lon":-9.4215}'::jsonb
+            where id=cast(:venue as uuid)
+        """), {"venue": venue})
+    day = datetime.now(timezone.utc).date().isoformat()
+    nearby = store.availability(day, "17:00", "20:00", "padel", 90, "", "all", 50,
+                                lat=38.6979, lon=-9.4215, radius_km=5)
+    assert any(s["id"] == court for s in nearby)
+    slot = next(s for s in nearby if s["id"] == court)
+    assert slot["distance_km"] is not None
+    assert float(slot["distance_km"]) < 0.1
+
+    far = store.availability(day, "17:00", "20:00", "padel", 90, "", "all", 50,
+                             lat=38.7223, lon=-9.1393, radius_km=5)
+    assert not any(s["id"] == court for s in far)
