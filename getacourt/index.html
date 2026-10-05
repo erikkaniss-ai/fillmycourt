@@ -51,7 +51,11 @@
         <div class="search-grid">
           <label class="field field-location">
             <span>Where</span>
-            <input id="locationInput" name="location" value="Cascais" autocomplete="address-level2" placeholder="City, area or club" />
+            <div class="location-entry">
+              <input id="locationInput" name="location" value="Cascais" autocomplete="address-level2" placeholder="City, area or club" />
+              <button id="nearMeButton" class="near-me-button" type="button" aria-label="Use my current location">◎ Near me</button>
+            </div>
+            <small id="radiusNote" class="radius-note"></small>
           </label>
           <label class="field">
             <span>Date</span>
