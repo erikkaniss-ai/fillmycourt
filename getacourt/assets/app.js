@@ -215,7 +215,7 @@
       bounds.push([v.lat,v.lon]);
       const slots=filteredSlots(v).slice(0,3);
       const distance=v.distanceKm==null?"":(" · "+Number(v.distanceKm).toFixed(1)+" km");
-      const popup='<div class="map-popup"><strong>'+esc(v.name)+'</strong><small>'+esc(v.area||"")+"'+distance+'</small>'+
+      const popup='<div class="map-popup"><strong>'+esc(v.name)+'</strong><small>'+esc(v.area||"")+distance+'</small>'+
         slots.map(s=>'<button type="button" class="map-slot" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'">'+esc(s.time)+' · '+esc(s.duration)+' min · '+money(s.price,s.currency)+'</button>').join("")+'</div>';
       L.marker([v.lat,v.lon]).addTo(state.mapLayer).bindPopup(popup);
     });
