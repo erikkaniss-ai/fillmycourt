@@ -23,7 +23,8 @@
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
     nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote"),
     sortSelect:q("#sortSelect"), listView:q("#listViewButton"), mapView:q("#mapViewButton"),
-    resultsMap:q("#resultsMap")
+    resultsMap:q("#resultsMap"), venueDialog:q("#venueDialog"), venueDialogContent:q("#venueDialogContent"),
+    closeVenue:q("#closeVenueButton")
   };
 
   const now = new Date();
@@ -241,11 +242,36 @@
       const distance=v.distanceKm==null?"":'<span class="distance">'+Number(v.distanceKm).toFixed(1)+' km</span>';
       card.innerHTML='<div class="venue-top"><div><div class="venue-kicker">'+esc(v.area||"Connected venue")+' · '+esc(v.sport||state.sport)+'</div>'+
         '<h3>'+esc(v.name)+'</h3><div class="venue-tags">'+tags+'</div></div>'+distance+'</div>'+
+        '<div class="venue-actions"><button class="venue-detail-button" type="button" data-venue="'+esc(v.id)+'">View venue</button></div>'+
         '<div class="slot-list">'+slots+'</div><p class="venue-source">Availability source: '+esc(v.source||"FillMyCourt booking core")+'</p>';
       el.grid.appendChild(card);
     });
     qa(".slot",el.grid).forEach(b=>b.addEventListener("click",()=>selectSlot(b.dataset.v,b.dataset.s)));
+    qa(".venue-detail-button",el.grid).forEach(b=>b.addEventListener("click",()=>openVenue(b.dataset.venue)));
     updateView();
+  }
+
+  function openVenue(venueId){
+    const v=state.venues.find(x=>x.id===venueId);
+    if(!v||!el.venueDialog) return;
+    const slots=filteredSlots(v);
+    const byCourt=new Map();
+    slots.forEach(s=>{
+      if(!byCourt.has(s.courtName)) byCourt.set(s.courtName,[]);
+      byCourt.get(s.courtName).push(s);
+    });
+    const distance=v.distanceKm==null?"":'<span>'+Number(v.distanceKm).toFixed(1)+' km away</span>';
+    const groups=[...byCourt.entries()].map(([court,items])=>{
+      const ordered=items.slice().sort((a,b)=>a.startsAt.localeCompare(b.startsAt)||a.duration-b.duration);
+      return '<section class="venue-court-group"><div class="venue-court-head"><strong>'+esc(court)+'</strong><span>'+esc(ordered[0]?.indoor?"Indoor":"Outdoor")+'</span></div>'+
+        '<div class="slot-list venue-slot-list">'+ordered.map(s=>'<button class="slot venue-dialog-slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'"><strong>'+esc(s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>').join("")+'</div></section>';
+    }).join("");
+    el.venueDialogContent.innerHTML='<p class="eyebrow">VENUE</p><div class="venue-detail-title"><div><h2>'+esc(v.name)+'</h2><p>'+esc(v.area||"")+'</p></div>'+distance+'</div>'+
+      '<div class="venue-tags">'+(v.tags||[]).map(t=>'<span>'+esc(t)+'</span>').join("")+'</div>'+
+      '<p class="venue-detail-note">Showing live slots from the shared FillMyCourt booking core. Final price and cancellation rules are confirmed before booking.</p>'+
+      (groups||'<div class="empty-state"><h3>No matching live slots</h3></div>');
+    el.venueDialog.showModal();
+    qa(".venue-dialog-slot",el.venueDialogContent).forEach(b=>b.addEventListener("click",()=>{el.venueDialog.close();selectSlot(b.dataset.v,b.dataset.s);}));
   }
 
   async function requireSignedIn(){
@@ -423,6 +449,7 @@
   el.profileForm.addEventListener("submit",saveProfile);
   el.closeProfile.addEventListener("click",()=>el.profileDialog.close());
   el.profileSignOut.addEventListener("click",signOut);
+  el.closeVenue?.addEventListener("click",()=>el.venueDialog.close());
 
   updateAuthUI();
   loadPlatform().then(async()=>{if(state.session?.accessToken) await loadProfile(false);search();});
