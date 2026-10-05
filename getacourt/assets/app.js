@@ -299,17 +299,31 @@
     openAuth("Sign in is required to hold or manage a court.");
     return false;
   }
+  function setCheckoutEnabled(enabled){
+    qa("input",el.bookingForm).forEach(x=>x.disabled=!enabled);
+  }
   async function selectSlot(venueId,slotId){
     const venue=state.venues.find(v=>v.id===venueId);
     const slot=venue&&venue.slots.find(s=>s.id===slotId);
     if(!venue||!slot) return;
-    if(!state.platform.bookingEnabled){toast("Native booking is disabled in staging.");return;}
-    if(!(await requireSignedIn())) return;
     state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="12%";
+    const button=q("#confirmBookingButton");
+    button.onclick=null;
+    el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
+    if(!state.platform.bookingEnabled){
+      q("#bookingHeading").textContent="Booking preview";
+      el.summary.innerHTML+="<span>Preview only · no hold, club CRM record or payment will be created.</span>";
+      button.textContent="Booking disabled in staging";
+      button.type="button";button.disabled=true;
+      setCheckoutEnabled(false);
+      el.dialog.showModal();
+      return;
+    }
+    if(!(await requireSignedIn())){reset();return;}
+    setCheckoutEnabled(true);
     q("#bookingHeading").textContent="Hold this court";
-    q("#confirmBookingButton").textContent="Confirm booking";
-    q("#confirmBookingButton").type="submit";q("#confirmBookingButton").disabled=false;q("#confirmBookingButton").onclick=null;
-    el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
+    button.textContent="Confirm booking";
+    button.type="submit";button.disabled=false;
     el.dialog.showModal();
     await hold();
   }
@@ -338,7 +352,7 @@
       toast("Booking confirmed.");
     }catch(err){toast(err.message||"Could not confirm booking.");}
   }
-  function reset(){state.selected=null;state.hold=null;el.progress.style.width="12%";}
+  function reset(){state.selected=null;state.hold=null;el.progress.style.width="12%";setCheckoutEnabled(true);const button=q("#confirmBookingButton");button.disabled=false;button.type="submit";button.textContent="Confirm booking";button.onclick=null;}
   async function loadBookings(){
     if(!(await requireSignedIn())) return;
     try{
@@ -459,7 +473,7 @@
   el.nearMe?.addEventListener("click",useCurrentLocation);
   el.location.addEventListener("input",()=>{if(el.location.value!=="Current location"){state.geo=null;if(el.radiusNote)el.radiusNote.textContent="";}});
   el.bookingForm.addEventListener("submit",confirm);
-  el.dialog.addEventListener("close",()=>{clearInterval(state.timer);if(el.dialog.returnValue==="cancel")reset();});
+  el.dialog.addEventListener("close",()=>{clearInterval(state.timer);reset();});
   el.myBookings.addEventListener("click",loadBookings);
   el.closeBookings.addEventListener("click",()=>el.bookingsDialog.close());
   el.authButton.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth(""));
