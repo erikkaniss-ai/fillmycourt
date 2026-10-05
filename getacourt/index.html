@@ -7,6 +7,7 @@
   <meta name="description" content="GetACourt helps racket-sport players find available courts across clubs and booking systems, then book in a few taps." />
   <title>GetACourt — Find a court. Play now.</title>
   <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body data-mode="preview">
@@ -89,11 +90,27 @@
           <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
         </div>
       </div>
-      <div class="filter-row">
-        <button type="button" class="filter-pill active" data-filter="all">All courts</button>
-        <button type="button" class="filter-pill" data-filter="indoor">Indoor</button>
-        <button type="button" class="filter-pill" data-filter="under35">Under €35</button>
-        <button type="button" class="filter-pill" data-filter="90min">90 min</button>
+      <div class="discovery-controls">
+        <div class="filter-row">
+          <button type="button" class="filter-pill active" data-filter="all">All courts</button>
+          <button type="button" class="filter-pill" data-filter="indoor">Indoor</button>
+          <button type="button" class="filter-pill" data-filter="under35">Under €35</button>
+          <button type="button" class="filter-pill" data-filter="90min">90 min</button>
+        </div>
+        <div class="view-sort-controls">
+          <label class="sort-control">Sort
+            <select id="sortSelect">
+              <option value="recommended">Recommended</option>
+              <option value="distance">Nearest</option>
+              <option value="time">Earliest</option>
+              <option value="price">Lowest price</option>
+            </select>
+          </label>
+          <div class="view-toggle" role="group" aria-label="Results view">
+            <button id="listViewButton" class="view-button active" type="button" aria-pressed="true">List</button>
+            <button id="mapViewButton" class="view-button" type="button" aria-pressed="false">Map</button>
+          </div>
+        </div>
       </div>
       <div id="resultsGrid" class="results-grid">
         <div class="empty-state">
@@ -102,6 +119,7 @@
           <p>GetACourt searches available inventory and brings the useful slots into one clean view.</p>
         </div>
       </div>
+      <div id="resultsMap" class="results-map" hidden aria-label="Map of available venues"></div>
     </section>
 
     <section class="principles" id="how">
@@ -219,6 +237,7 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>
