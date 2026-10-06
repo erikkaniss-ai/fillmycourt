@@ -166,6 +166,41 @@ def test_fill_today_preserves_split_sellable_windows(fill_today):
     ]
 
 
+def test_fill_today_keeps_active_courts_without_rate_coverage_visible(fill_today):
+    url, store, user_id, org_id, court_id = fill_today
+    uncovered_court_id = str(uuid.uuid4())
+    with store.trusted() as c:
+        c.execute(text("""
+            insert into public.courts(id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled)
+            select cast(:court as uuid),venue_id,'Unpriced Court','padel',false,'native',true
+            from public.courts where id=cast(:existing_court as uuid)
+        """), {"court": uncovered_court_id, "existing_court": court_id})
+
+    settings = Settings(
+        origin="https://fill.test",
+        environment="test",
+        database=url,
+        supabase_url="https://example.supabase.co",
+        supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+    r = client.get(
+        f"/api/fmc/{org_id}/today",
+        params={"date": "2026-10-05"},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    uncovered = next(court for court in body["courts"] if court["court_id"] == uncovered_court_id)
+    assert uncovered["has_rate_coverage"] is False
+    assert uncovered["capacity_minutes"] == 0
+    assert uncovered["sellable_windows"] == []
+    assert body["summary"]["active_courts"] == 2
+    assert body["summary"]["courts_with_rate_coverage"] == 1
+    assert body["summary"]["courts_without_rate_coverage"] == 1
+
+
 
 def test_fill_calendar_returns_active_holds(fill_today):
     url, store, user_id, org_id, court_id = fill_today

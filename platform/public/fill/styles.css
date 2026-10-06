@@ -44,3 +44,6 @@
 .comparison-row small{display:block;margin-top:2px;font-size:8px;color:var(--muted)}
 .opportunity-quotes{margin-top:2px}
 @media(max-width:720px){.comparison-panel{margin-top:12px}}
+.validation-note{margin:-4px 0 16px;max-width:860px}
+.coverage-gap{color:#9a5a00;font-size:11px;font-weight:700}
+.kpi-grid{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}

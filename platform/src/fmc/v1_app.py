@@ -705,8 +705,9 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                           and (r.weekday is null or r.weekday=:weekday)
                           and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
                       )
-                    )
-                    select ob.court_id::text,ob.court_name,
+                    ),
+                    court_metrics as (
+                      select ob.court_id,
                            min(ob.local_minute)::int open_start_minute,
                            (max(ob.local_minute)+30)::int open_end_minute,
                            count(*)::int*30 capacity_minutes,
@@ -743,13 +744,27 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                            (
                              select coalesce(sum(bk.gross_amount_minor),0)::int
                              from public.bookings bk
-                             where bk.court_id=ob.court_id
-                               and bk.status in ('confirmed','pending_payment')
-                               and bk.starts_at>=:begin and bk.starts_at<:finish
+                           where bk.court_id=ob.court_id
+                             and bk.status in ('confirmed','pending_payment')
+                             and bk.starts_at>=:begin and bk.starts_at<:finish
                            ) revenue_minor
-                    from open_buckets ob
-                    group by ob.court_id,ob.court_name
-                    order by ob.court_name
+                      from open_buckets ob
+                      group by ob.court_id
+                    )
+                    select ac.id::text court_id,ac.name court_name,
+                           coalesce(cm.open_start_minute,0)::int open_start_minute,
+                           coalesce(cm.open_end_minute,0)::int open_end_minute,
+                           coalesce(cm.capacity_minutes,0)::int capacity_minutes,
+                           coalesce(cm.booked_minutes,0)::int booked_minutes,
+                           coalesce(cm.held_minutes,0)::int held_minutes,
+                           coalesce(cm.blocked_minutes,0)::int blocked_minutes,
+                           coalesce(cm.bookings,0)::int bookings,
+                           coalesce(cm.cancellations,0)::int cancellations,
+                           coalesce(cm.revenue_minor,0)::int revenue_minor,
+                           cm.court_id is not null has_rate_coverage
+                    from active_courts ac
+                    left join court_metrics cm on cm.court_id=ac.id
+                    order by ac.name
                 """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
                 sellable_windows = rows(c.execute(text("""
                     with active_courts as (
@@ -925,6 +940,8 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 booked = sum(int(x["booked_minutes"] or 0) for x in court_rows)
                 held = sum(int(x["held_minutes"] or 0) for x in court_rows)
                 blocked = sum(int(x["blocked_minutes"] or 0) for x in court_rows)
+                courts_with_rate_coverage = sum(1 for x in court_rows if x.get("has_rate_coverage"))
+                courts_without_rate_coverage = len(court_rows) - courts_with_rate_coverage
                 for x in court_rows:
                     x["sellable_windows"] = windows_by_court.get(x["court_id"], [])
                     cap = int(x["capacity_minutes"] or 0)
@@ -947,6 +964,9 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         "bookings": int(financial.get("bookings") or 0),
                         "cancellations": int(financial.get("cancellations") or 0),
                         "revenue_minor": int(financial.get("revenue_minor") or 0),
+                        "active_courts": len(court_rows),
+                        "courts_with_rate_coverage": courts_with_rate_coverage,
+                        "courts_without_rate_coverage": courts_without_rate_coverage,
                         "bookable_60_starts": bookable_60_starts,
                         "bookable_90_starts": bookable_90_starts,
                         "highest_single_quote_minor": int((best_quote or {}).get("best_amount_minor") or 0),
