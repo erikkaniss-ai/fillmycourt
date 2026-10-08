@@ -154,6 +154,71 @@ class PlayerProfileIn(BaseModel):
     marketing_consent: bool | None = None
 
 
+class PlayRoutineIn(BaseModel):
+    sport: str
+    days_of_week: list[int] = Field(min_length=1, max_length=7)
+    window_start: str
+    window_end: str
+    duration_minutes: int = Field(default=90, ge=30, le=240)
+    location_label: str = Field(default="", max_length=160)
+    center_lat: float | None = None
+    center_lon: float | None = None
+    radius_km: float = Field(default=10, gt=0, le=200)
+    max_price_minor: int | None = Field(default=None, ge=0, le=100_000_000)
+    currency: str = Field(default="EUR", min_length=3, max_length=3)
+    indoor_preference: str = "all"
+    preferred_venue_ids: list[str] = Field(default_factory=list, max_length=30)
+    excluded_venue_ids: list[str] = Field(default_factory=list, max_length=30)
+    timezone: str = Field(default="Europe/Lisbon", min_length=3, max_length=80)
+    start_date: str | None = None
+    valid_until: str | None = None
+
+
+class PlayRoutineStatusIn(BaseModel):
+    status: str
+
+
+def _time_minute(value: str) -> int:
+    try:
+        h, m = map(int, value.split(":"))
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError
+        return h * 60 + m
+    except Exception:
+        raise DomainError("TIME", "Use HH:MM.", 422) from None
+
+
+def _minute_time(value: int) -> str:
+    return f"{value // 60:02d}:{value % 60:02d}"
+
+
+def _match_score(slot: dict, routine: dict) -> float:
+    start = slot["starts_at"]
+    if isinstance(start, str):
+        start = iso(start)
+    local = start.astimezone(ZoneInfo(routine["timezone"]))
+    slot_minute = local.hour * 60 + local.minute
+    latest_start = int(routine["window_end_minute"]) - int(routine["duration_minutes"])
+    center = (int(routine["window_start_minute"]) + max(int(routine["window_start_minute"]), latest_start)) / 2
+    span = max(30.0, (max(int(routine["window_start_minute"]), latest_start) - int(routine["window_start_minute"])) / 2 or 30.0)
+    components = [(45.0, max(0.0, 1.0 - abs(slot_minute - center) / span))]
+
+    distance = slot.get("distance_km")
+    if distance is not None and routine.get("radius_km"):
+        components.append((25.0, max(0.0, 1.0 - float(distance) / float(routine["radius_km"]))))
+
+    max_price = routine.get("max_price_minor")
+    if max_price:
+        components.append((20.0, max(0.0, 1.0 - int(slot.get("amount_minor") or 0) / int(max_price))))
+
+    preferred = routine.get("preferred_venue_ids") or []
+    if preferred:
+        components.append((10.0, 1.0 if str(slot.get("venue_id")) in preferred else 0.0))
+
+    weight = sum(w for w, _ in components)
+    return round(100.0 * sum(w * v for w, v in components) / weight, 2) if weight else 0.0
+
+
 def create_v1_app(settings, service: str = "all", auth_override=None):
     if service not in ("all", "core", "operations"):
         raise RuntimeError("Unknown service mode")
@@ -1175,6 +1240,865 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 audit(c, request, org, a, f"reconciliation.{body.action}", "reconciliation_item", item_id,
                       before=current, after={"status": status_map[body.action], "note": body.note})
                 return {"id": item_id, "status": status_map[body.action]}
+
+        @app.get("/api/fmc/{org}/demand")
+        def demand_signals(org: str, request: Request, date: str):
+            a = who(request)
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise DomainError("DATE", "Use YYYY-MM-DD.", 422) from None
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+            with db.trusted() as c:
+                items = rows(c.execute(text("""
+                    with org_venues as (
+                      select v.id,v.name,v.currency::text,v.address,
+                             case when coalesce(v.address->>'lat','') ~ '^-?[0-9]+([.][0-9]+)?(org: str, request: Request, after: int = 0, limit: int = Query(100, ge=1, le=200)):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                return {"items": rows(c.execute(text("""
+                    select id,actor_user_id::text,event_type,entity_type,entity_id,before_state,after_state,request_id,occurred_at
+                    from public.audit_events
+                    where organization_id=cast(:org as uuid) and id>:after
+                    order by id limit :limit
+                """), {"org": org, "after": after, "limit": limit}))}
+
+    if service in ("core", "all"):
+        @app.get("/api/player-profile")
+        def player_profile(request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                profile = one(c.execute(text("""
+                    select user_id::text,full_name,home_area,preferred_sports,locale,
+                           marketing_consent,onboarding_completed_at,created_at,updated_at
+                    from public.player_profiles
+                    where user_id=cast(:uid as uuid)
+                """), {"uid": a.id}))
+                return {"profile": profile}
+
+        @app.put("/api/player-profile")
+        def upsert_player_profile(body: PlayerProfileIn, request: Request):
+            a = who(request)
+            sports = list(dict.fromkeys(body.preferred_sports))
+            if any(s not in SPORTS for s in sports):
+                raise DomainError("SPORT", "Unsupported preferred sport.", 422)
+            full_name = body.full_name.strip()
+            home_area = body.home_area.strip() if body.home_area else None
+            if len(full_name) < 2:
+                raise DomainError("PROFILE_NAME", "Use a valid player name.", 422)
+            with db.user(a.id) as c:
+                profile = one(c.execute(text("""
+                    insert into public.player_profiles
+                      (user_id,full_name,home_area,preferred_sports,locale,marketing_consent,
+                       onboarding_completed_at,updated_at)
+                    values
+                      (cast(:uid as uuid),:full_name,:home_area,:sports,:locale,:marketing_consent,
+                       now(),now())
+                    on conflict(user_id) do update set
+                      full_name=excluded.full_name,
+                      home_area=excluded.home_area,
+                      preferred_sports=excluded.preferred_sports,
+                      locale=excluded.locale,
+                      marketing_consent=excluded.marketing_consent,
+                      onboarding_completed_at=coalesce(public.player_profiles.onboarding_completed_at,now()),
+                      updated_at=now()
+                    returning user_id::text,full_name,home_area,preferred_sports,locale,
+                              marketing_consent,onboarding_completed_at,created_at,updated_at
+                """), {
+                    "uid": a.id,
+                    "full_name": full_name,
+                    "home_area": home_area,
+                    "sports": sports,
+                    "locale": body.locale.strip().lower(),
+                    "marketing_consent": body.marketing_consent,
+                }))
+                return {"profile": profile}
+
+        @app.get("/api/play-routines")
+        def play_routines(request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                items = rows(c.execute(text("""
+                    select id::text,sport,days_of_week,window_start_minute,window_end_minute,
+                           duration_minutes,location_label,center_lat,center_lon,radius_km,
+                           max_price_minor,currency::text,indoor_preference,preferred_venue_ids,
+                           excluded_venue_ids,timezone,start_date,valid_until,status,watch_enabled,
+                           last_engaged_at,last_evaluated_at,next_check_at,created_at,updated_at
+                    from public.play_routines
+                    where user_id=cast(:uid as uuid)
+                    order by status='active' desc,updated_at desc
+                """), {"uid": a.id}))
+                return {"items": items}
+
+        @app.post("/api/play-routines", status_code=201)
+        def create_play_routine(body: PlayRoutineIn, request: Request):
+            a = who(request)
+            sport = body.sport.strip().lower()
+            if sport not in SPORTS:
+                raise DomainError("SPORT", "Unsupported sport.", 422)
+            days = sorted(set(body.days_of_week))
+            if not days or any(day < 0 or day > 6 for day in days):
+                raise DomainError("DAYS", "Use weekdays 0–6 where Monday is 0.", 422)
+            start_minute = _time_minute(body.window_start)
+            end_minute = _time_minute(body.window_end)
+            if end_minute <= start_minute or end_minute - start_minute < body.duration_minutes:
+                raise DomainError("TIME_WINDOW", "Time window must fit the requested duration.", 422)
+            if body.duration_minutes not in (30,60,90,120,150,180,240):
+                raise DomainError("DURATION", "Unsupported duration.", 422)
+            indoor = body.indoor_preference.strip().lower()
+            if indoor not in ("all","indoor","outdoor"):
+                raise DomainError("INDOOR", "Use all, indoor or outdoor.", 422)
+            if (body.center_lat is None) != (body.center_lon is None):
+                raise DomainError("LOCATION_COORDS", "Provide both latitude and longitude.", 422)
+            if body.center_lat is not None and not (-90 <= body.center_lat <= 90 and -180 <= body.center_lon <= 180):
+                raise DomainError("LOCATION_COORDS", "Latitude/longitude are out of range.", 422)
+            location_label = body.location_label.strip()
+            if body.center_lat is None and not location_label:
+                raise DomainError("LOCATION", "Provide an area or coordinates.", 422)
+            try:
+                ZoneInfo(body.timezone)
+            except Exception:
+                raise DomainError("TIMEZONE", "Use a valid IANA timezone.", 422) from None
+            try:
+                start_date = datetime.strptime(body.start_date, "%Y-%m-%d").date() if body.start_date else datetime.now(ZoneInfo(body.timezone)).date()
+                valid_until = datetime.strptime(body.valid_until, "%Y-%m-%d").date() if body.valid_until else None
+            except ValueError:
+                raise DomainError("DATE", "Use YYYY-MM-DD.", 422) from None
+            if valid_until and valid_until < start_date:
+                raise DomainError("DATE", "valid_until must be on or after start_date.", 422)
+            preferred = list(dict.fromkeys(body.preferred_venue_ids))
+            excluded = list(dict.fromkeys(body.excluded_venue_ids))
+            if set(preferred) & set(excluded):
+                raise DomainError("VENUE_PREFERENCE", "A venue cannot be both preferred and excluded.", 422)
+            with db.user(a.id) as c:
+                item = one(c.execute(text("""
+                    insert into public.play_routines
+                      (user_id,sport,days_of_week,window_start_minute,window_end_minute,duration_minutes,
+                       location_label,center_lat,center_lon,radius_km,max_price_minor,currency,
+                       indoor_preference,preferred_venue_ids,excluded_venue_ids,timezone,start_date,valid_until)
+                    values
+                      (cast(:uid as uuid),:sport,:days,:start_minute,:end_minute,:duration,
+                       :location_label,:lat,:lon,:radius,:max_price,:currency,
+                       :indoor,:preferred,:excluded,:timezone,:start_date,:valid_until)
+                    returning id::text,sport,days_of_week,window_start_minute,window_end_minute,
+                              duration_minutes,location_label,center_lat,center_lon,radius_km,
+                              max_price_minor,currency::text,indoor_preference,preferred_venue_ids,
+                              excluded_venue_ids,timezone,start_date,valid_until,status,watch_enabled,
+                              last_engaged_at,last_evaluated_at,next_check_at,created_at,updated_at
+                """), {
+                    "uid": a.id, "sport": sport, "days": days, "start_minute": start_minute,
+                    "end_minute": end_minute, "duration": body.duration_minutes,
+                    "location_label": location_label, "lat": body.center_lat, "lon": body.center_lon,
+                    "radius": body.radius_km, "max_price": body.max_price_minor,
+                    "currency": body.currency.upper(), "indoor": indoor,
+                    "preferred": preferred, "excluded": excluded, "timezone": body.timezone,
+                    "start_date": start_date, "valid_until": valid_until,
+                }))
+                return {"routine": item}
+
+        @app.patch("/api/play-routines/{routine_id}")
+        def update_play_routine_status(routine_id: str, body: PlayRoutineStatusIn, request: Request):
+            a = who(request)
+            status = body.status.strip().lower()
+            if status not in ("active","paused","expired"):
+                raise DomainError("ROUTINE_STATUS", "Use active, paused or expired.", 422)
+            with db.user(a.id) as c:
+                item = one(c.execute(text("""
+                    update public.play_routines
+                    set status=:status,watch_enabled=(:status='active'),
+                        last_engaged_at=case when :status='active' then now() else last_engaged_at end,
+                        updated_at=now()
+                    where id=cast(:id as uuid) and user_id=cast(:uid as uuid)
+                    returning id::text,status,watch_enabled,last_engaged_at,updated_at
+                """), {"status": status, "id": routine_id, "uid": a.id}))
+                if not item:
+                    raise DomainError("ROUTINE_NOT_FOUND", "Play routine not found.", 404)
+                c.execute(text("""
+                    update public.demand_intents
+                    set status=case when :status='active' then
+                                      case when expires_at>now() then 'watching' else 'expired' end
+                                    else :status end,
+                        updated_at=now()
+                    where routine_id=cast(:id as uuid) and user_id=cast(:uid as uuid)
+                """), {"status": status, "id": routine_id, "uid": a.id})
+                return {"routine": item}
+
+        @app.post("/api/play-routines/{routine_id}/evaluate")
+        def evaluate_play_routine(routine_id: str, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                routine = one(c.execute(text("""
+                    select id::text,user_id::text,sport,days_of_week,window_start_minute,window_end_minute,
+                           duration_minutes,location_label,center_lat,center_lon,radius_km,max_price_minor,
+                           currency::text,indoor_preference,preferred_venue_ids,excluded_venue_ids,
+                           timezone,start_date,valid_until,status,watch_enabled,last_engaged_at,
+                           last_evaluated_at,next_check_at
+                    from public.play_routines
+                    where id=cast(:id as uuid) and user_id=cast(:uid as uuid)
+                """), {"id": routine_id, "uid": a.id}))
+                if not routine:
+                    raise DomainError("ROUTINE_NOT_FOUND", "Play routine not found.", 404)
+                if routine["status"] != "active" or not routine["watch_enabled"]:
+                    raise DomainError("ROUTINE_PAUSED", "This play routine is not actively watched.", 409)
+
+                tz = ZoneInfo(routine["timezone"])
+                today = datetime.now(tz).date()
+                first_date = max(today, routine["start_date"])
+                horizon_end = first_date + timedelta(days=13)
+                if routine["valid_until"]:
+                    horizon_end = min(horizon_end, routine["valid_until"])
+                target_dates = []
+                cursor = first_date
+                wanted_days = set(int(x) for x in routine["days_of_week"])
+                while cursor <= horizon_end:
+                    if cursor.weekday() in wanted_days:
+                        target_dates.append(cursor)
+                    cursor += timedelta(days=1)
+
+                evaluated = []
+                all_matches = []
+                notifications = []
+                indoor = {"all":"all","indoor":"true","outdoor":"false"}[routine["indoor_preference"]]
+                for target in target_dates:
+                    days_ahead = max(0, (target - today).days)
+                    freshness = round(max(0.60, 1.0 - days_ahead / 35.0), 3)
+                    expiry = datetime(target.year,target.month,target.day,23,59,59,tzinfo=tz)
+                    intent = one(c.execute(text("""
+                        insert into public.demand_intents
+                          (routine_id,user_id,target_date,window_start_minute,window_end_minute,
+                           duration_minutes,status,freshness_score,expires_at,last_evaluated_at,updated_at)
+                        values
+                          (cast(:routine as uuid),cast(:uid as uuid),:target,:start_minute,:end_minute,
+                           :duration,'watching',:freshness,:expires,now(),now())
+                        on conflict(routine_id,target_date) do update set
+                          window_start_minute=excluded.window_start_minute,
+                          window_end_minute=excluded.window_end_minute,
+                          duration_minutes=excluded.duration_minutes,
+                          status=case when public.demand_intents.status='paused' then 'paused' else 'watching' end,
+                          freshness_score=excluded.freshness_score,
+                          expires_at=excluded.expires_at,
+                          last_evaluated_at=now(),updated_at=now()
+                        returning id::text,target_date,status,freshness_score,expires_at
+                    """), {
+                        "routine": routine_id, "uid": a.id, "target": target,
+                        "start_minute": routine["window_start_minute"], "end_minute": routine["window_end_minute"],
+                        "duration": routine["duration_minutes"], "freshness": freshness, "expires": expiry,
+                    }))
+
+                    slots = db.availability(
+                        target.isoformat(),
+                        _minute_time(int(routine["window_start_minute"])),
+                        _minute_time(int(routine["window_end_minute"])),
+                        routine["sport"],
+                        int(routine["duration_minutes"]),
+                        routine["location_label"],
+                        indoor,
+                        200,
+                        lat=routine["center_lat"],
+                        lon=routine["center_lon"],
+                        radius_km=float(routine["radius_km"]),
+                    )
+                    filtered = []
+                    excluded = set(routine["excluded_venue_ids"] or [])
+                    max_price = routine["max_price_minor"]
+                    for slot in slots:
+                        if str(slot["venue_id"]) in excluded:
+                            continue
+                        if max_price is not None and int(slot["amount_minor"]) > int(max_price):
+                            continue
+                        candidate = dict(slot)
+                        candidate["match_score"] = _match_score(candidate, routine)
+                        filtered.append(candidate)
+                    filtered.sort(key=lambda x: (-float(x["match_score"]), float(x.get("distance_km") or 9999), int(x["amount_minor"]), x["starts_at"]))
+                    filtered = filtered[:20]
+
+                    c.execute(text("""
+                        update public.demand_matches
+                        set status='stale'
+                        where intent_id=cast(:intent as uuid) and user_id=cast(:uid as uuid) and status='active'
+                    """), {"intent": intent["id"], "uid": a.id})
+                    saved_matches = []
+                    for slot in filtered:
+                        starts_at = slot["starts_at"]
+                        starts_iso = starts_at.isoformat() if hasattr(starts_at, "isoformat") else str(starts_at)
+                        fingerprint = f'{slot["id"]}|{starts_iso}|{routine["duration_minutes"]}'
+                        saved = one(c.execute(text("""
+                            insert into public.demand_matches
+                              (intent_id,routine_id,user_id,venue_id,court_id,starts_at,duration_minutes,
+                               amount_minor,currency,distance_km,match_score,status,fingerprint,metadata,last_seen_at)
+                            values
+                              (cast(:intent as uuid),cast(:routine as uuid),cast(:uid as uuid),
+                               cast(:venue as uuid),cast(:court as uuid),:starts_at,:duration,
+                               :amount,:currency,:distance,:score,'active',:fingerprint,
+                               cast(:metadata as jsonb),now())
+                            on conflict(intent_id,fingerprint) do update set
+                              amount_minor=excluded.amount_minor,currency=excluded.currency,
+                              distance_km=excluded.distance_km,match_score=excluded.match_score,
+                              status='active',metadata=excluded.metadata,last_seen_at=now()
+                            returning id::text,venue_id::text,court_id::text,starts_at,duration_minutes,
+                                      amount_minor,currency::text,distance_km,match_score,status
+                        """), {
+                            "intent": intent["id"], "routine": routine_id, "uid": a.id,
+                            "venue": slot["venue_id"], "court": slot["id"], "starts_at": slot["starts_at"],
+                            "duration": routine["duration_minutes"], "amount": slot["amount_minor"],
+                            "currency": slot["currency"], "distance": slot.get("distance_km"),
+                            "score": slot["match_score"], "fingerprint": fingerprint,
+                            "metadata": json.dumps({
+                                "venue_name": slot.get("venue_name"),
+                                "court_name": slot.get("name"),
+                                "timezone": slot.get("timezone"),
+                            }),
+                        }))
+                        saved["venue_name"] = slot.get("venue_name")
+                        saved["court_name"] = slot.get("name")
+                        saved_matches.append(saved)
+
+                    c.execute(text("""
+                        update public.demand_intents
+                        set status=:status,last_evaluated_at=now(),updated_at=now()
+                        where id=cast(:id as uuid) and user_id=cast(:uid as uuid)
+                    """), {"status": "matched" if saved_matches else "watching", "id": intent["id"], "uid": a.id})
+                    intent["status"] = "matched" if saved_matches else "watching"
+                    evaluated.append(intent)
+                    all_matches.extend(saved_matches)
+
+                    if saved_matches and float(saved_matches[0]["match_score"]) >= 65:
+                        previous = one(c.execute(text("""
+                            select id::text,created_at,coalesce((metadata->>'best_score')::numeric,0) best_score
+                            from public.notification_events
+                            where user_id=cast(:uid as uuid) and intent_id=cast(:intent as uuid)
+                              and event_type='ready'
+                            order by created_at desc limit 1
+                        """), {"uid": a.id, "intent": intent["id"]}))
+                        should_notify = (
+                            previous is None
+                            or previous["created_at"] < datetime.now(tz=previous["created_at"].tzinfo) - timedelta(hours=6)
+                            or float(saved_matches[0]["match_score"]) >= float(previous["best_score"] or 0) + 5
+                        )
+                        if should_notify:
+                            snapshot = []
+                            for match in saved_matches[:3]:
+                                snapshot.append({
+                                    "match_id": match["id"],
+                                    "venue_id": match["venue_id"],
+                                    "venue_name": match.get("venue_name"),
+                                    "court_id": match["court_id"],
+                                    "court_name": match.get("court_name"),
+                                    "starts_at": match["starts_at"].isoformat() if hasattr(match["starts_at"], "isoformat") else str(match["starts_at"]),
+                                    "duration_minutes": match["duration_minutes"],
+                                    "amount_minor": match["amount_minor"],
+                                    "currency": match["currency"],
+                                    "distance_km": match["distance_km"],
+                                    "match_score": float(match["match_score"]),
+                                })
+                            event = one(c.execute(text("""
+                                insert into public.notification_events
+                                  (user_id,routine_id,intent_id,event_type,channel,metadata)
+                                values
+                                  (cast(:uid as uuid),cast(:routine as uuid),cast(:intent as uuid),
+                                   'ready','in_app',cast(:metadata as jsonb))
+                                returning id::text,event_type,channel,metadata,created_at
+                            """), {
+                                "uid": a.id, "routine": routine_id, "intent": intent["id"],
+                                "metadata": json.dumps({
+                                    "best_score": float(saved_matches[0]["match_score"]),
+                                    "target_date": str(target),
+                                    "matches": snapshot,
+                                }),
+                            }))
+                            notifications.append(event)
+
+                soonest = min(target_dates) if target_dates else None
+                if soonest:
+                    hours_to = max(0.0, (datetime(soonest.year,soonest.month,soonest.day,
+                                                     int(routine["window_start_minute"])//60,
+                                                     int(routine["window_start_minute"])%60,
+                                                     tzinfo=tz) - datetime.now(tz)).total_seconds()/3600)
+                    poll_minutes = 15 if hours_to <= 6 else 30 if hours_to <= 24 else 120 if hours_to <= 72 else 360
+                else:
+                    poll_minutes = 720
+                next_check = datetime.now(tz) + timedelta(minutes=poll_minutes)
+                c.execute(text("""
+                    update public.play_routines
+                    set last_evaluated_at=now(),next_check_at=:next_check,updated_at=now()
+                    where id=cast(:id as uuid) and user_id=cast(:uid as uuid)
+                """), {"next_check": next_check, "id": routine_id, "uid": a.id})
+                return {
+                    "routine_id": routine_id,
+                    "evaluated_intents": evaluated,
+                    "matches": all_matches,
+                    "notifications": notifications,
+                    "watch": {"next_check_at": next_check, "poll_after_minutes": poll_minutes},
+                }
+
+        @app.get("/api/demand-notifications")
+        def demand_notifications(request: Request, limit: int = Query(20, ge=1, le=100)):
+            a = who(request)
+            with db.user(a.id) as c:
+                items = rows(c.execute(text("""
+                    select id::text,routine_id::text,intent_id::text,event_type,channel,metadata,created_at
+                    from public.notification_events
+                    where user_id=cast(:uid as uuid)
+                    order by created_at desc limit :limit
+                """), {"uid": a.id, "limit": limit}))
+                return {"items": items}
+
+        @app.get("/api/availability")
+        def availability(date: str, time: str, sport: str = "padel", duration: int = 90,
+                         end_time: str = "23:00", location: str = "", indoor: str = "all",
+                         lat: float | None = None, lon: float | None = None,
+                         radius_km: float = Query(25, gt=0, le=200)):
+            if sport not in SPORTS:
+                raise DomainError("SPORT", "Unsupported sport.", 422)
+            if duration not in (30, 60, 90, 120, 150, 180, 240):
+                raise DomainError("DURATION", "Unsupported duration.", 422)
+            if indoor.lower() not in ("all", "true", "false"):
+                raise DomainError("INDOOR", "Use all, true or false.", 422)
+            if (lat is None) != (lon is None):
+                raise DomainError("LOCATION_COORDS", "Provide both lat and lon.", 422)
+            if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise DomainError("LOCATION_COORDS", "Latitude/longitude are out of range.", 422)
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+                sh, sm = map(int, time.split(":"))
+                eh, em = map(int, end_time.split(":"))
+                if not (0 <= sh <= 23 and 0 <= eh <= 23 and 0 <= sm <= 59 and 0 <= em <= 59):
+                    raise ValueError
+                if (eh, em) <= (sh, sm):
+                    raise ValueError
+            except Exception:
+                raise DomainError("DATE_TIME", "Use YYYY-MM-DD and an increasing HH:MM time range.", 422)
+            slots = db.availability(date, time, end_time, sport, duration, location, indoor, 200,
+                                    lat=lat, lon=lon, radius_km=radius_km)
+            return {"slots": slots, "count": len(slots),
+                    "search": {"lat": lat, "lon": lon, "radius_km": radius_km if lat is not None else None}}
+
+        @app.post("/api/holds", status_code=201)
+        def hold(body: HoldIn, request: Request, idempotency_key: str | None = Header(default=None)):
+            if not settings.booking_enabled:
+                raise DomainError("BOOKING_UNAVAILABLE", "Direct booking is not enabled.", 503)
+            a = who(request)
+            require_key(idempotency_key)
+            start = iso(body.starts_at)
+            end = start + timedelta(minutes=body.duration)
+            with db.trusted() as c:
+                db.cleanup_expired_holds(c)
+                db.advisory_court_lock(c, body.court_id)
+                existing = one(c.execute(text("""
+                    select id::text,quote,expires_at from public.booking_holds
+                    where idempotency_key=:key and organization_id in (
+                      select v.organization_id from public.courts c join public.venues v on v.id=c.venue_id where c.id=cast(:court as uuid)
+                    )
+                """), {"key": idempotency_key, "court": body.court_id}))
+                if existing:
+                    return existing
+                court, quote = db.quote(c, body.court_id, start, body.duration)
+                if court["inventory_mode"] != "native" or not court["native_write_enabled"]:
+                    raise DomainError("HANDOFF_REQUIRED", "This inventory cannot be booked natively.", 409)
+                if db.active_conflict(c, body.court_id, start, end):
+                    raise DomainError("SLOT_TAKEN", "This slot is no longer available.", 409)
+                player = db.ensure_person(c, court["organization_id"], a)
+                r = one(c.execute(text("""
+                    insert into public.booking_holds
+                      (organization_id,court_id,player_id,starts_at,ends_at,expires_at,idempotency_key,quote)
+                    values(cast(:org as uuid),cast(:court as uuid),cast(:player as uuid),:a,:b,now()+interval '10 minutes',:key,cast(:quote as jsonb))
+                    returning id::text,starts_at,ends_at,expires_at,quote
+                """), {"org": court["organization_id"], "court": body.court_id, "player": player,
+                       "a": start, "b": end, "key": idempotency_key, "quote": json.dumps(quote)}))
+                db.emit(c, court["organization_id"], a.id, "hold.created", "booking_hold", r["id"],
+                        after={"court_id": body.court_id, "starts_at": body.starts_at})
+                return r
+
+        @app.post("/api/holds/{hold_id}/confirm", status_code=201)
+        def confirm(hold_id: str, body: ConfirmIn, request: Request,
+                    idempotency_key: str | None = Header(default=None)):
+            if not settings.booking_enabled:
+                raise DomainError("BOOKING_UNAVAILABLE", "Direct booking is not enabled.", 503)
+            a = who(request)
+            require_key(idempotency_key)
+            if not body.accept_policy:
+                raise DomainError("POLICY_REQUIRED", "Cancellation policy must be accepted.", 422)
+            with db.trusted() as c:
+                h = one(c.execute(text("""
+                    select h.*,v.id venue_id,v.organization_id,p.auth_user_id
+                    from public.booking_holds h
+                    join public.courts c on c.id=h.court_id
+                    join public.venues v on v.id=c.venue_id
+                    join public.people p on p.id=h.player_id
+                    where h.id=cast(:id as uuid) for update
+                """), {"id": hold_id}))
+                if not h or str(h["auth_user_id"]) != a.id:
+                    raise DomainError("HOLD_NOT_FOUND", "Hold not found.", 404)
+                if h["expires_at"] <= datetime.now(h["expires_at"].tzinfo):
+                    c.execute(text("delete from public.booking_holds where id=cast(:id as uuid)"), {"id": hold_id})
+                    raise DomainError("HOLD_EXPIRED", "Hold has expired.", 409)
+                db.advisory_court_lock(c, str(h["court_id"]))
+                if db.active_conflict(c, str(h["court_id"]), h["starts_at"], h["ends_at"], ignore_hold=hold_id):
+                    raise DomainError("SLOT_TAKEN", "This slot is no longer available.", 409)
+                existing = one(c.execute(text("""
+                    select id::text,status::text from public.bookings
+                    where organization_id=cast(:org as uuid) and idempotency_key=:key
+                """), {"org": str(h["organization_id"]), "key": idempotency_key}))
+                if existing:
+                    return existing
+                quote = h["quote"]
+                r = one(c.execute(text("""
+                    insert into public.bookings
+                      (organization_id,venue_id,court_id,player_id,status,starts_at,ends_at,currency,
+                       gross_amount_minor,source,idempotency_key,cancellation_policy_version,metadata)
+                    values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:player as uuid),'confirmed',:a,:b,:currency,
+                           :amount,'getacourt',:key,:policy,cast(:metadata as jsonb))
+                    returning id::text,status::text,starts_at,ends_at,currency::text,gross_amount_minor
+                """), {"org": str(h["organization_id"]), "venue": str(h["venue_id"]), "court": str(h["court_id"]),
+                       "player": str(h["player_id"]), "a": h["starts_at"], "b": h["ends_at"],
+                       "currency": quote["currency"], "amount": quote["amount_minor"], "key": idempotency_key,
+                       "policy": settings.terms_version or "unversioned",
+                       "metadata": json.dumps({"participants": body.participants, "payment_status": "not_collected"})}))
+                c.execute(text("delete from public.booking_holds where id=cast(:id as uuid)"), {"id": hold_id})
+                db.emit(c, str(h["organization_id"]), a.id, "booking.confirmed", "booking", r["id"], after=r)
+                return r
+
+        @app.get("/api/bookings")
+        def my_bookings(request: Request, limit: int = Query(50, ge=1, le=100)):
+            a = who(request)
+            with db.trusted() as c:
+                return {"items": rows(c.execute(text("""
+                    select b.id::text,b.status::text,b.starts_at,b.ends_at,b.currency::text,b.gross_amount_minor,
+                           b.source,b.metadata,c.name court_name,v.name venue_name
+                    from public.bookings b
+                    join public.people p on p.id=b.player_id
+                    join public.courts c on c.id=b.court_id
+                    join public.venues v on v.id=b.venue_id
+                    where p.auth_user_id=cast(:uid as uuid)
+                    order by b.starts_at desc limit :limit
+                """), {"uid": a.id, "limit": limit}))}
+
+        @app.post("/api/bookings/{booking_id}/cancel")
+        def cancel(booking_id: str, request: Request):
+            a = who(request)
+            with db.trusted() as c:
+                b = one(c.execute(text("""
+                    select b.id::text,b.organization_id::text,b.status::text,p.auth_user_id
+                    from public.bookings b join public.people p on p.id=b.player_id
+                    where b.id=cast(:id as uuid) for update
+                """), {"id": booking_id}))
+                if not b or str(b["auth_user_id"]) != a.id:
+                    raise DomainError("BOOKING_NOT_FOUND", "Booking not found.", 404)
+                if b["status"] not in ("confirmed", "pending_payment"):
+                    raise DomainError("BOOKING_STATE", "Booking cannot be cancelled in this state.", 409)
+                c.execute(text("""
+                    update public.bookings set status='cancelled',updated_at=now()
+                    where id=cast(:id as uuid)
+                """), {"id": booking_id})
+                db.emit(c, b["organization_id"], a.id, "booking.cancelled", "booking", booking_id,
+                        before={"status": b["status"]}, after={"status": "cancelled"})
+                return {"id": booking_id, "status": "cancelled"}
+
+    if service in ("operations", "all"):
+        fill_ui = Path(__file__).resolve().parents[2] / "public" / "fill"
+        if fill_ui.exists():
+            app.mount("/fill", StaticFiles(directory=str(fill_ui), html=True), name="fill-v1")
+
+    return app
+
+
+def create_from_env():
+    from .config import Settings
+    settings = Settings.from_env()
+    settings.validate()
+    import os
+    return create_v1_app(settings, os.getenv("FMC_SERVICE","all"))
+
+                                  then (v.address->>'lat')::double precision end as venue_lat,
+                             case when coalesce(v.address->>'lon','') ~ '^-?[0-9]+([.][0-9]+)?(org: str, request: Request, after: int = 0, limit: int = Query(100, ge=1, le=200)):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                return {"items": rows(c.execute(text("""
+                    select id,actor_user_id::text,event_type,entity_type,entity_id,before_state,after_state,request_id,occurred_at
+                    from public.audit_events
+                    where organization_id=cast(:org as uuid) and id>:after
+                    order by id limit :limit
+                """), {"org": org, "after": after, "limit": limit}))}
+
+    if service in ("core", "all"):
+        @app.get("/api/player-profile")
+        def player_profile(request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                profile = one(c.execute(text("""
+                    select user_id::text,full_name,home_area,preferred_sports,locale,
+                           marketing_consent,onboarding_completed_at,created_at,updated_at
+                    from public.player_profiles
+                    where user_id=cast(:uid as uuid)
+                """), {"uid": a.id}))
+                return {"profile": profile}
+
+        @app.put("/api/player-profile")
+        def upsert_player_profile(body: PlayerProfileIn, request: Request):
+            a = who(request)
+            sports = list(dict.fromkeys(body.preferred_sports))
+            if any(s not in SPORTS for s in sports):
+                raise DomainError("SPORT", "Unsupported preferred sport.", 422)
+            full_name = body.full_name.strip()
+            home_area = body.home_area.strip() if body.home_area else None
+            if len(full_name) < 2:
+                raise DomainError("PROFILE_NAME", "Use a valid player name.", 422)
+            with db.user(a.id) as c:
+                profile = one(c.execute(text("""
+                    insert into public.player_profiles
+                      (user_id,full_name,home_area,preferred_sports,locale,marketing_consent,
+                       onboarding_completed_at,updated_at)
+                    values
+                      (cast(:uid as uuid),:full_name,:home_area,:sports,:locale,:marketing_consent,
+                       now(),now())
+                    on conflict(user_id) do update set
+                      full_name=excluded.full_name,
+                      home_area=excluded.home_area,
+                      preferred_sports=excluded.preferred_sports,
+                      locale=excluded.locale,
+                      marketing_consent=excluded.marketing_consent,
+                      onboarding_completed_at=coalesce(public.player_profiles.onboarding_completed_at,now()),
+                      updated_at=now()
+                    returning user_id::text,full_name,home_area,preferred_sports,locale,
+                              marketing_consent,onboarding_completed_at,created_at,updated_at
+                """), {
+                    "uid": a.id,
+                    "full_name": full_name,
+                    "home_area": home_area,
+                    "sports": sports,
+                    "locale": body.locale.strip().lower(),
+                    "marketing_consent": body.marketing_consent,
+                }))
+                return {"profile": profile}
+
+        @app.get("/api/availability")
+        def availability(date: str, time: str, sport: str = "padel", duration: int = 90,
+                         end_time: str = "23:00", location: str = "", indoor: str = "all",
+                         lat: float | None = None, lon: float | None = None,
+                         radius_km: float = Query(25, gt=0, le=200)):
+            if sport not in SPORTS:
+                raise DomainError("SPORT", "Unsupported sport.", 422)
+            if duration not in (30, 60, 90, 120, 150, 180, 240):
+                raise DomainError("DURATION", "Unsupported duration.", 422)
+            if indoor.lower() not in ("all", "true", "false"):
+                raise DomainError("INDOOR", "Use all, true or false.", 422)
+            if (lat is None) != (lon is None):
+                raise DomainError("LOCATION_COORDS", "Provide both lat and lon.", 422)
+            if lat is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise DomainError("LOCATION_COORDS", "Latitude/longitude are out of range.", 422)
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+                sh, sm = map(int, time.split(":"))
+                eh, em = map(int, end_time.split(":"))
+                if not (0 <= sh <= 23 and 0 <= eh <= 23 and 0 <= sm <= 59 and 0 <= em <= 59):
+                    raise ValueError
+                if (eh, em) <= (sh, sm):
+                    raise ValueError
+            except Exception:
+                raise DomainError("DATE_TIME", "Use YYYY-MM-DD and an increasing HH:MM time range.", 422)
+            slots = db.availability(date, time, end_time, sport, duration, location, indoor, 200,
+                                    lat=lat, lon=lon, radius_km=radius_km)
+            return {"slots": slots, "count": len(slots),
+                    "search": {"lat": lat, "lon": lon, "radius_km": radius_km if lat is not None else None}}
+
+        @app.post("/api/holds", status_code=201)
+        def hold(body: HoldIn, request: Request, idempotency_key: str | None = Header(default=None)):
+            if not settings.booking_enabled:
+                raise DomainError("BOOKING_UNAVAILABLE", "Direct booking is not enabled.", 503)
+            a = who(request)
+            require_key(idempotency_key)
+            start = iso(body.starts_at)
+            end = start + timedelta(minutes=body.duration)
+            with db.trusted() as c:
+                db.cleanup_expired_holds(c)
+                db.advisory_court_lock(c, body.court_id)
+                existing = one(c.execute(text("""
+                    select id::text,quote,expires_at from public.booking_holds
+                    where idempotency_key=:key and organization_id in (
+                      select v.organization_id from public.courts c join public.venues v on v.id=c.venue_id where c.id=cast(:court as uuid)
+                    )
+                """), {"key": idempotency_key, "court": body.court_id}))
+                if existing:
+                    return existing
+                court, quote = db.quote(c, body.court_id, start, body.duration)
+                if court["inventory_mode"] != "native" or not court["native_write_enabled"]:
+                    raise DomainError("HANDOFF_REQUIRED", "This inventory cannot be booked natively.", 409)
+                if db.active_conflict(c, body.court_id, start, end):
+                    raise DomainError("SLOT_TAKEN", "This slot is no longer available.", 409)
+                player = db.ensure_person(c, court["organization_id"], a)
+                r = one(c.execute(text("""
+                    insert into public.booking_holds
+                      (organization_id,court_id,player_id,starts_at,ends_at,expires_at,idempotency_key,quote)
+                    values(cast(:org as uuid),cast(:court as uuid),cast(:player as uuid),:a,:b,now()+interval '10 minutes',:key,cast(:quote as jsonb))
+                    returning id::text,starts_at,ends_at,expires_at,quote
+                """), {"org": court["organization_id"], "court": body.court_id, "player": player,
+                       "a": start, "b": end, "key": idempotency_key, "quote": json.dumps(quote)}))
+                db.emit(c, court["organization_id"], a.id, "hold.created", "booking_hold", r["id"],
+                        after={"court_id": body.court_id, "starts_at": body.starts_at})
+                return r
+
+        @app.post("/api/holds/{hold_id}/confirm", status_code=201)
+        def confirm(hold_id: str, body: ConfirmIn, request: Request,
+                    idempotency_key: str | None = Header(default=None)):
+            if not settings.booking_enabled:
+                raise DomainError("BOOKING_UNAVAILABLE", "Direct booking is not enabled.", 503)
+            a = who(request)
+            require_key(idempotency_key)
+            if not body.accept_policy:
+                raise DomainError("POLICY_REQUIRED", "Cancellation policy must be accepted.", 422)
+            with db.trusted() as c:
+                h = one(c.execute(text("""
+                    select h.*,v.id venue_id,v.organization_id,p.auth_user_id
+                    from public.booking_holds h
+                    join public.courts c on c.id=h.court_id
+                    join public.venues v on v.id=c.venue_id
+                    join public.people p on p.id=h.player_id
+                    where h.id=cast(:id as uuid) for update
+                """), {"id": hold_id}))
+                if not h or str(h["auth_user_id"]) != a.id:
+                    raise DomainError("HOLD_NOT_FOUND", "Hold not found.", 404)
+                if h["expires_at"] <= datetime.now(h["expires_at"].tzinfo):
+                    c.execute(text("delete from public.booking_holds where id=cast(:id as uuid)"), {"id": hold_id})
+                    raise DomainError("HOLD_EXPIRED", "Hold has expired.", 409)
+                db.advisory_court_lock(c, str(h["court_id"]))
+                if db.active_conflict(c, str(h["court_id"]), h["starts_at"], h["ends_at"], ignore_hold=hold_id):
+                    raise DomainError("SLOT_TAKEN", "This slot is no longer available.", 409)
+                existing = one(c.execute(text("""
+                    select id::text,status::text from public.bookings
+                    where organization_id=cast(:org as uuid) and idempotency_key=:key
+                """), {"org": str(h["organization_id"]), "key": idempotency_key}))
+                if existing:
+                    return existing
+                quote = h["quote"]
+                r = one(c.execute(text("""
+                    insert into public.bookings
+                      (organization_id,venue_id,court_id,player_id,status,starts_at,ends_at,currency,
+                       gross_amount_minor,source,idempotency_key,cancellation_policy_version,metadata)
+                    values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:player as uuid),'confirmed',:a,:b,:currency,
+                           :amount,'getacourt',:key,:policy,cast(:metadata as jsonb))
+                    returning id::text,status::text,starts_at,ends_at,currency::text,gross_amount_minor
+                """), {"org": str(h["organization_id"]), "venue": str(h["venue_id"]), "court": str(h["court_id"]),
+                       "player": str(h["player_id"]), "a": h["starts_at"], "b": h["ends_at"],
+                       "currency": quote["currency"], "amount": quote["amount_minor"], "key": idempotency_key,
+                       "policy": settings.terms_version or "unversioned",
+                       "metadata": json.dumps({"participants": body.participants, "payment_status": "not_collected"})}))
+                c.execute(text("delete from public.booking_holds where id=cast(:id as uuid)"), {"id": hold_id})
+                db.emit(c, str(h["organization_id"]), a.id, "booking.confirmed", "booking", r["id"], after=r)
+                return r
+
+        @app.get("/api/bookings")
+        def my_bookings(request: Request, limit: int = Query(50, ge=1, le=100)):
+            a = who(request)
+            with db.trusted() as c:
+                return {"items": rows(c.execute(text("""
+                    select b.id::text,b.status::text,b.starts_at,b.ends_at,b.currency::text,b.gross_amount_minor,
+                           b.source,b.metadata,c.name court_name,v.name venue_name
+                    from public.bookings b
+                    join public.people p on p.id=b.player_id
+                    join public.courts c on c.id=b.court_id
+                    join public.venues v on v.id=b.venue_id
+                    where p.auth_user_id=cast(:uid as uuid)
+                    order by b.starts_at desc limit :limit
+                """), {"uid": a.id, "limit": limit}))}
+
+        @app.post("/api/bookings/{booking_id}/cancel")
+        def cancel(booking_id: str, request: Request):
+            a = who(request)
+            with db.trusted() as c:
+                b = one(c.execute(text("""
+                    select b.id::text,b.organization_id::text,b.status::text,p.auth_user_id
+                    from public.bookings b join public.people p on p.id=b.player_id
+                    where b.id=cast(:id as uuid) for update
+                """), {"id": booking_id}))
+                if not b or str(b["auth_user_id"]) != a.id:
+                    raise DomainError("BOOKING_NOT_FOUND", "Booking not found.", 404)
+                if b["status"] not in ("confirmed", "pending_payment"):
+                    raise DomainError("BOOKING_STATE", "Booking cannot be cancelled in this state.", 409)
+                c.execute(text("""
+                    update public.bookings set status='cancelled',updated_at=now()
+                    where id=cast(:id as uuid)
+                """), {"id": booking_id})
+                db.emit(c, b["organization_id"], a.id, "booking.cancelled", "booking", booking_id,
+                        before={"status": b["status"]}, after={"status": "cancelled"})
+                return {"id": booking_id, "status": "cancelled"}
+
+    if service in ("operations", "all"):
+        fill_ui = Path(__file__).resolve().parents[2] / "public" / "fill"
+        if fill_ui.exists():
+            app.mount("/fill", StaticFiles(directory=str(fill_ui), html=True), name="fill-v1")
+
+    return app
+
+
+def create_from_env():
+    from .config import Settings
+    settings = Settings.from_env()
+    settings.validate()
+    import os
+    return create_v1_app(settings, os.getenv("FMC_SERVICE","all"))
+
+                                  then (v.address->>'lon')::double precision end as venue_lon
+                      from public.venues v
+                      where v.organization_id=cast(:org as uuid) and v.active
+                    ),
+                    eligible as (
+                      select v.id venue_id,v.name venue_name,v.currency,
+                             di.id intent_id,pr.sport,di.window_start_minute,di.window_end_minute,
+                             di.duration_minutes,di.freshness_score,pr.max_price_minor,
+                             case
+                               when pr.center_lat is not null and pr.center_lon is not null
+                                    and v.venue_lat is not null and v.venue_lon is not null
+                               then 6371.0 * 2.0 * asin(sqrt(
+                                 power(sin(radians(v.venue_lat-pr.center_lat)/2.0),2)
+                                 + cos(radians(pr.center_lat))*cos(radians(v.venue_lat))
+                                 * power(sin(radians(v.venue_lon-pr.center_lon)/2.0),2)
+                               ))
+                             end distance_km
+                      from org_venues v
+                      cross join public.demand_intents di
+                      join public.play_routines pr on pr.id=di.routine_id
+                      where di.target_date=cast(:date as date)
+                        and di.status in ('watching','matched')
+                        and di.expires_at>now()
+                        and pr.status='active' and pr.watch_enabled
+                        and (
+                          (
+                            pr.center_lat is not null and pr.center_lon is not null
+                            and v.venue_lat is not null and v.venue_lon is not null
+                            and 6371.0 * 2.0 * asin(sqrt(
+                              power(sin(radians(v.venue_lat-pr.center_lat)/2.0),2)
+                              + cos(radians(pr.center_lat))*cos(radians(v.venue_lat))
+                              * power(sin(radians(v.venue_lon-pr.center_lon)/2.0),2)
+                            )) <= pr.radius_km
+                          )
+                          or
+                          (
+                            pr.center_lat is null and pr.center_lon is null
+                            and btrim(pr.location_label)<>''
+                            and lower(v.address::text) like '%' || lower(pr.location_label) || '%'
+                          )
+                        )
+                    )
+                    select venue_id::text,venue_name,currency,sport,window_start_minute,window_end_minute,
+                           duration_minutes,count(*)::int active_intents,
+                           round(avg(freshness_score)::numeric,3) freshness_confidence,
+                           percentile_disc(0.5) within group(order by max_price_minor)
+                             filter (where max_price_minor is not null)::int median_max_price_minor,
+                           min(max_price_minor)::int min_max_price_minor,
+                           max(max_price_minor)::int max_max_price_minor,
+                           round(avg(distance_km)::numeric,2) avg_distance_km
+                    from eligible
+                    group by venue_id,venue_name,currency,sport,window_start_minute,window_end_minute,duration_minutes
+                    order by active_intents desc,freshness_confidence desc,venue_name
+                """), {"org": org, "date": date}))
+                for item in items:
+                    n = int(item["active_intents"])
+                    item["demand_level"] = "high" if n >= 8 else "medium" if n >= 3 else "low"
+                    item["source"] = "getacourt_persistent"
+                return {"date": date, "items": items}
 
         @app.get("/api/fmc/{org}/audit")
         def audit_log(org: str, request: Request, after: int = 0, limit: int = Query(100, ge=1, le=200)):
