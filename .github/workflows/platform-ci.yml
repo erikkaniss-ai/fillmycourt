@@ -1,0 +1,61 @@
+name: Platform CI
+
+on:
+  push:
+    branches: ["platform/v0.4-staging"]
+    paths:
+      - "platform/**"
+      - ".github/workflows/platform-ci.yml"
+  pull_request:
+    paths:
+      - "platform/**"
+      - ".github/workflows/platform-ci.yml"
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fmc_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fmc_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/fmc_test
+      PSQL_URL: postgresql://postgres:postgres@localhost:5432/fmc_test
+      PYTHONPATH: \${{ github.workspace }}/platform/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: pip install -r platform/requirements-dev.txt
+      - name: Compile
+        run: python -m compileall -q platform/src
+      - name: Bootstrap Supabase auth contract
+        run: |
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create role anon nologin;
+          create role authenticated nologin;
+          create schema auth;
+          create table auth.users(id uuid primary key);
+          create or replace function auth.uid()
+          returns uuid language sql stable
+          as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+          SQL
+      - name: Apply migrations from zero
+        run: |
+          for f in platform/supabase/migrations/*.sql; do
+            echo "Applying $f"
+            psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Test
+        run: pytest -q platform/tests

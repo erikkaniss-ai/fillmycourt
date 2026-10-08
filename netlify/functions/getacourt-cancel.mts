@@ -1,23 +1,19 @@
-import { body, bookingStore, response, slotKey } from "../lib/getacourt.mts";
+import { body, coreJson, errorResponse, requireAuth, response } from "../lib/platform.mts";
 
 export default async (req) => {
   if (req.method !== "POST") return response({ error:"Method not allowed" }, 405);
-  const input = await body(req);
-  if (!input.bookingId || !input.email) return response({ error:"bookingId and email are required" }, 400);
-
-  const store = bookingStore();
-  const booking = await store.get("booking/" + input.bookingId, { type:"json" });
-  if (!booking) return response({ error:"Booking not found" }, 404);
-  if (String(booking.customer?.email || "").toLowerCase() !== String(input.email).toLowerCase()) {
-    return response({ error:"Booking identity mismatch" }, 403);
+  try {
+    requireAuth(req);
+    const input = await body(req);
+    if (!input.bookingId) return response({ error:"INVALID_BOOKING", message:"bookingId is required" }, 400);
+    const data = await coreJson("/api/bookings/" + encodeURIComponent(input.bookingId) + "/cancel", {
+      method:"POST",
+      body:JSON.stringify({}),
+    }, req);
+    return response(data);
+  } catch (error) {
+    return errorResponse(error);
   }
-  if (booking.status !== "confirmed") return response({ booking });
-
-  booking.status = "cancelled";
-  booking.cancelledAt = new Date().toISOString();
-  await store.setJSON("booking/" + input.bookingId, booking);
-  await store.delete("slot-booking/" + slotKey(booking.slot?.date, booking.slot?.id));
-  return response({ booking });
 };
 
 export const config = { path:"/api/gac/cancel" };
