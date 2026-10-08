@@ -2328,10 +2328,13 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 action = one(c.execute(text("""
                     select ca.id::text,ca.status,ca.quote_amount_minor,ca.execution_enabled,
                            ca.opportunity_version_at_plan,ca.audience_eligible,
+                           ca.expected_incremental_contribution_minor planned_expected_incremental,
                            ro.id::text opportunity_id,ro.status opportunity_status,
                            ro.updated_at opportunity_updated_at,
-                           ro.expected_incremental_contribution_minor,
+                           ro.expected_incremental_contribution_minor current_expected_incremental,
                            ro.quote_amount_minor opportunity_quote,
+                           ro.recommended_starts_at opportunity_start,
+                           ro.duration_minutes opportunity_duration,
                            ro.court_id::text,ro.window_starts_at,ro.window_ends_at
                     from public.crm_actions ca
                     join public.revenue_opportunities ro on ro.id=ca.opportunity_id
@@ -2340,11 +2343,10 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 """), {"action": action_id, "org": org}))
                 if not action:
                     raise DomainError("CRM_ACTION_NOT_FOUND", "CRM action not found.", 404)
-                now_utc = datetime.now().astimezone()
                 stop_reason = None
                 if action["opportunity_status"] in ("won","expired","suppressed","lost"):
                     stop_reason = "opportunity_" + action["opportunity_status"]
-                elif int(action["expected_incremental_contribution_minor"] or 0) <= 0:
+                elif int(action["current_expected_incremental"] or 0) <= 0:
                     stop_reason = "expected_incremental_non_positive"
                 elif int(action["quote_amount_minor"]) != int(action["opportunity_quote"]):
                     stop_reason = "authoritative_price_changed"
@@ -2388,6 +2390,11 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                           and cp.consent_at is not null
                           and cp.suppression_reason is null
                           and (
+                            cp.frequency_cap_hours is null
+                            or cp.last_contacted_at is null
+                            or cp.last_contacted_at + make_interval(hours => cp.frequency_cap_hours) <= now()
+                          )
+                          and (
                             (aa.channel='whatsapp' and p.phone is not null)
                             or (aa.channel='email' and p.email is not null)
                           )
@@ -2413,8 +2420,34 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         "id": action_id, "status": "stopped", "stop_reason": stop_reason,
                         "execution_enabled": False,
                     }
-                stale = action["opportunity_updated_at"] != action["opportunity_version_at_plan"]
-                if stale and action["status"] in ("approval_pending","approved"):
+                first_offer = one(c.execute(text("""
+                    select target_starts_at,target_ends_at
+                    from public.crm_offers
+                    where action_id=cast(:action as uuid)
+                    order by wave_number
+                    limit 1
+                """), {"action": action_id}))
+                planned_expected = int(action["planned_expected_incremental"] or 0)
+                current_expected = int(action["current_expected_incremental"] or 0)
+                material_threshold = max(300, int(round(abs(planned_expected) * 0.20)))
+                economics_changed = abs(current_expected - planned_expected) > material_threshold
+                expected_target_end = (
+                    action["opportunity_start"] + timedelta(minutes=int(action["opportunity_duration"]))
+                    if action.get("opportunity_start") and action.get("opportunity_duration") else None
+                )
+                target_changed = bool(
+                    first_offer
+                    and (
+                        first_offer["target_starts_at"] != action["opportunity_start"]
+                        or first_offer["target_ends_at"] != expected_target_end
+                    )
+                )
+                stale_reason = (
+                    "material_economics_changed" if economics_changed
+                    else "target_inventory_changed" if target_changed
+                    else None
+                )
+                if stale_reason and action["status"] in ("approval_pending","approved"):
                     c.execute(text("""
                         update public.crm_actions
                         set status='stale',execution_enabled=false,updated_at=now()
@@ -2422,6 +2455,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     """), {"action": action_id})
                     return {
                         "id": action_id, "status": "stale",
+                        "stale_reason": stale_reason,
                         "stop_reason": None, "execution_enabled": False,
                     }
                 return {
@@ -2471,11 +2505,15 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     select ca.id::text,ca.status,ca.risk_level,ca.policy_version,
                            ca.opportunity_id::text,ca.opportunity_version_at_plan,
                            ca.quote_amount_minor,ca.audience_total,ca.audience_eligible,
-                           ca.audience_blocked,ca.expected_incremental_contribution_minor,
+                           ca.audience_blocked,
+                           ca.expected_incremental_contribution_minor planned_expected_incremental,
                            ca.economics_snapshot,ca.message_template_key,
                            ro.status opportunity_status,ro.updated_at opportunity_updated_at,
-                           ro.quote_amount_minor opportunity_quote,ro.court_id::text,
-                           ro.window_starts_at,ro.window_ends_at
+                           ro.expected_incremental_contribution_minor current_expected_incremental,
+                           ro.quote_amount_minor opportunity_quote,
+                           ro.recommended_starts_at opportunity_start,
+                           ro.duration_minutes opportunity_duration,
+                           ro.court_id::text,ro.window_starts_at,ro.window_ends_at
                     from public.crm_actions ca
                     join public.revenue_opportunities ro on ro.id=ca.opportunity_id
                     where ca.id=cast(:action as uuid) and ca.organization_id=cast(:org as uuid)
@@ -2496,12 +2534,25 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     order by wave_number
                 """), {"action": action_id}))
                 stale_reason = None
+                planned_expected = int(action["planned_expected_incremental"] or 0)
+                current_expected = int(action["current_expected_incremental"] or 0)
+                material_threshold = max(300, int(round(abs(planned_expected) * 0.20)))
+                first_offer = offers[0] if offers else None
+                expected_target_end = (
+                    action["opportunity_start"] + timedelta(minutes=int(action["opportunity_duration"]))
+                    if action.get("opportunity_start") and action.get("opportunity_duration") else None
+                )
                 if action["opportunity_status"] not in ("actionable","in_progress"):
                     stale_reason = "opportunity_not_actionable"
-                elif action["opportunity_updated_at"] != action["opportunity_version_at_plan"]:
-                    stale_reason = "opportunity_changed"
                 elif int(action["quote_amount_minor"]) != int(action["opportunity_quote"]):
                     stale_reason = "authoritative_price_changed"
+                elif abs(current_expected - planned_expected) > material_threshold:
+                    stale_reason = "material_economics_changed"
+                elif first_offer and (
+                    first_offer["target_starts_at"] != action["opportunity_start"]
+                    or first_offer["target_ends_at"] != expected_target_end
+                ):
+                    stale_reason = "target_inventory_changed"
                 elif any(offer["expires_at"] <= datetime.now().astimezone() for offer in offers):
                     stale_reason = "offer_expired"
                 elif one(c.execute(text("""
