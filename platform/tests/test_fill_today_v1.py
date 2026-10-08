@@ -466,12 +466,15 @@ def test_crm_shadow_requires_verified_channel_permission_and_never_executes_live
               (cast(:id as uuid),cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),
                'crm-shadow-opportunity',cast(:target_date as date),:window_start,:window_end,
                :recommended_start,90,4000,'EUR','actionable',4,85,0.9,0.1,0.7,1800,82,
-               '{"getacourt_network":{"active_intents":4}}'::jsonb,'[]'::jsonb,
-               '{"formula_version":"test"}'::jsonb,now(),now())
+               cast(:source_breakdown as jsonb),cast(:action_plan as jsonb),
+               cast(:explanation as jsonb),now(),now())
         """), {
             "id": opportunity_id, "org": org_id, "venue": venue_id, "court": court_id,
             "target_date": target_start.date().isoformat(), "window_start": target_start,
             "window_end": target_end, "recommended_start": target_start,
+            "source_breakdown": '{"getacourt_network":{"active_intents":4}}',
+            "action_plan": "[]",
+            "explanation": '{"formula_version":"test"}',
         })
 
     settings = Settings(
