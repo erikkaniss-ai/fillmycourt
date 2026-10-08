@@ -1335,6 +1335,77 @@ def _evaluate_revenue_opportunities(c, org: str, orgrow: dict, day) -> list[dict
                       before=current, after={"status": status_map[body.action], "note": body.note})
                 return {"id": item_id, "status": status_map[body.action]}
 
+        @app.post("/api/fmc/{org}/opportunities/evaluate")
+        def evaluate_opportunities(org: str, request: Request, date: str):
+            a = who(request)
+            try:
+                day = datetime.strptime(date, "%Y-%m-%d").date()
+            except ValueError:
+                raise DomainError("DATE", "Use YYYY-MM-DD.", 422) from None
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                orgrow = one(c.execute(text("""
+                    select timezone,default_currency::text currency
+                    from public.organizations
+                    where id=cast(:org as uuid)
+                """), {"org": org}))
+                if not orgrow:
+                    raise DomainError("ORG_NOT_FOUND", "Organization not found.", 404)
+            with db.trusted() as c:
+                items = _evaluate_revenue_opportunities(c, org, orgrow, day)
+            actionable = [item for item in items if item["status"] in ("actionable","in_progress")]
+            expected_incremental = sum(int(item.get("expected_incremental_contribution_minor") or 0) for item in actionable)
+            total_demand = sum(int(item.get("active_demand_count") or 0) for item in actionable)
+            return {
+                "date": date,
+                "formula_version": "fill_demand_aware_v1",
+                "summary": {
+                    "opportunities": len(items),
+                    "actionable": len(actionable),
+                    "expected_incremental_contribution_minor": expected_incremental,
+                    "active_demand_intents": total_demand,
+                    "club_crm_signal": "not_connected",
+                    "execution_mode": "recommendation_only",
+                },
+                "items": items,
+            }
+
+        @app.get("/api/fmc/{org}/opportunities")
+        def list_opportunities(org: str, request: Request, date: str):
+            a = who(request)
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise DomainError("DATE", "Use YYYY-MM-DD.", 422) from None
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                items = rows(c.execute(text("""
+                    select ro.id::text,ro.organization_id::text,ro.venue_id::text,ro.court_id::text,
+                           ro.opportunity_key,ro.target_date,ro.window_starts_at,ro.window_ends_at,
+                           ro.recommended_starts_at,ro.duration_minutes,ro.quote_amount_minor,
+                           ro.currency::text,ro.status,ro.active_demand_count,ro.demand_fit_score,
+                           ro.freshness_confidence,ro.organic_baseline_probability,
+                           ro.action_conversion_probability,ro.expected_incremental_contribution_minor,
+                           ro.priority_score,ro.source_breakdown,ro.action_plan,ro.explanation,
+                           ro.detected_at,ro.qualified_at,ro.actionable_at,ro.in_progress_at,
+                           ro.closed_at,ro.last_evaluated_at,ro.updated_at,
+                           courts.name court_name,venues.name venue_name
+                    from public.revenue_opportunities ro
+                    join public.courts courts on courts.id=ro.court_id
+                    join public.venues venues on venues.id=ro.venue_id
+                    where ro.organization_id=cast(:org as uuid)
+                      and ro.target_date=cast(:date as date)
+                    order by
+                      case ro.status when 'actionable' then 0 when 'in_progress' then 1
+                                     when 'qualified' then 2 when 'detected' then 3
+                                     when 'suppressed' then 4 else 5 end,
+                      ro.expected_incremental_contribution_minor desc,
+                      ro.priority_score desc,
+                      ro.recommended_starts_at
+                    limit 100
+                """), {"org": org, "date": date}))
+                return {"date": date, "items": items}
+
         @app.get("/api/fmc/{org}/demand")
         def demand_signals(org: str, request: Request, date: str):
             a = who(request)
