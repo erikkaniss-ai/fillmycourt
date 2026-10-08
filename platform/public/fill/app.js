@@ -1,7 +1,7 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, courts: [] };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, courts: [], opportunities: null };
   const el = {
     auth: q("#authGate"), workspace: q("#workspace"), org: q("#orgSelect"),
     identity: q("#identity"), signOut: q("#signOut"), date: q("#dateInput"),
@@ -42,9 +42,11 @@
     return localStorage.getItem("fill.access");
   }
 
-  async function api(path) {
+  async function api(path, options = {}) {
     if (!state.token) throw Error("AUTH_REQUIRED");
-    const response = await fetch(path, { headers: { Authorization: `Bearer ${state.token}` } });
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${state.token}`);
+    const response = await fetch(path, { ...options, headers });
     let body = {};
     try { body = await response.json(); } catch {}
     if (!response.ok) {
@@ -115,8 +117,10 @@
       ]);
       state.today = today;
       state.courts = courts.items || [];
+      state.opportunities = null;
       renderToday();
       if (state.view === "calendar") await loadCalendar();
+      if (state.view === "revenue") await loadOpportunities();
     } catch (error) {
       fail(error);
     }
@@ -165,35 +169,90 @@
     renderRevenue();
   }
 
+  async function loadOpportunities() {
+    if (!state.org) return;
+    const date = el.date.value;
+    const result = await api(
+      `/api/fmc/${encodeURIComponent(state.org)}/opportunities/evaluate?date=${encodeURIComponent(date)}`,
+      { method: "POST" }
+    );
+    state.opportunities = result;
+    renderRevenue();
+  }
+
   function renderRevenue() {
     if (!state.today || !el.revenueKpis || !el.opportunityQueue) return;
     const summary = state.today.summary || {};
     const currency = state.today.currency || "EUR";
-    const windows = [...(state.today.empty_windows || [])].sort((left, right) => (
-      Number(right.best_amount_minor || 0) - Number(left.best_amount_minor || 0)
-      || Number(right.duration_minutes || 0) - Number(left.duration_minutes || 0)
-      || new Date(left.starts_at) - new Date(right.starts_at)
-    ));
-    const pricedStarts = Number(summary.bookable_60_starts || 0) + Number(summary.bookable_90_starts || 0);
+    const windows = [...(state.today.empty_windows || [])];
+    const opportunitySummary = state.opportunities?.summary || {};
+    const opportunities = state.opportunities?.items || [];
+    const actionable = Number(opportunitySummary.actionable || 0);
+    const expectedIncremental = Number(opportunitySummary.expected_incremental_contribution_minor || 0);
     const uncovered = Number(summary.courts_without_rate_coverage || 0);
+
     renderKpis(el.revenueKpis, [
       ["Revenue today", mon(summary.revenue_minor, currency), "Confirmed + pending payment"],
       ["Utilisation", `${summary.utilization_pct || 0}%`, "Booked / sellable capacity"],
+      ["Actionable", actionable, "Demand-aware revenue opportunities"],
+      ["Expected incremental", mon(expectedIncremental, currency), "Rule-based expected uplift"],
       ["Rate coverage", rateCoverageSummary(summary), uncovered ? `${uncovered} court needs attention` : "All active courts covered"],
-      ["Priced starts", pricedStarts, "60 + 90 minute bookable starts"],
-      ["Highest quote", mon(summary.highest_single_quote_minor, currency), summary.highest_single_quote_duration_minutes ? `Authoritative ${summary.highest_single_quote_duration_minutes} min quote` : "No priced opportunity"],
     ]);
 
     const timezone = state.today.timezone || "Europe/Lisbon";
-    const formatTime = (iso) => new Intl.DateTimeFormat("en-GB", {
+    const formatTime = (iso) => iso ? new Intl.DateTimeFormat("en-GB", {
       timeZone: timezone, hour: "2-digit", minute: "2-digit", hour12: false,
-    }).format(new Date(iso));
-    el.opportunityQueue.innerHTML = windows.slice(0, 16).map((window, index) => {
-      const topQuote = window.best_amount_minor == null ? "—" : mon(window.best_amount_minor, window.currency || currency);
-      const detail = `${window.bookable_60_count || 0} × 60m · ${window.bookable_90_count || 0} × 90m`;
-      const quoteCaption = window.best_duration_minutes ? `${window.best_duration_minutes} MIN TOP QUOTE` : "NO PRICED START";
-      return `<div class="opportunity-item"><div class="opportunity-main"><span class="opportunity-rank">#${index + 1}</span><div><strong>${esc(window.court_name)}</strong><small>${esc(formatTime(window.starts_at))}–${esc(formatTime(window.ends_at))} · ${hours(window.duration_minutes)} unsold</small><small class="opportunity-quotes">${esc(detail)}</small></div></div><div class="opportunity-value"><strong>${esc(topQuote)}</strong><span>${esc(quoteCaption)}</span></div></div>`;
-    }).join("") || '<p class="muted">No unsold sellable windows of 60+ minutes.</p>';
+    }).format(new Date(iso)) : "—";
+    const pct = (value) => `${Math.round(Number(value || 0) * 100)}%`;
+
+    if (!state.opportunities) {
+      el.opportunityQueue.innerHTML = '<p class="muted">Evaluating demand, organic baseline and incremental contribution…</p>';
+    } else {
+      el.opportunityQueue.innerHTML = opportunities.slice(0, 20).map((opportunity, index) => {
+        const sources = opportunity.source_breakdown || {};
+        const getDemand = Number(sources.getacourt_network?.active_intents || 0);
+        const clubSignal = sources.club_owned?.signal_status === "connected"
+          ? `${Number(sources.club_owned?.active_intents || 0)} club-owned`
+          : "Club CRM signal not connected";
+        const action = (opportunity.action_plan || [])[0];
+        const status = String(opportunity.status || "detected");
+        const signal = sources.demand_level || "none";
+        const expected = mon(opportunity.expected_incremental_contribution_minor || 0, opportunity.currency || currency);
+        const quote = mon(opportunity.quote_amount_minor || 0, opportunity.currency || currency);
+        const timing = `${formatTime(opportunity.recommended_starts_at)} · ${opportunity.duration_minutes || "—"} min`;
+        const actionText = action
+          ? action.action.replaceAll("_", " ").toLowerCase().replace(/^./, c => c.toUpperCase())
+          : "No intervention recommended";
+        return `<article class="opportunity-card status-${esc(status)}">
+          <div class="opportunity-card-head">
+            <div class="opportunity-main">
+              <span class="opportunity-rank">#${index + 1}</span>
+              <div>
+                <div class="opportunity-title-line"><strong>${esc(opportunity.court_name || "Court")}</strong><span class="opportunity-status">${esc(status)}</span></div>
+                <small>${esc(timing)} · ${esc(opportunity.venue_name || "")}</small>
+              </div>
+            </div>
+            <div class="opportunity-value">
+              <strong>${esc(expected)}</strong>
+              <span>EXPECTED INCREMENTAL</span>
+              <small>${esc(quote)} slot value</small>
+            </div>
+          </div>
+          <div class="opportunity-metrics">
+            <span><b>${esc(opportunity.active_demand_count || 0)}</b> active intents</span>
+            <span><b>${esc(Math.round(Number(opportunity.demand_fit_score || 0)))}</b>/100 demand fit</span>
+            <span><b>${esc(signal)}</b> demand</span>
+            <span><b>${esc(pct(opportunity.organic_baseline_probability))}</b> organic baseline</span>
+            <span><b>${esc(Math.round(Number(opportunity.priority_score || 0)))}</b>/100 priority</span>
+          </div>
+          <div class="opportunity-sources">
+            <span>GetACourt network: <b>${esc(getDemand)}</b></span>
+            <span>${esc(clubSignal)}</span>
+          </div>
+          <div class="opportunity-action"><span>RECOMMENDED</span><strong>${esc(actionText)}</strong><small>Recommendation only · no automatic pricing, messaging or provider writes.</small></div>
+        </article>`;
+      }).join("") || '<p class="muted">No demand-aware revenue opportunities for this date.</p>';
+    }
 
     if (el.courtComparison) renderCourtComparison(windows, currency);
   }
@@ -300,7 +359,7 @@
     if (state.view === "calendar") {
       try { await loadCalendar(); } catch (error) { fail(error); }
     } else if (state.view === "revenue") {
-      renderRevenue();
+      try { await loadOpportunities(); } catch (error) { fail(error); }
     }
   }));
 
