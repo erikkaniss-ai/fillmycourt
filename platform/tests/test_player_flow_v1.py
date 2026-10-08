@@ -49,9 +49,9 @@ def player_flow():
         c.execute(text("""
             insert into public.venues(id,organization_id,name,timezone,currency,address)
             values(cast(:venue as uuid),cast(:org as uuid),'Cascais CI Venue',
-                   'Europe/Lisbon','EUR',
-                   '{"city":"Cascais","country":"Portugal","lat":38.6979,"lon":-9.4215}'::jsonb)
-        """), {"venue": venue_id, "org": org_id})
+                   'Europe/Lisbon','EUR',cast(:address as jsonb))
+        """), {"venue": venue_id, "org": org_id,
+                "address": '{"city":"Cascais","country":"Portugal","lat":38.6979,"lon":-9.4215}'})
         c.execute(text("""
             insert into public.courts(id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled)
             values(cast(:court as uuid),cast(:venue as uuid),'Padel CI','padel',true,'native',true)
