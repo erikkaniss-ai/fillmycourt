@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import hashlib
 import io
 import json
+import math
 from pathlib import Path
 import re
 import uuid
@@ -213,6 +214,92 @@ def _match_score(slot: dict, routine: dict) -> float:
         components.append((10.0, 1.0 if str(slot.get("venue_id")) in preferred else 0.0))
     weight = sum(w for w, _ in components)
     return round(100.0 * sum(w * v for w, v in components) / weight, 2) if weight else 0.0
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlon / 2) ** 2
+    return radius * 2 * math.asin(math.sqrt(a))
+
+
+def _opportunity_demand_match(candidate: dict, intent: dict) -> tuple[float, float | None] | None:
+    if intent["sport"] != candidate["sport"]:
+        return None
+    if int(intent["duration_minutes"]) != int(candidate["duration_minutes"]):
+        return None
+
+    local = candidate["starts_at"].astimezone(ZoneInfo(intent["timezone"]))
+    if str(intent["target_date"]) != local.date().isoformat():
+        return None
+    start_minute = local.hour * 60 + local.minute
+    end_minute = start_minute + int(candidate["duration_minutes"])
+    if start_minute < int(intent["window_start_minute"]) or end_minute > int(intent["window_end_minute"]):
+        return None
+
+    max_price = intent.get("max_price_minor")
+    if max_price is not None and int(candidate["amount_minor"]) > int(max_price):
+        return None
+
+    indoor_pref = intent.get("indoor_preference") or "all"
+    if indoor_pref == "indoor" and candidate.get("indoor") is not True:
+        return None
+    if indoor_pref == "outdoor" and candidate.get("indoor") is not False:
+        return None
+
+    venue_id = str(candidate["venue_id"])
+    if venue_id in set(intent.get("excluded_venue_ids") or []):
+        return None
+
+    distance = None
+    if intent.get("center_lat") is not None and intent.get("center_lon") is not None:
+        if candidate.get("venue_lat") is None or candidate.get("venue_lon") is None:
+            return None
+        distance = _haversine_km(
+            float(intent["center_lat"]), float(intent["center_lon"]),
+            float(candidate["venue_lat"]), float(candidate["venue_lon"]),
+        )
+        if distance > float(intent["radius_km"]):
+            return None
+    else:
+        label = (intent.get("location_label") or "").strip().casefold()
+        haystack = f'{candidate.get("venue_name") or ""} {candidate.get("venue_address") or ""}'.casefold()
+        if label and label not in haystack:
+            return None
+
+    latest_start = int(intent["window_end_minute"]) - int(intent["duration_minutes"])
+    center = (int(intent["window_start_minute"]) + max(int(intent["window_start_minute"]), latest_start)) / 2
+    span = max(30.0, (max(int(intent["window_start_minute"]), latest_start) - int(intent["window_start_minute"])) / 2 or 30.0)
+    components = [(35.0, max(0.0, 1.0 - abs(start_minute - center) / span))]
+
+    if distance is not None and float(intent["radius_km"]) > 0:
+        components.append((20.0, max(0.0, 1.0 - distance / float(intent["radius_km"]))))
+
+    if max_price:
+        components.append((15.0, max(0.0, 1.0 - int(candidate["amount_minor"]) / int(max_price))))
+
+    preferred = set(intent.get("preferred_venue_ids") or [])
+    if preferred:
+        components.append((10.0, 1.0 if venue_id in preferred else 0.0))
+
+    components.append((20.0, float(intent.get("freshness_score") or 0)))
+    weight = sum(w for w, _ in components)
+    score = round(100.0 * sum(w * v for w, v in components) / weight, 2) if weight else 0.0
+    return score, distance
+
+
+def _opportunity_urgency(hours_to_slot: float) -> float:
+    if hours_to_slot <= 6:
+        return 1.0
+    if hours_to_slot <= 24:
+        return 0.8
+    if hours_to_slot <= 72:
+        return 0.55
+    if hours_to_slot <= 168:
+        return 0.35
+    return 0.2
 
 
 def create_v1_app(settings, service: str = "all", auth_override=None):
