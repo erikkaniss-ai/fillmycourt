@@ -180,6 +180,25 @@
     renderRevenue();
   }
 
+  function renderCrmShadow(target, result) {
+    const action = result.action || {};
+    const shadow = result.shadow || {};
+    const waves = shadow.waves || [];
+    const exclusions = shadow.exclusions || {};
+    const exclusionText = Object.entries(exclusions)
+      .map(([reason, count]) => `${count} ${reason.replaceAll("_", " ")}`)
+      .join(" · ");
+    target.innerHTML = `<div class="crm-shadow-summary">
+      <div><span>SHADOW PLAN</span><strong>${esc(action.audience_eligible || 0)} eligible · ${esc(action.audience_blocked || 0)} blocked</strong></div>
+      <small>${esc(waves.length)} audience wave${waves.length === 1 ? "" : "s"} · WhatsApp primary / Email fallback</small>
+      ${exclusionText ? `<small>Excluded: ${esc(exclusionText)}</small>` : ""}
+      <small class="crm-safety">Execution disabled. No messages, bookings, prices or provider data are written.</small>
+      ${Number(action.audience_eligible || 0) > 0 && action.status === "shadow_ready"
+        ? `<button class="button secondary crm-approval-request" data-action-id="${esc(action.id)}">Request approval</button>`
+        : ""}
+    </div>`;
+  }
+
   function renderRevenue() {
     if (!state.today || !el.revenueKpis || !el.opportunityQueue) return;
     const summary = state.today.summary || {};
@@ -250,6 +269,9 @@
             <span>${esc(clubSignal)}</span>
           </div>
           <div class="opportunity-action"><span>RECOMMENDED</span><strong>${esc(actionText)}</strong><small>Recommendation only · no automatic pricing, messaging or provider writes.</small></div>
+          ${status === "actionable" || status === "in_progress"
+            ? `<div class="crm-shadow-controls"><button class="button secondary crm-shadow-button" data-opportunity-id="${esc(opportunity.id)}">Prepare CRM shadow</button><div class="crm-shadow-result"></div></div>`
+            : ""}
         </article>`;
       }).join("") || '<p class="muted">No demand-aware revenue opportunities for this date.</p>';
     }
@@ -348,6 +370,62 @@
     }).join("");
     el.timeline.innerHTML = `<div class="court-grid"><div class="court-axis"><span>COURT</span><div class="time-axis" style="grid-template-columns:repeat(${steps.length},minmax(22px,1fr))">${labels}</div><span>UTIL.</span></div>${lanes}</div><div class="timeline-legend"><span><i class="legend-open"></i>Available</span><span><i class="legend-booked"></i>Booked</span><span><i class="legend-held"></i>Held</span><span><i class="legend-blocked"></i>Blocked</span><span><i class="legend-closed"></i>Not sellable</span></div>`;
   }
+
+  el.opportunityQueue?.addEventListener("click", async (event) => {
+    const shadowButton = event.target.closest(".crm-shadow-button");
+    if (shadowButton) {
+      const card = shadowButton.closest(".opportunity-card");
+      const target = card?.querySelector(".crm-shadow-result");
+      if (!target) return;
+      shadowButton.disabled = true;
+      shadowButton.textContent = "Preparing…";
+      try {
+        const result = await api(
+          `/api/fmc/${encodeURIComponent(state.org)}/opportunities/${encodeURIComponent(shadowButton.dataset.opportunityId)}/crm-shadow`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }
+        );
+        renderCrmShadow(target, result);
+        shadowButton.textContent = "Rebuild CRM shadow";
+      } catch (error) {
+        target.innerHTML = `<p class="crm-shadow-error">${esc(error.message || String(error))}</p>`;
+        shadowButton.textContent = "Prepare CRM shadow";
+      } finally {
+        shadowButton.disabled = false;
+      }
+      return;
+    }
+
+    const requestButton = event.target.closest(".crm-approval-request");
+    if (requestButton) {
+      requestButton.disabled = true;
+      try {
+        const result = await api(
+          `/api/fmc/${encodeURIComponent(state.org)}/crm-actions/${encodeURIComponent(requestButton.dataset.actionId)}/request-approval`,
+          { method: "POST" }
+        );
+        requestButton.outerHTML = `<button class="button primary crm-approval-approve" data-action-id="${esc(requestButton.dataset.actionId)}">Approve plan · no send</button><small class="crm-approval-state">${esc(result.status)}</small>`;
+      } catch (error) {
+        requestButton.insertAdjacentHTML("afterend", `<small class="crm-shadow-error">${esc(error.message || String(error))}</small>`);
+        requestButton.disabled = false;
+      }
+      return;
+    }
+
+    const approveButton = event.target.closest(".crm-approval-approve");
+    if (approveButton) {
+      approveButton.disabled = true;
+      try {
+        const result = await api(
+          `/api/fmc/${encodeURIComponent(state.org)}/crm-actions/${encodeURIComponent(approveButton.dataset.actionId)}/approve`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve" }) }
+        );
+        approveButton.outerHTML = `<span class="crm-approved">Approved · execution still disabled</span><small class="crm-approval-state">${esc(result.status)}</small>`;
+      } catch (error) {
+        approveButton.insertAdjacentHTML("afterend", `<small class="crm-shadow-error">${esc(error.message || String(error))}</small>`);
+        approveButton.disabled = false;
+      }
+    }
+  });
 
   qa(".nav-item").forEach((button) => button.addEventListener("click", async () => {
     state.view = button.dataset.view;
