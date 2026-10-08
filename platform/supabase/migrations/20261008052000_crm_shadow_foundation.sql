@@ -117,6 +117,7 @@ create table public.crm_offers (
 );
 
 create index crm_offers_action_idx on public.crm_offers(action_id,wave_number,status);
+create index crm_offers_org_idx on public.crm_offers(organization_id,status);
 create index crm_offers_opportunity_idx on public.crm_offers(opportunity_id,status);
 create index crm_offers_target_idx on public.crm_offers(target_court_id,target_starts_at,target_ends_at);
 
@@ -208,6 +209,6 @@ using (private.has_org_role(organization_id,array['owner','admin','manager','ana
 create policy crm_approvals_manager_insert on public.crm_approvals
 for insert to authenticated
 with check (
-  approver_user_id=auth.uid()
+  approver_user_id=(select auth.uid())
   and private.has_org_role(organization_id,array['owner','admin','manager']::public.fmc_member_role[])
 );
