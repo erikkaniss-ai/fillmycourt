@@ -22,6 +22,7 @@
       <a href="#discover">Discover</a>
       <a href="#how">How it works</a>
       <button class="nav-button" id="myBookingsButton" type="button">My bookings</button>
+      <button class="nav-button" id="myWatchesButton" type="button">My watches</button>
       <button class="nav-button" id="authButton" type="button">Sign in</button>
     </nav>
     <a class="club-link" href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">For clubs ↗</a>
@@ -113,6 +114,14 @@
         </div>
       </div>
       <div id="quickPicks" class="quick-picks" hidden></div>
+      <div id="watchPrompt" class="watch-prompt" hidden>
+        <div>
+          <span class="watch-kicker">PLAY ROUTINE</span>
+          <strong id="watchPromptTitle">Want me to keep looking?</strong>
+          <small id="watchPromptText">Save this search and GetACourt will keep watching for a useful match.</small>
+        </div>
+        <button id="watchPromptButton" class="ghost-button watch-cta" type="button">Keep looking</button>
+      </div>
       <div id="resultsGrid" class="results-grid">
         <div class="empty-state">
           <div class="empty-orbit"></div>
@@ -226,6 +235,45 @@
       <h2>My bookings</h2>
       <div id="bookingsList" class="bookings-list"></div>
     </div>
+  </dialog>
+
+  <dialog class="bookings-dialog watches-dialog" id="watchesDialog">
+    <div class="dialog-shell watches-shell">
+      <button class="dialog-close" id="closeWatchesButton" aria-label="Close">×</button>
+      <p class="eyebrow">PLAY ROUTINES</p>
+      <h2>My watches</h2>
+      <p class="payment-note">GetACourt watches the next useful dates for your routine. Booking remains manual in this staging build.</p>
+      <div id="watchAlerts" class="watch-alerts"></div>
+      <div id="watchesList" class="bookings-list"></div>
+    </div>
+  </dialog>
+
+  <dialog class="booking-dialog watch-dialog" id="watchDialog">
+    <form class="dialog-shell" id="watchForm">
+      <button class="dialog-close" id="closeWatchButton" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">KEEP LOOKING</p>
+      <h2>Save this play routine</h2>
+      <div id="watchSummary" class="booking-summary"></div>
+      <div class="checkout-grid watch-grid">
+        <label class="field"><span>Duration</span>
+          <select id="watchDuration">
+            <option value="60">60 min</option>
+            <option value="90" selected>90 min</option>
+          </select>
+        </label>
+        <label class="field"><span>Max court price</span><input id="watchMaxPrice" type="number" min="0" step="1" placeholder="No limit" /></label>
+        <label class="field"><span>Radius</span><input id="watchRadius" type="number" min="1" max="200" step="1" value="10" /></label>
+        <label class="field"><span>Court type</span>
+          <select id="watchIndoor">
+            <option value="all">Indoor or outdoor</option>
+            <option value="indoor">Indoor only</option>
+            <option value="outdoor">Outdoor only</option>
+          </select>
+        </label>
+      </div>
+      <p class="payment-note">You choose the rules. GetACourt only creates a persistent demand watch after you confirm.</p>
+      <button class="confirm-button" type="submit">Save & start watching</button>
+    </form>
   </dialog>
 
   <dialog class="booking-dialog auth-dialog" id="authDialog">
