@@ -1965,7 +1965,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     join public.organizations o on o.id=ro.organization_id
                     where ro.id=cast(:opportunity as uuid)
                       and ro.organization_id=cast(:org as uuid)
-                    for update
+                    for update of ro
                 """), {"opportunity": opportunity_id, "org": org}))
                 if not opportunity:
                     raise DomainError("OPPORTUNITY_NOT_FOUND", "Revenue Opportunity not found.", 404)
