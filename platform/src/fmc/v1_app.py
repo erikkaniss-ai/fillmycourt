@@ -992,6 +992,91 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     order by id limit :limit
                 """), params))}
 
+        @app.post("/api/fmc/{org}/people/{person_id}/communication-permissions")
+        def upsert_communication_permission(org: str, person_id: str,
+                                            body: CommunicationPermissionIn, request: Request):
+            a = who(request)
+            channel = body.channel.strip().lower()
+            status = body.status.strip().lower()
+            purpose = body.purpose.strip().lower()
+            if channel not in ("whatsapp","email","sms","push"):
+                raise DomainError("CHANNEL", "Unsupported communication channel.", 422)
+            if status not in ("granted","denied","withdrawn","unknown"):
+                raise DomainError("CONSENT_STATUS", "Unsupported permission status.", 422)
+            consent_at = iso(body.consent_at) if body.consent_at else None
+            if status == "granted" and (not body.consent_proof or consent_at is None):
+                raise DomainError("CONSENT_PROOF", "Granted permission requires evidence and consent timestamp.", 422)
+            with db.user(a.id) as c:
+                actor_role = role(c, org, a, ROLE_MANAGER)
+                person = one(c.execute(text("""
+                    select id::text,full_name,email,phone
+                    from public.people
+                    where id=cast(:person as uuid) and organization_id=cast(:org as uuid)
+                """), {"person": person_id, "org": org}))
+                if not person:
+                    raise DomainError("PERSON_NOT_FOUND", "CRM contact not found.", 404)
+                if channel == "whatsapp" and status == "granted" and not person.get("phone"):
+                    raise DomainError("CHANNEL_IDENTITY", "WhatsApp permission requires a phone number.", 422)
+                if channel == "email" and status == "granted" and not person.get("email"):
+                    raise DomainError("CHANNEL_IDENTITY", "Email permission requires an email address.", 422)
+                row = one(c.execute(text("""
+                    insert into public.communication_permissions
+                      (organization_id,person_id,channel,purpose,status,consent_proof,consent_at,
+                       jurisdiction,source,frequency_cap_count,frequency_cap_hours,
+                       suppression_reason,created_by,updated_at)
+                    values
+                      (cast(:org as uuid),cast(:person as uuid),:channel,:purpose,:status,
+                       :proof,:consent_at,:jurisdiction,:source,:cap_count,:cap_hours,
+                       :suppression,cast(:uid as uuid),now())
+                    on conflict(organization_id,person_id,channel,purpose) do update set
+                      status=excluded.status,
+                      consent_proof=excluded.consent_proof,
+                      consent_at=excluded.consent_at,
+                      jurisdiction=excluded.jurisdiction,
+                      source=excluded.source,
+                      frequency_cap_count=excluded.frequency_cap_count,
+                      frequency_cap_hours=excluded.frequency_cap_hours,
+                      suppression_reason=excluded.suppression_reason,
+                      updated_at=now()
+                    returning id::text,person_id::text,channel,purpose,status,consent_proof,
+                              consent_at,jurisdiction,source,frequency_cap_count,
+                              frequency_cap_hours,last_contacted_at,suppression_reason,
+                              created_at,updated_at
+                """), {
+                    "org": org, "person": person_id, "channel": channel, "purpose": purpose,
+                    "status": status, "proof": body.consent_proof, "consent_at": consent_at,
+                    "jurisdiction": body.jurisdiction, "source": body.source,
+                    "cap_count": body.frequency_cap_count, "cap_hours": body.frequency_cap_hours,
+                    "suppression": body.suppression_reason, "uid": a.id,
+                }))
+                audit(c, request, org, a, "communication_permission.upserted",
+                      "communication_permission", row["id"],
+                      after={"person_id": person_id, "channel": channel, "purpose": purpose,
+                             "status": status, "role": actor_role})
+                return row
+
+        @app.get("/api/fmc/{org}/people/{person_id}/communication-permissions")
+        def list_communication_permissions(org: str, person_id: str, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                person = one(c.execute(text("""
+                    select id::text from public.people
+                    where id=cast(:person as uuid) and organization_id=cast(:org as uuid)
+                """), {"person": person_id, "org": org}))
+                if not person:
+                    raise DomainError("PERSON_NOT_FOUND", "CRM contact not found.", 404)
+                return {"items": rows(c.execute(text("""
+                    select id::text,person_id::text,channel,purpose,status,consent_proof,
+                           consent_at,jurisdiction,source,frequency_cap_count,
+                           frequency_cap_hours,last_contacted_at,suppression_reason,
+                           created_at,updated_at
+                    from public.communication_permissions
+                    where organization_id=cast(:org as uuid)
+                      and person_id=cast(:person as uuid)
+                    order by channel,purpose
+                """), {"org": org, "person": person_id}))}
+
         @app.post("/api/fmc/{org}/imports", status_code=201)
         def stage_import(org: str, body: ImportIn, request: Request):
             a = who(request)
