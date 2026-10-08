@@ -1,5 +1,7 @@
 import os
 import uuid
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -273,3 +275,148 @@ def test_fill_today_opportunity_quotes_follow_rate_priority(fill_today):
     assert evening["max_90_amount_minor"] == 6000
     assert evening["best_duration_minutes"] == 90
     assert r.json()["summary"]["highest_single_quote_minor"] == 6000
+
+
+
+def test_fill_demand_aware_opportunity_is_incremental_private_and_lifecycle_aware(fill_today):
+    url, store, user_id, org_id, court_id = fill_today
+    player_id = str(uuid.uuid4())
+    target = datetime.now(ZoneInfo("Europe/Lisbon")).date() + timedelta(days=7)
+    target_weekday = target.weekday()
+    target_start = datetime(target.year, target.month, target.day, 17, 0, tzinfo=ZoneInfo("Europe/Lisbon"))
+    expires_at = datetime(target.year, target.month, target.day, 23, 59, tzinfo=ZoneInfo("Europe/Lisbon"))
+
+    with store.trusted() as c:
+        venue_id = c.execute(text("""
+            select venue_id::text from public.courts where id=cast(:court as uuid)
+        """), {"court": court_id}).scalar_one()
+        c.execute(text("insert into auth.users(id) values(cast(:uid as uuid))"), {"uid": player_id})
+        routine_id = c.execute(text("""
+            insert into public.play_routines
+              (user_id,sport,days_of_week,window_start_minute,window_end_minute,duration_minutes,
+               location_label,center_lat,center_lon,radius_km,max_price_minor,currency,
+               indoor_preference,timezone,start_date,status,watch_enabled)
+            values
+              (cast(:uid as uuid),'padel',:days,1020,1200,90,
+               'Cascais',38.6979,-9.4215,10,5000,'EUR',
+               'indoor','Europe/Lisbon',cast(:target as date),'active',true)
+            returning id::text
+        """), {"uid": player_id, "days": [target_weekday], "target": target.isoformat()}).scalar_one()
+        c.execute(text("""
+            insert into public.demand_intents
+              (routine_id,user_id,target_date,window_start_minute,window_end_minute,
+               duration_minutes,status,freshness_score,expires_at)
+            values
+              (cast(:routine as uuid),cast(:uid as uuid),cast(:target as date),
+               1020,1200,90,'watching',1.000,:expires)
+        """), {
+            "routine": routine_id,
+            "uid": player_id,
+            "target": target.isoformat(),
+            "expires": expires_at,
+        })
+
+        before_bookings = c.execute(text("""
+            select count(*) from public.bookings where organization_id=cast(:org as uuid)
+        """), {"org": org_id}).scalar_one()
+        before_holds = c.execute(text("""
+            select count(*) from public.booking_holds where organization_id=cast(:org as uuid)
+        """), {"org": org_id}).scalar_one()
+        before_people = c.execute(text("""
+            select count(*) from public.people where organization_id=cast(:org as uuid)
+        """), {"org": org_id}).scalar_one()
+
+    settings = Settings(
+        origin="https://fill.test",
+        environment="test",
+        database=url,
+        supabase_url="https://example.supabase.co",
+        supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+    evaluated = client.post(
+        f"/api/fmc/{org_id}/opportunities/evaluate",
+        params={"date": target.isoformat()},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert evaluated.status_code == 200, evaluated.text
+    payload = evaluated.json()
+    assert payload["formula_version"] == "fill_demand_aware_v1"
+    assert payload["summary"]["actionable"] >= 1
+    assert payload["summary"]["expected_incremental_contribution_minor"] > 0
+    assert payload["summary"]["club_crm_signal"] == "not_connected"
+
+    opportunity = next(item for item in payload["items"] if item["status"] == "actionable")
+    assert opportunity["court_id"] == court_id
+    assert opportunity["active_demand_count"] >= 1
+    assert float(opportunity["demand_fit_score"]) >= 50
+    assert int(opportunity["expected_incremental_contribution_minor"]) > 0
+    assert float(opportunity["priority_score"]) >= 50
+    assert opportunity["source_breakdown"]["getacourt_network"]["active_intents"] >= 1
+    assert opportunity["source_breakdown"]["club_owned"]["signal_status"] == "not_connected"
+    assert opportunity["action_plan"][0]["action"] == "ACTIVATE_GET_NETWORK_CURRENT_PRICE"
+    assert opportunity["action_plan"][0]["execution"] == "recommendation_only"
+    assert "player_id" not in evaluated.text
+    assert player_id not in evaluated.text
+
+    listed = client.get(
+        f"/api/fmc/{org_id}/opportunities",
+        params={"date": target.isoformat()},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == opportunity["id"] for item in listed.json()["items"])
+
+    with store.trusted() as c:
+        assert c.execute(text("""
+            select count(*) from public.bookings where organization_id=cast(:org as uuid)
+        """), {"org": org_id}).scalar_one() == before_bookings
+        assert c.execute(text("""
+            select count(*) from public.booking_holds where organization_id=cast(:org as uuid)
+        """), {"org": org_id}).scalar_one() == before_holds
+        assert c.execute(text("""
+            select count(*) from public.people where organization_id=cast(:org as uuid)
+        """), {"org": org_id}).scalar_one() == before_people
+        assert c.execute(text("""
+            select count(*) from public.revenue_opportunities
+            where organization_id=cast(:org as uuid) and target_date=cast(:target as date)
+        """), {"org": org_id, "target": target.isoformat()}).scalar_one() >= 1
+
+        recommended = datetime.fromisoformat(opportunity["recommended_starts_at"])
+        ends_at = recommended + timedelta(minutes=int(opportunity["duration_minutes"]))
+        c.execute(text("""
+            insert into public.bookings
+              (organization_id,venue_id,court_id,status,starts_at,ends_at,
+               currency,gross_amount_minor,source,idempotency_key)
+            values
+              (cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),'confirmed',
+               :starts_at,:ends_at,'EUR',:amount,'manual','demand-aware-won')
+        """), {
+            "org": org_id,
+            "venue": venue_id,
+            "court": court_id,
+            "starts_at": recommended,
+            "ends_at": ends_at,
+            "amount": int(opportunity["quote_amount_minor"]),
+        })
+
+    reevaluated = client.post(
+        f"/api/fmc/{org_id}/opportunities/evaluate",
+        params={"date": target.isoformat()},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert reevaluated.status_code == 200, reevaluated.text
+
+    lifecycle = client.get(
+        f"/api/fmc/{org_id}/opportunities",
+        params={"date": target.isoformat()},
+        headers={"Authorization": "Bearer ci-owner-token"},
+    )
+    assert lifecycle.status_code == 200, lifecycle.text
+    won = next(item for item in lifecycle.json()["items"] if item["id"] == opportunity["id"])
+    assert won["status"] == "won"
+    assert won["closed_at"] is not None
+
+    with store.trusted() as c:
+        c.execute(text("delete from auth.users where id=cast(:uid as uuid)"), {"uid": player_id})
