@@ -4,7 +4,8 @@
   const state = {
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
-    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, onlinePayments:false }, session:null, profile:null, geo:null
+    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, onlinePayments:false },
+    session:null, profile:null, geo:null, searchMeta:{}, hasSearched:false, routines:[], watchNotifications:[]
   };
 
   const el = {
@@ -26,7 +27,13 @@
     resultsMap:q("#resultsMap"), quickPicks:q("#quickPicks"), venueDialog:q("#venueDialog"),
     venueDialogContent:q("#venueDialogContent"), closeVenue:q("#closeVenueButton"),
     bookingIdentityLabel:q("#bookingIdentityLabel"), bookingIdentityNote:q("#bookingIdentityNote"),
-    bookingIdentityAction:q("#bookingIdentityAction"), bookingPaymentStatus:q("#bookingPaymentStatus")
+    bookingIdentityAction:q("#bookingIdentityAction"), bookingPaymentStatus:q("#bookingPaymentStatus"),
+    myWatches:q("#myWatchesButton"), watchesDialog:q("#watchesDialog"), watchesList:q("#watchesList"),
+    closeWatches:q("#closeWatchesButton"), watchAlerts:q("#watchAlerts"),
+    watchPrompt:q("#watchPrompt"), watchPromptTitle:q("#watchPromptTitle"), watchPromptText:q("#watchPromptText"),
+    watchPromptButton:q("#watchPromptButton"), watchDialog:q("#watchDialog"), watchForm:q("#watchForm"),
+    watchSummary:q("#watchSummary"), watchDuration:q("#watchDuration"), watchMaxPrice:q("#watchMaxPrice"),
+    watchRadius:q("#watchRadius"), watchIndoor:q("#watchIndoor"), closeWatch:q("#closeWatchButton")
   };
 
   const now = new Date();
@@ -42,6 +49,9 @@
   function prettyDate(v){return new Intl.DateTimeFormat("en-GB",{weekday:"short",day:"numeric",month:"short"}).format(new Date(v+"T12:00:00"));}
   function toast(message){el.toast.textContent=message;el.toast.classList.add("show");setTimeout(()=>el.toast.classList.remove("show"),2600);}
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(16).slice(2);}
+  function weekdayIndex(dateValue){const d=new Date(dateValue+"T12:00:00");return (d.getDay()+6)%7;}
+  function weekdayLabel(i){return ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][Number(i)]||"Day";}
+  function minuteLabel(v){const n=Number(v||0);return String(Math.floor(n/60)).padStart(2,"0")+":"+String(n%60).padStart(2,"0");}
 
   function loadSession(){
     try{return JSON.parse(localStorage.getItem("gac.session")||"null");}catch{return null;}
@@ -149,6 +159,8 @@
     try{
       const data=await api("/api/gac/search?"+new URLSearchParams(p).toString());
       state.venues=data.venues||[];
+      state.searchMeta=data.search||{};
+      state.hasSearched=true;
       if(el.radiusNote){
         const s=data.search||{};
         el.radiusNote.textContent=s.radiusUsedKm
@@ -157,11 +169,14 @@
       }
     }catch(err){
       state.venues=[];
+      state.searchMeta={};
+      state.hasSearched=true;
       if(el.radiusNote) el.radiusNote.textContent="";
       toast(err.message||"Live availability is temporarily unavailable.");
     }
     el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
+    renderWatchPrompt();
     q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
   }
 
@@ -270,6 +285,17 @@
     el.quickPicks.hidden=!el.quickPicks.innerHTML;
     qa(".quick-pick",el.quickPicks).forEach(b=>b.addEventListener("click",()=>openVenue(b.dataset.v)));
   }
+  function renderWatchPrompt(){
+    if(!el.watchPrompt) return;
+    if(!state.hasSearched){el.watchPrompt.hidden=true;return;}
+    const day=weekdayLabel(weekdayIndex(el.date.value));
+    const place=state.geo?"near your current location":("around "+(el.location.value.trim()||"your area"));
+    const hasMatches=state.venues.some(visible);
+    el.watchPromptTitle.textContent=hasMatches?"Want me to keep watching this time?":"Nothing fits yet. Want me to keep looking?";
+    el.watchPromptText.textContent="Save "+day+" "+el.from.value+"–"+el.to.value+" "+place+" as a Play Routine. Booking stays manual.";
+    el.watchPrompt.hidden=false;
+  }
+
   function render(){
     const venues=sortedVenues();
     const n=venues.reduce((a,v)=>a+filteredSlots(v).length,0);
@@ -298,6 +324,104 @@
     qa(".slot",el.grid).forEach(b=>b.addEventListener("click",()=>selectSlot(b.dataset.v,b.dataset.s)));
     qa(".venue-detail-button",el.grid).forEach(b=>b.addEventListener("click",()=>openVenue(b.dataset.venue)));
     updateView();
+  }
+
+  async function openWatchDialog(){
+    const token=await accessToken();
+    if(!token){openAuth("Sign in to save a Play Routine.");return;}
+    const day=weekdayLabel(weekdayIndex(el.date.value));
+    const place=state.geo?"Current location":(el.location.value.trim()||"Your area");
+    el.watchSummary.innerHTML="<strong>"+esc(state.sport)+" · "+esc(day)+"s</strong><span>"+esc(el.from.value)+"–"+esc(el.to.value)+" · "+esc(place)+"</span><span>GetACourt will watch upcoming matching dates. Booking remains manual.</span>";
+    el.watchRadius.value=String(state.searchMeta.radiusUsedKm||10);
+    el.watchMaxPrice.value="";
+    el.watchDuration.value=state.filter==="90min"?"90":"90";
+    el.watchIndoor.value=state.filter==="indoor"?"indoor":"all";
+    el.watchDialog.showModal();
+  }
+
+  async function saveWatch(e){
+    e.preventDefault();
+    const token=await accessToken();
+    if(!token){el.watchDialog.close();openAuth("Sign in to save a Play Routine.");return;}
+    const maxPrice=el.watchMaxPrice.value.trim();
+    const payload={
+      sport:state.sport,
+      daysOfWeek:[weekdayIndex(el.date.value)],
+      windowStart:el.from.value,
+      windowEnd:el.to.value,
+      durationMinutes:Number(el.watchDuration.value||90),
+      locationLabel:state.geo?"Current location":(el.location.value.trim()||"Cascais"),
+      centerLat:state.geo?.lat??null,
+      centerLon:state.geo?.lon??null,
+      radiusKm:Number(el.watchRadius.value||state.searchMeta.radiusUsedKm||10),
+      maxPriceMinor:maxPrice===""?null:Math.round(Number(maxPrice)*100),
+      currency:"EUR",
+      indoorPreference:el.watchIndoor.value||"all",
+      timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||"Europe/Lisbon",
+      startDate:el.date.value
+    };
+    try{
+      const created=await api("/api/gac/play-routines",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)},true);
+      const routine=created.routine;
+      let evaluated=null;
+      try{
+        evaluated=await api("/api/gac/play-routine-evaluate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routineId:routine.id})},true);
+      }catch{}
+      el.watchDialog.close();
+      toast(evaluated?.matches?.length?"Play Routine saved · matching courts found.":"Play Routine saved · I’ll keep looking.");
+      await loadWatches(false);
+    }catch(err){toast(err.message||"Could not save this Play Routine.");}
+  }
+
+  function renderWatches(){
+    if(!el.watchesList) return;
+    if(!state.routines.length){
+      el.watchesList.innerHTML='<div class="empty-state watch-empty"><h3>No Play Routines yet</h3><p>Save a search and GetACourt can keep watching upcoming matching dates.</p></div>';
+    }else{
+      el.watchesList.innerHTML=state.routines.map(r=>{
+        const maxPrice=r.max_price_minor==null?"No price limit":money(Number(r.max_price_minor)/100,r.currency||"EUR");
+        const days=(r.days_of_week||[]).map(weekdayLabel).join(", ");
+        const next=r.next_check_at?new Date(r.next_check_at).toLocaleString([], {day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):"On next check";
+        const toggle=r.status==="active"?"paused":"active";
+        return '<article class="watch-item"><div class="watch-item-head"><div><strong>'+esc(r.sport)+' · '+esc(days)+'</strong><span>'+esc(minuteLabel(r.window_start_minute))+'–'+esc(minuteLabel(r.window_end_minute))+' · '+esc(r.duration_minutes)+' min</span></div><span class="booking-status">'+esc(r.status)+'</span></div><div class="watch-meta"><span>'+esc(r.location_label||"Location")+' · '+esc(Number(r.radius_km||0).toFixed(0))+' km</span><span>'+esc(maxPrice)+' · next '+esc(next)+'</span></div><button class="ghost-button watch-toggle" type="button" data-routine="'+esc(r.id)+'" data-status="'+toggle+'">'+(toggle==="paused"?"Pause":"Resume")+'</button></article>';
+      }).join("");
+      qa(".watch-toggle",el.watchesList).forEach(b=>b.addEventListener("click",()=>setRoutineStatus(b.dataset.routine,b.dataset.status)));
+    }
+    if(el.watchAlerts){
+      const alerts=state.watchNotifications.filter(x=>x.event_type==="ready");
+      el.watchAlerts.innerHTML=alerts.slice(0,5).map(a=>{
+        const matches=a.metadata?.matches||[];
+        const best=matches[0];
+        if(!best)return "";
+        const date=new Date(best.starts_at);
+        return '<article class="watch-alert"><span>MATCH FOUND</span><strong>'+esc(best.venue_name||"Court available")+'</strong><small>'+esc(date.toLocaleString([], {weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}))+' · '+esc(best.duration_minutes)+' min · '+money(Number(best.amount_minor||0)/100,best.currency||"EUR")+(best.distance_km==null?"":" · "+Number(best.distance_km).toFixed(1)+" km")+'</small></article>';
+      }).join("");
+    }
+  }
+
+  async function setRoutineStatus(routineId,status){
+    try{
+      await api("/api/gac/play-routines",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({routineId,status})},true);
+      toast(status==="paused"?"Play Routine paused.":"Play Routine resumed.");
+      await loadWatches(false);
+    }catch(err){toast(err.message||"Could not update Play Routine.");}
+  }
+
+  async function loadWatches(openDialog=true){
+    const token=await accessToken();
+    if(!token){if(openDialog)openAuth("Sign in to manage your Play Routines.");return;}
+    try{
+      let routines=(await api("/api/gac/play-routines",{},true)).items||[];
+      const due=routines.filter(r=>r.status==="active"&&(!r.next_check_at||new Date(r.next_check_at)<=new Date())).slice(0,4);
+      if(due.length){
+        await Promise.all(due.map(r=>api("/api/gac/play-routine-evaluate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routineId:r.id})},true).catch(()=>null)));
+        routines=(await api("/api/gac/play-routines",{},true)).items||[];
+      }
+      state.routines=routines;
+      state.watchNotifications=(await api("/api/gac/demand-notifications?limit=20",{},true)).items||[];
+      renderWatches();
+      if(openDialog) el.watchesDialog.showModal();
+    }catch(err){toast(err.message||"Could not load Play Routines.");}
   }
 
   function openVenue(venueId){
@@ -530,6 +654,11 @@
   el.dialog.addEventListener("close",()=>{clearInterval(state.timer);reset();});
   el.myBookings.addEventListener("click",loadBookings);
   el.closeBookings.addEventListener("click",()=>el.bookingsDialog.close());
+  el.myWatches?.addEventListener("click",()=>loadWatches(true));
+  el.closeWatches?.addEventListener("click",()=>el.watchesDialog.close());
+  el.watchPromptButton?.addEventListener("click",openWatchDialog);
+  el.watchForm?.addEventListener("submit",saveWatch);
+  el.closeWatch?.addEventListener("click",()=>el.watchDialog.close());
   el.authButton.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth(""));
   el.bookingIdentityAction?.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth("Sign in before live booking."));
   el.authForm.addEventListener("submit",sendMagicLink);
@@ -540,5 +669,5 @@
   el.closeVenue?.addEventListener("click",()=>el.venueDialog.close());
 
   updateAuthUI();
-  loadPlatform().then(async()=>{if(state.session?.accessToken) await loadProfile(false);search();});
+  loadPlatform().then(async()=>{if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}search();});
 })();
