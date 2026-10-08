@@ -420,3 +420,180 @@ def test_fill_demand_aware_opportunity_is_incremental_private_and_lifecycle_awar
 
     with store.trusted() as c:
         c.execute(text("delete from auth.users where id=cast(:uid as uuid)"), {"uid": player_id})
+
+
+def test_crm_shadow_requires_verified_channel_permission_and_never_executes_live(fill_today):
+    url, store, user_id, org_id, court_id = fill_today
+    person_id = str(uuid.uuid4())
+    opportunity_id = str(uuid.uuid4())
+    target_start = datetime.now(ZoneInfo("Europe/Lisbon")).replace(
+        hour=19, minute=0, second=0, microsecond=0
+    ) + timedelta(days=14)
+    target_end = target_start + timedelta(hours=2)
+    historical_start = target_start - timedelta(days=21)
+
+    with store.trusted() as c:
+        venue_id = c.execute(text("""
+            select venue_id::text from public.courts where id=cast(:court as uuid)
+        """), {"court": court_id}).scalar_one()
+        c.execute(text("""
+            insert into public.people
+              (id,organization_id,external_key,full_name,email,phone,marketing_consent,source,source_updated_at)
+            values
+              (cast(:person as uuid),cast(:org as uuid),'crm-shadow-person','CRM Shadow Player',
+               'crm-shadow@example.test','+351910000001',true,'club_crm',now())
+        """), {"person": person_id, "org": org_id})
+        c.execute(text("""
+            insert into public.bookings
+              (organization_id,venue_id,court_id,player_id,status,starts_at,ends_at,
+               currency,gross_amount_minor,source,idempotency_key)
+            values
+              (cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:person as uuid),
+               'confirmed',:starts_at,:ends_at,'EUR',3600,'manual','crm-shadow-history')
+        """), {
+            "org": org_id, "venue": venue_id, "court": court_id, "person": person_id,
+            "starts_at": historical_start, "ends_at": historical_start + timedelta(minutes=90),
+        })
+        c.execute(text("""
+            insert into public.revenue_opportunities
+              (id,organization_id,venue_id,court_id,opportunity_key,target_date,
+               window_starts_at,window_ends_at,recommended_starts_at,duration_minutes,
+               quote_amount_minor,currency,status,active_demand_count,demand_fit_score,
+               freshness_confidence,organic_baseline_probability,action_conversion_probability,
+               expected_incremental_contribution_minor,priority_score,source_breakdown,
+               action_plan,explanation,qualified_at,actionable_at)
+            values
+              (cast(:id as uuid),cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),
+               'crm-shadow-opportunity',cast(:target_date as date),:window_start,:window_end,
+               :recommended_start,90,4000,'EUR','actionable',4,85,0.9,0.1,0.7,1800,82,
+               '{"getacourt_network":{"active_intents":4}}'::jsonb,'[]'::jsonb,
+               '{"formula_version":"test"}'::jsonb,now(),now())
+        """), {
+            "id": opportunity_id, "org": org_id, "venue": venue_id, "court": court_id,
+            "target_date": target_start.date().isoformat(), "window_start": target_start,
+            "window_end": target_end, "recommended_start": target_start,
+        })
+
+    settings = Settings(
+        origin="https://fill.test",
+        environment="test",
+        database=url,
+        supabase_url="https://example.supabase.co",
+        supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+    headers = {"Authorization": "Bearer ci-owner-token"}
+
+    first = client.post(
+        f"/api/fmc/{org_id}/opportunities/{opportunity_id}/crm-shadow",
+        json={},
+        headers=headers,
+    )
+    assert first.status_code == 201, first.text
+    first_body = first.json()
+    assert first_body["action"]["audience_eligible"] == 0
+    assert first_body["action"]["execution_enabled"] is False
+    assert first_body["shadow"]["exclusions"]["permission_unknown"] >= 1
+    blocked_action_id = first_body["action"]["id"]
+
+    no_approval = client.post(
+        f"/api/fmc/{org_id}/crm-actions/{blocked_action_id}/request-approval",
+        headers=headers,
+    )
+    assert no_approval.status_code == 409
+    assert no_approval.json()["error"] == "NO_ELIGIBLE_AUDIENCE"
+
+    permission = client.post(
+        f"/api/fmc/{org_id}/people/{person_id}/communication-permissions",
+        json={
+            "channel": "whatsapp",
+            "purpose": "promotional",
+            "status": "granted",
+            "consent_proof": "club CRM consent record #1",
+            "consent_at": (datetime.now(ZoneInfo("Europe/Lisbon")) - timedelta(days=30)).isoformat(),
+            "jurisdiction": "PT",
+            "source": "club_crm",
+            "frequency_cap_hours": 24,
+        },
+        headers=headers,
+    )
+    assert permission.status_code == 200, permission.text
+    assert permission.json()["status"] == "granted"
+
+    second = client.post(
+        f"/api/fmc/{org_id}/opportunities/{opportunity_id}/crm-shadow",
+        json={},
+        headers=headers,
+    )
+    assert second.status_code == 201, second.text
+    second_body = second.json()
+    action_id = second_body["action"]["id"]
+    assert second_body["action"]["audience_eligible"] >= 1
+    assert second_body["action"]["audience_blocked"] == 0
+    assert second_body["action"]["execution_enabled"] is False
+    assert second_body["shadow"]["waves"][0]["wave"] == 1
+    assert second_body["shadow"]["live_delivery_available"] is False
+
+    detail = client.get(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}",
+        headers=headers,
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["offers"][0]["status"] == "shadow"
+    assert detail.json()["audience"][0]["eligibility"] == "eligible"
+
+    approval_request = client.post(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}/request-approval",
+        headers=headers,
+    )
+    assert approval_request.status_code == 200, approval_request.text
+    assert approval_request.json()["status"] == "approval_pending"
+    assert approval_request.json()["execution_enabled"] is False
+
+    approval = client.post(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}/approve",
+        json={"decision": "approve"},
+        headers=headers,
+    )
+    assert approval.status_code == 200, approval.text
+    assert approval.json()["status"] == "approved"
+    assert approval.json()["execution_enabled"] is False
+    assert approval.json()["live_delivery_available"] is False
+
+    with store.trusted() as c:
+        offer = c.execute(text("""
+            select target_starts_at,target_ends_at from public.crm_offers
+            where action_id=cast(:action as uuid) and wave_number=1
+        """), {"action": action_id}).mappings().one()
+        booking_count_before = c.execute(text("""
+            select count(*) from public.bookings
+            where organization_id=cast(:org as uuid) and starts_at=:starts_at
+        """), {"org": org_id, "starts_at": offer["target_starts_at"]}).scalar_one()
+        hold_count_before = c.execute(text("""
+            select count(*) from public.booking_holds
+            where organization_id=cast(:org as uuid) and starts_at=:starts_at
+        """), {"org": org_id, "starts_at": offer["target_starts_at"]}).scalar_one()
+        assert booking_count_before == 0
+        assert hold_count_before == 0
+
+        c.execute(text("""
+            insert into public.bookings
+              (organization_id,venue_id,court_id,status,starts_at,ends_at,
+               currency,gross_amount_minor,source,idempotency_key)
+            values
+              (cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),'confirmed',
+               :starts_at,:ends_at,'EUR',4000,'manual','crm-shadow-stop-booking')
+        """), {
+            "org": org_id, "venue": venue_id, "court": court_id,
+            "starts_at": offer["target_starts_at"], "ends_at": offer["target_ends_at"],
+        })
+
+    stopped = client.post(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}/evaluate",
+        headers=headers,
+    )
+    assert stopped.status_code == 200, stopped.text
+    assert stopped.json()["status"] == "stopped"
+    assert stopped.json()["stop_reason"] == "target_inventory_booked"
+    assert stopped.json()["execution_enabled"] is False
