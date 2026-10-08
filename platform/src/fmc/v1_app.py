@@ -179,6 +179,30 @@ class PlayRoutineStatusIn(BaseModel):
     status: str
 
 
+class CommunicationPermissionIn(BaseModel):
+    channel: str
+    purpose: str = Field(default="promotional", min_length=2, max_length=40)
+    status: str
+    consent_proof: str | None = Field(default=None, max_length=2000)
+    consent_at: str | None = None
+    jurisdiction: str | None = Field(default=None, max_length=80)
+    source: str = Field(default="manual", min_length=1, max_length=80)
+    frequency_cap_count: int | None = Field(default=None, ge=1, le=100)
+    frequency_cap_hours: int | None = Field(default=None, ge=1, le=8760)
+    suppression_reason: str | None = Field(default=None, max_length=500)
+
+
+class CrmShadowIn(BaseModel):
+    purpose: str = Field(default="promotional", min_length=2, max_length=40)
+    primary_channel: str = "whatsapp"
+    fallback_channel: str | None = "email"
+    message_template_key: str = Field(default="availability_current_price_v1", min_length=2, max_length=120)
+
+
+class CrmApprovalIn(BaseModel):
+    decision: str = "approve"
+
+
 def _time_minute(value: str) -> int:
     try:
         h, m = map(int, value.split(":"))
