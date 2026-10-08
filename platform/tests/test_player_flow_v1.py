@@ -1,5 +1,7 @@
 import os
 import uuid
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,9 +43,14 @@ def player_flow():
             values(cast(:org as uuid),:slug,'Player Flow CI','Europe/Lisbon','EUR')
         """), {"org": org_id, "slug": slug})
         c.execute(text("""
+            insert into public.organization_members(organization_id,user_id,role)
+            values(cast(:org as uuid),cast(:uid as uuid),'owner')
+        """), {"org": org_id, "uid": user_id})
+        c.execute(text("""
             insert into public.venues(id,organization_id,name,timezone,currency,address)
             values(cast(:venue as uuid),cast(:org as uuid),'Cascais CI Venue',
-                   'Europe/Lisbon','EUR','{"city":"Cascais","country":"Portugal"}'::jsonb)
+                   'Europe/Lisbon','EUR',
+                   '{"city":"Cascais","country":"Portugal","lat":38.6979,"lon":-9.4215}'::jsonb)
         """), {"venue": venue_id, "org": org_id})
         c.execute(text("""
             insert into public.courts(id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled)
@@ -193,3 +200,127 @@ def test_enabled_hold_links_global_profile_into_club_person(player_flow):
         assert person["email"] == "player@example.test"
         assert person["marketing_consent"] is True
         assert person["source"] == "getacourt"
+
+
+
+def test_persistent_demand_routine_evaluate_and_private_aggregation(player_flow):
+    f = player_flow
+    core = TestClient(create_v1_app(settings(f["url"], False), "core", auth_override=f["auth"]))
+    operations = TestClient(create_v1_app(settings(f["url"], False), "operations", auth_override=f["auth"]))
+
+    assert core.get("/api/play-routines").status_code == 401
+
+    target = datetime.now(ZoneInfo("Europe/Lisbon")).date() + timedelta(days=1)
+    created = core.post("/api/play-routines", headers=headers(), json={
+        "sport": "padel",
+        "days_of_week": [target.weekday()],
+        "window_start": "17:00",
+        "window_end": "20:00",
+        "duration_minutes": 90,
+        "location_label": "Cascais",
+        "center_lat": 38.6979,
+        "center_lon": -9.4215,
+        "radius_km": 10,
+        "max_price_minor": 10000,
+        "currency": "EUR",
+        "indoor_preference": "all",
+        "timezone": "Europe/Lisbon",
+        "start_date": target.isoformat(),
+    })
+    assert created.status_code == 201, created.text
+    routine = created.json()["routine"]
+    assert routine["status"] == "active"
+    assert routine["watch_enabled"] is True
+    assert routine["days_of_week"] == [target.weekday()]
+
+    listed = core.get("/api/play-routines", headers=headers())
+    assert listed.status_code == 200, listed.text
+    assert [x["id"] for x in listed.json()["items"]] == [routine["id"]]
+
+    evaluated = core.post(
+        f'/api/play-routines/{routine["id"]}/evaluate',
+        headers=headers(),
+    )
+    assert evaluated.status_code == 200, evaluated.text
+    payload = evaluated.json()
+    assert payload["evaluated_intents"]
+    assert any(x["target_date"] == target.isoformat() for x in payload["evaluated_intents"])
+    assert payload["matches"]
+    assert payload["matches"][0]["court_id"] == f["court_id"]
+    assert float(payload["matches"][0]["match_score"]) >= 65
+    assert payload["notifications"]
+    assert payload["notifications"][0]["event_type"] == "ready"
+    assert payload["notifications"][0]["channel"] == "in_app"
+    assert payload["watch"]["poll_after_minutes"] in (15, 30, 120, 360, 720)
+
+    notifications = core.get("/api/demand-notifications", headers=headers())
+    assert notifications.status_code == 200, notifications.text
+    assert notifications.json()["items"]
+    assert notifications.json()["items"][0]["metadata"]["matches"]
+
+    signal = operations.get(
+        f'/api/fmc/{f["org_id"]}/demand',
+        params={"date": target.isoformat()},
+        headers=headers(),
+    )
+    assert signal.status_code == 200, signal.text
+    body = signal.json()
+    assert body["items"]
+    assert body["items"][0]["venue_id"] == f["venue_id"]
+    assert body["items"][0]["active_intents"] >= 1
+    assert body["items"][0]["source"] == "getacourt_persistent"
+    assert "user_id" not in signal.text
+
+    with f["store"].trusted() as c:
+        assert c.execute(text("""
+            select count(*) from public.booking_holds
+            where organization_id=cast(:org as uuid)
+        """), {"org": f["org_id"]}).scalar() == 0
+        assert c.execute(text("""
+            select count(*) from public.bookings
+            where organization_id=cast(:org as uuid)
+        """), {"org": f["org_id"]}).scalar() == 0
+        assert c.execute(text("""
+            select count(*) from public.people
+            where organization_id=cast(:org as uuid)
+        """), {"org": f["org_id"]}).scalar() == 0
+
+
+def test_persistent_demand_hard_price_constraint_and_pause(player_flow):
+    f = player_flow
+    core = TestClient(create_v1_app(settings(f["url"], False), "core", auth_override=f["auth"]))
+    target = datetime.now(ZoneInfo("Europe/Lisbon")).date() + timedelta(days=1)
+
+    created = core.post("/api/play-routines", headers=headers(), json={
+        "sport": "padel",
+        "days_of_week": [target.weekday()],
+        "window_start": "17:00",
+        "window_end": "20:00",
+        "duration_minutes": 90,
+        "location_label": "Cascais",
+        "radius_km": 10,
+        "max_price_minor": 1000,
+        "indoor_preference": "all",
+        "timezone": "Europe/Lisbon",
+        "start_date": target.isoformat(),
+    })
+    assert created.status_code == 201, created.text
+    routine_id = created.json()["routine"]["id"]
+
+    evaluated = core.post(f"/api/play-routines/{routine_id}/evaluate", headers=headers())
+    assert evaluated.status_code == 200, evaluated.text
+    assert evaluated.json()["evaluated_intents"]
+    assert evaluated.json()["matches"] == []
+    assert evaluated.json()["notifications"] == []
+
+    paused = core.patch(
+        f"/api/play-routines/{routine_id}",
+        headers=headers(),
+        json={"status": "paused"},
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["routine"]["status"] == "paused"
+
+    blocked = core.post(f"/api/play-routines/{routine_id}/evaluate", headers=headers())
+    assert blocked.status_code == 409
+    assert blocked.json()["error"] == "ROUTINE_PAUSED"
