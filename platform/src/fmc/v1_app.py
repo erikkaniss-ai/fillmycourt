@@ -1939,6 +1939,669 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 """), {"org": org, "date": date}))
                 return {"date": date, "items": items}
 
+        @app.post("/api/fmc/{org}/opportunities/{opportunity_id}/crm-shadow", status_code=201)
+        def create_crm_shadow(org: str, opportunity_id: str, body: CrmShadowIn, request: Request):
+            a = who(request)
+            primary = body.primary_channel.strip().lower()
+            fallback = body.fallback_channel.strip().lower() if body.fallback_channel else None
+            purpose = body.purpose.strip().lower()
+            if primary not in ("whatsapp","email"):
+                raise DomainError("CHANNEL", "CRM shadow primary channel must be WhatsApp or email.", 422)
+            if fallback and fallback not in ("whatsapp","email"):
+                raise DomainError("CHANNEL", "CRM shadow fallback channel must be WhatsApp or email.", 422)
+            if fallback == primary:
+                fallback = None
+            with db.user(a.id) as c:
+                actor_role = role(c, org, a, ROLE_FINANCE)
+                opportunity = one(c.execute(text("""
+                    select ro.id::text,ro.venue_id::text,ro.court_id::text,ro.status,
+                           ro.recommended_starts_at,ro.duration_minutes,ro.quote_amount_minor,
+                           ro.currency::text,ro.expected_incremental_contribution_minor,
+                           ro.organic_baseline_probability,ro.priority_score,
+                           ro.window_starts_at,ro.window_ends_at,ro.updated_at,
+                           v.name venue_name,o.timezone
+                    from public.revenue_opportunities ro
+                    join public.venues v on v.id=ro.venue_id
+                    join public.organizations o on o.id=ro.organization_id
+                    where ro.id=cast(:opportunity as uuid)
+                      and ro.organization_id=cast(:org as uuid)
+                    for update
+                """), {"opportunity": opportunity_id, "org": org}))
+                if not opportunity:
+                    raise DomainError("OPPORTUNITY_NOT_FOUND", "Revenue Opportunity not found.", 404)
+                if opportunity["status"] not in ("actionable","in_progress"):
+                    raise DomainError("OPPORTUNITY_STATE", "CRM activation requires an actionable opportunity.", 409)
+                if int(opportunity.get("expected_incremental_contribution_minor") or 0) <= 0:
+                    raise DomainError("NO_INCREMENTAL_VALUE", "Opportunity has no positive expected incremental contribution.", 409)
+                if not opportunity.get("recommended_starts_at") or not opportunity.get("duration_minutes"):
+                    raise DomainError("OPPORTUNITY_TARGET", "Opportunity has no target start/duration.", 409)
+
+                now = datetime.now(ZoneInfo(opportunity["timezone"]))
+                target_start = opportunity["recommended_starts_at"]
+                target_end = target_start + timedelta(minutes=int(opportunity["duration_minutes"]))
+                if target_start <= now:
+                    raise DomainError("OPPORTUNITY_EXPIRED", "Target inventory is no longer in the future.", 409)
+
+                c.execute(text("""
+                    update public.crm_actions
+                    set status='stopped',stop_reason='replanned',stopped_at=now(),updated_at=now()
+                    where organization_id=cast(:org as uuid)
+                      and opportunity_id=cast(:opportunity as uuid)
+                      and status in ('shadow_ready','approval_pending','approved','stale')
+                """), {"org": org, "opportunity": opportunity_id})
+
+                people_rows = rows(c.execute(text("""
+                    select id::text,full_name,email,phone,source,marketing_consent,updated_at
+                    from public.people
+                    where organization_id=cast(:org as uuid)
+                    order by id
+                    limit 2000
+                """), {"org": org}))
+                permission_rows = rows(c.execute(text("""
+                    select id::text,person_id::text,channel,purpose,status,consent_proof,
+                           consent_at,jurisdiction,source,frequency_cap_count,
+                           frequency_cap_hours,last_contacted_at,suppression_reason,updated_at
+                    from public.communication_permissions
+                    where organization_id=cast(:org as uuid) and purpose=:purpose
+                      and channel in ('whatsapp','email')
+                """), {"org": org, "purpose": purpose}))
+                permissions = {}
+                for permission in permission_rows:
+                    permissions[(permission["person_id"], permission["channel"])] = permission
+
+                history_rows = rows(c.execute(text("""
+                    select player_id::text person_id,venue_id::text,starts_at
+                    from public.bookings
+                    where organization_id=cast(:org as uuid)
+                      and player_id is not null
+                      and status in ('confirmed','pending_payment')
+                      and starts_at>=:history_begin and starts_at<:history_end
+                    order by starts_at desc
+                """), {
+                    "org": org,
+                    "history_begin": now - timedelta(days=180),
+                    "history_end": now,
+                }))
+                history = {}
+                for booking in history_rows:
+                    history.setdefault(booking["person_id"], []).append(booking)
+
+                def permission_for(person, channel):
+                    p = permissions.get((person["id"], channel))
+                    if not p:
+                        return None, "permission_unknown"
+                    if p["status"] != "granted" or not p.get("consent_proof") or not p.get("consent_at"):
+                        return None, "permission_blocked"
+                    if p.get("suppression_reason"):
+                        return None, "suppressed"
+                    if channel == "whatsapp" and not person.get("phone"):
+                        return None, "channel_identity_missing"
+                    if channel == "email" and not person.get("email"):
+                        return None, "channel_identity_missing"
+                    if p.get("frequency_cap_hours") and p.get("last_contacted_at"):
+                        hours = (now - p["last_contacted_at"]).total_seconds() / 3600
+                        if hours < int(p["frequency_cap_hours"]):
+                            return None, "frequency_capped"
+                    return p, None
+
+                audience = []
+                for person in people_rows:
+                    selected_channel = None
+                    permission = None
+                    blocked_reason = None
+                    for candidate_channel in [primary, fallback]:
+                        if not candidate_channel:
+                            continue
+                        candidate_permission, reason = permission_for(person, candidate_channel)
+                        if candidate_permission:
+                            selected_channel = candidate_channel
+                            permission = candidate_permission
+                            blocked_reason = None
+                            break
+                        blocked_reason = blocked_reason or reason
+
+                    person_history = history.get(person["id"], [])
+                    segment_key = "no_relevant_history"
+                    segment_rank = 4
+                    relevance = 0.0
+                    if person_history:
+                        same_venue = [b for b in person_history if b["venue_id"] == opportunity["venue_id"]]
+                        same_time = []
+                        target_local = target_start.astimezone(ZoneInfo(opportunity["timezone"]))
+                        target_minute = target_local.hour * 60 + target_local.minute
+                        for booking in same_venue:
+                            local_booking = booking["starts_at"].astimezone(ZoneInfo(opportunity["timezone"]))
+                            minute = local_booking.hour * 60 + local_booking.minute
+                            age_days = (now.date() - local_booking.date()).days
+                            if (
+                                local_booking.weekday() == target_local.weekday()
+                                and abs(minute - target_minute) <= 120
+                                and age_days <= 60
+                            ):
+                                same_time.append(booking)
+                        if same_time:
+                            segment_key,segment_rank,relevance = "venue_same_daypart_recent",1,95.0
+                        elif same_venue and any((now - b["starts_at"]).days <= 120 for b in same_venue):
+                            segment_key,segment_rank,relevance = "venue_recent",2,75.0
+                        else:
+                            segment_key,segment_rank,relevance = "club_recent",3,55.0
+
+                    eligibility = "eligible" if selected_channel and segment_rank <= 3 else "blocked"
+                    if eligibility == "blocked" and selected_channel and segment_rank > 3:
+                        blocked_reason = "no_relevant_play_history"
+                    audience.append({
+                        "person": person,
+                        "permission": permission,
+                        "eligibility": eligibility,
+                        "channel": selected_channel,
+                        "segment_key": segment_key,
+                        "segment_rank": segment_rank,
+                        "relevance_score": relevance,
+                        "exclusion_reason": blocked_reason,
+                    })
+
+                eligible = sorted(
+                    [x for x in audience if x["eligibility"] == "eligible"],
+                    key=lambda x: (x["segment_rank"], -x["relevance_score"], x["person"]["id"]),
+                )
+                for index, item in enumerate(eligible):
+                    item["wave_number"] = 1 if index < 12 else 2 if index < 32 else 3
+                blocked = [x for x in audience if x["eligibility"] == "blocked"]
+
+                risk_level = "low"
+                opportunity_snapshot = {
+                    "id": opportunity["id"],
+                    "status": opportunity["status"],
+                    "venue_id": opportunity["venue_id"],
+                    "court_id": opportunity["court_id"],
+                    "recommended_starts_at": target_start.isoformat(),
+                    "duration_minutes": int(opportunity["duration_minutes"]),
+                    "quote_amount_minor": int(opportunity["quote_amount_minor"]),
+                    "currency": opportunity["currency"],
+                    "expected_incremental_contribution_minor": int(opportunity["expected_incremental_contribution_minor"]),
+                    "updated_at": opportunity["updated_at"].isoformat(),
+                }
+                economics_snapshot = {
+                    "expected_incremental_contribution_minor": int(opportunity["expected_incremental_contribution_minor"]),
+                    "organic_baseline_probability": float(opportunity["organic_baseline_probability"] or 0),
+                    "priority_score": float(opportunity["priority_score"] or 0),
+                    "incentive_bps": 0,
+                    "objective": "incremental_contribution",
+                }
+                action = one(c.execute(text("""
+                    insert into public.crm_actions
+                      (organization_id,opportunity_id,mode,status,risk_level,primary_channel,
+                       fallback_channel,purpose,message_template_key,quote_amount_minor,currency,
+                       incentive_bps,expected_incremental_contribution_minor,
+                       organic_baseline_probability,audience_total,audience_eligible,
+                       audience_blocked,current_wave,execution_enabled,opportunity_snapshot,
+                       economics_snapshot,policy_version,opportunity_version_at_plan,created_by)
+                    values
+                      (cast(:org as uuid),cast(:opportunity as uuid),'shadow','shadow_ready',
+                       :risk,:primary,:fallback,:purpose,:template,:quote,:currency,0,
+                       :expected,:organic,:total,:eligible,:blocked,1,false,
+                       cast(:opportunity_snapshot as jsonb),cast(:economics as jsonb),
+                       'crm_shadow_v1',:opportunity_version,cast(:uid as uuid))
+                    returning id::text,opportunity_id::text,mode,status,risk_level,
+                              primary_channel,fallback_channel,purpose,message_template_key,
+                              quote_amount_minor,currency::text,incentive_bps,
+                              expected_incremental_contribution_minor,
+                              organic_baseline_probability,audience_total,audience_eligible,
+                              audience_blocked,current_wave,execution_enabled,policy_version,
+                              opportunity_version_at_plan,created_at,updated_at
+                """), {
+                    "org": org, "opportunity": opportunity_id, "risk": risk_level,
+                    "primary": primary, "fallback": fallback, "purpose": purpose,
+                    "template": body.message_template_key,
+                    "quote": int(opportunity["quote_amount_minor"]),
+                    "currency": opportunity["currency"],
+                    "expected": int(opportunity["expected_incremental_contribution_minor"]),
+                    "organic": float(opportunity["organic_baseline_probability"] or 0),
+                    "total": len(audience), "eligible": len(eligible), "blocked": len(blocked),
+                    "opportunity_snapshot": json.dumps(opportunity_snapshot),
+                    "economics": json.dumps(economics_snapshot),
+                    "opportunity_version": opportunity["updated_at"], "uid": a.id,
+                }))
+
+                for item in audience:
+                    person = item["person"]
+                    permission = item["permission"]
+                    c.execute(text("""
+                        insert into public.crm_action_audience
+                          (organization_id,action_id,person_id,permission_id,eligibility,channel,
+                           segment_key,segment_rank,relevance_score,wave_number,exclusion_reason,
+                           person_snapshot,permission_snapshot)
+                        values
+                          (cast(:org as uuid),cast(:action as uuid),cast(:person as uuid),
+                           cast(:permission as uuid),:eligibility,:channel,:segment_key,
+                           :segment_rank,:score,:wave,:reason,
+                           cast(:person_snapshot as jsonb),cast(:permission_snapshot as jsonb))
+                    """), {
+                        "org": org, "action": action["id"], "person": person["id"],
+                        "permission": permission["id"] if permission else None,
+                        "eligibility": item["eligibility"], "channel": item["channel"],
+                        "segment_key": item["segment_key"], "segment_rank": item["segment_rank"],
+                        "score": item["relevance_score"], "wave": item.get("wave_number"),
+                        "reason": item["exclusion_reason"],
+                        "person_snapshot": json.dumps({
+                            "full_name": person.get("full_name"),
+                            "email": person.get("email"),
+                            "phone": person.get("phone"),
+                            "source": person.get("source"),
+                        }),
+                        "permission_snapshot": json.dumps({
+                            "channel": permission.get("channel") if permission else None,
+                            "purpose": permission.get("purpose") if permission else purpose,
+                            "status": permission.get("status") if permission else "unknown",
+                            "consent_at": permission["consent_at"].isoformat() if permission and permission.get("consent_at") else None,
+                            "jurisdiction": permission.get("jurisdiction") if permission else None,
+                            "source": permission.get("source") if permission else None,
+                        }),
+                    })
+
+                expires_at = target_start - timedelta(minutes=30)
+                offer_rows = []
+                if expires_at > now:
+                    waves = sorted(set(item["wave_number"] for item in eligible))
+                    for wave in waves:
+                        tracking_token = "crm_" + uuid.uuid4().hex
+                        offer = one(c.execute(text("""
+                            insert into public.crm_offers
+                              (organization_id,action_id,opportunity_id,wave_number,tracking_token,
+                               status,target_court_id,target_starts_at,target_ends_at,
+                               authoritative_price_minor,incentive_bps,offered_price_minor,currency,
+                               expires_at,attribution_window_ends_at)
+                            values
+                              (cast(:org as uuid),cast(:action as uuid),cast(:opportunity as uuid),
+                               :wave,:token,'shadow',cast(:court as uuid),:start,:end,
+                               :price,0,:price,:currency,:expires,:expires)
+                            returning id::text,action_id::text,opportunity_id::text,wave_number,
+                                      tracking_token,status,target_court_id::text,target_starts_at,
+                                      target_ends_at,authoritative_price_minor,incentive_bps,
+                                      offered_price_minor,currency::text,expires_at,
+                                      attribution_window_ends_at,created_at
+                        """), {
+                            "org": org, "action": action["id"], "opportunity": opportunity_id,
+                            "wave": wave, "token": tracking_token, "court": opportunity["court_id"],
+                            "start": target_start, "end": target_end,
+                            "price": int(opportunity["quote_amount_minor"]),
+                            "currency": opportunity["currency"], "expires": expires_at,
+                        }))
+                        offer_rows.append(offer)
+                else:
+                    c.execute(text("""
+                        update public.crm_actions
+                        set status='stopped',stop_reason='offer_expired',stopped_at=now(),updated_at=now()
+                        where id=cast(:action as uuid)
+                    """), {"action": action["id"]})
+                    action["status"] = "stopped"
+
+                audit(c, request, org, a, "crm.shadow_created", "crm_action", action["id"],
+                      after={"opportunity_id": opportunity_id, "eligible": len(eligible),
+                             "blocked": len(blocked), "waves": len(offer_rows),
+                             "execution_enabled": False, "actor_role": actor_role})
+                segment_summary = {}
+                for item in eligible:
+                    key = item["segment_key"]
+                    segment_summary[key] = segment_summary.get(key, 0) + 1
+                exclusion_summary = {}
+                for item in blocked:
+                    key = item["exclusion_reason"] or "blocked"
+                    exclusion_summary[key] = exclusion_summary.get(key, 0) + 1
+                return {
+                    "action": action,
+                    "shadow": {
+                        "segments": segment_summary,
+                        "exclusions": exclusion_summary,
+                        "waves": [
+                            {
+                                "wave": wave,
+                                "eligible": sum(1 for x in eligible if x["wave_number"] == wave),
+                                "offer_id": next((o["id"] for o in offer_rows if o["wave_number"] == wave), None),
+                            }
+                            for wave in sorted(set(x["wave_number"] for x in eligible))
+                        ],
+                        "message_preview": {
+                            "template_key": body.message_template_key,
+                            "headline": "Court available",
+                            "slot": target_start.isoformat(),
+                            "duration_minutes": int(opportunity["duration_minutes"]),
+                            "price_minor": int(opportunity["quote_amount_minor"]),
+                            "currency": opportunity["currency"],
+                        },
+                        "execution_enabled": False,
+                        "live_delivery_available": False,
+                    },
+                }
+
+        @app.get("/api/fmc/{org}/crm-actions/{action_id}")
+        def get_crm_action(org: str, action_id: str, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                action = one(c.execute(text("""
+                    select id::text,opportunity_id::text,mode,status,risk_level,primary_channel,
+                           fallback_channel,purpose,message_template_key,quote_amount_minor,
+                           currency::text,incentive_bps,expected_incremental_contribution_minor,
+                           organic_baseline_probability,audience_total,audience_eligible,
+                           audience_blocked,current_wave,execution_enabled,opportunity_snapshot,
+                           economics_snapshot,policy_version,opportunity_version_at_plan,
+                           stop_reason,stopped_at,created_at,updated_at
+                    from public.crm_actions
+                    where id=cast(:action as uuid) and organization_id=cast(:org as uuid)
+                """), {"action": action_id, "org": org}))
+                if not action:
+                    raise DomainError("CRM_ACTION_NOT_FOUND", "CRM action not found.", 404)
+                audiences = rows(c.execute(text("""
+                    select eligibility,channel,segment_key,segment_rank,relevance_score,
+                           wave_number,exclusion_reason,count(*)::int contacts
+                    from public.crm_action_audience
+                    where action_id=cast(:action as uuid)
+                    group by eligibility,channel,segment_key,segment_rank,relevance_score,
+                             wave_number,exclusion_reason
+                    order by eligibility desc,segment_rank,wave_number
+                """), {"action": action_id}))
+                offers = rows(c.execute(text("""
+                    select id::text,wave_number,status,target_court_id::text,target_starts_at,
+                           target_ends_at,authoritative_price_minor,incentive_bps,
+                           offered_price_minor,currency::text,expires_at,
+                           attribution_window_ends_at,created_at,updated_at
+                    from public.crm_offers
+                    where action_id=cast(:action as uuid)
+                    order by wave_number
+                """), {"action": action_id}))
+                approvals = rows(c.execute(text("""
+                    select id::text,approver_user_id::text,approver_role::text,status,
+                           policy_version,audience_snapshot,offer_snapshot,economics_snapshot,
+                           approved_at,created_at
+                    from public.crm_approvals
+                    where action_id=cast(:action as uuid)
+                    order by created_at desc
+                """), {"action": action_id}))
+                return {"action": action, "audience": audiences, "offers": offers, "approvals": approvals}
+
+        @app.post("/api/fmc/{org}/crm-actions/{action_id}/evaluate")
+        def evaluate_crm_action(org: str, action_id: str, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                action = one(c.execute(text("""
+                    select ca.id::text,ca.status,ca.quote_amount_minor,ca.execution_enabled,
+                           ca.opportunity_version_at_plan,ca.audience_eligible,
+                           ro.id::text opportunity_id,ro.status opportunity_status,
+                           ro.updated_at opportunity_updated_at,
+                           ro.expected_incremental_contribution_minor,
+                           ro.quote_amount_minor opportunity_quote,
+                           ro.court_id::text,ro.window_starts_at,ro.window_ends_at
+                    from public.crm_actions ca
+                    join public.revenue_opportunities ro on ro.id=ca.opportunity_id
+                    where ca.id=cast(:action as uuid) and ca.organization_id=cast(:org as uuid)
+                    for update of ca
+                """), {"action": action_id, "org": org}))
+                if not action:
+                    raise DomainError("CRM_ACTION_NOT_FOUND", "CRM action not found.", 404)
+                now_utc = datetime.now().astimezone()
+                stop_reason = None
+                if action["opportunity_status"] in ("won","expired","suppressed","lost"):
+                    stop_reason = "opportunity_" + action["opportunity_status"]
+                elif int(action["expected_incremental_contribution_minor"] or 0) <= 0:
+                    stop_reason = "expected_incremental_non_positive"
+                elif int(action["quote_amount_minor"]) != int(action["opportunity_quote"]):
+                    stop_reason = "authoritative_price_changed"
+                elif one(c.execute(text("""
+                    select 1 found from public.bookings
+                    where organization_id=cast(:org as uuid)
+                      and court_id=cast(:court as uuid)
+                      and status in ('confirmed','pending_payment')
+                      and starts_at<:window_end and ends_at>:window_start
+                    limit 1
+                """), {"org": org, "court": action["court_id"],
+                       "window_start": action["window_starts_at"], "window_end": action["window_ends_at"]})):
+                    stop_reason = "target_inventory_booked"
+                elif one(c.execute(text("""
+                    select 1 found from public.booking_holds
+                    where organization_id=cast(:org as uuid)
+                      and court_id=cast(:court as uuid)
+                      and expires_at>now()
+                      and starts_at<:window_end and ends_at>:window_start
+                    limit 1
+                """), {"org": org, "court": action["court_id"],
+                       "window_start": action["window_starts_at"], "window_end": action["window_ends_at"]})):
+                    stop_reason = "target_inventory_held"
+                elif one(c.execute(text("""
+                    select 1 found from public.crm_offers
+                    where action_id=cast(:action as uuid)
+                      and expires_at<=now()
+                    limit 1
+                """), {"action": action_id})):
+                    stop_reason = "offer_expired"
+                else:
+                    eligible_now = c.execute(text("""
+                        select count(*)::int
+                        from public.crm_action_audience aa
+                        join public.communication_permissions cp on cp.id=aa.permission_id
+                        join public.people p on p.id=aa.person_id
+                        where aa.action_id=cast(:action as uuid)
+                          and aa.eligibility='eligible'
+                          and cp.status='granted'
+                          and cp.consent_proof is not null
+                          and cp.consent_at is not null
+                          and cp.suppression_reason is null
+                          and (
+                            (aa.channel='whatsapp' and p.phone is not null)
+                            or (aa.channel='email' and p.email is not null)
+                          )
+                    """), {"action": action_id}).scalar_one()
+                    if int(eligible_now or 0) <= 0:
+                        stop_reason = "eligible_audience_exhausted_or_revoked"
+
+                if stop_reason:
+                    c.execute(text("""
+                        update public.crm_actions
+                        set status='stopped',stop_reason=:reason,stopped_at=coalesce(stopped_at,now()),
+                            execution_enabled=false,updated_at=now()
+                        where id=cast(:action as uuid)
+                    """), {"reason": stop_reason, "action": action_id})
+                    c.execute(text("""
+                        update public.crm_offers
+                        set status='stopped',updated_at=now()
+                        where action_id=cast(:action as uuid) and status in ('shadow','active')
+                    """), {"action": action_id})
+                    audit(c, request, org, a, "crm.action_stopped", "crm_action", action_id,
+                          after={"stop_reason": stop_reason, "execution_enabled": False})
+                    return {
+                        "id": action_id, "status": "stopped", "stop_reason": stop_reason,
+                        "execution_enabled": False,
+                    }
+                stale = action["opportunity_updated_at"] != action["opportunity_version_at_plan"]
+                if stale and action["status"] in ("approval_pending","approved"):
+                    c.execute(text("""
+                        update public.crm_actions
+                        set status='stale',execution_enabled=false,updated_at=now()
+                        where id=cast(:action as uuid)
+                    """), {"action": action_id})
+                    return {
+                        "id": action_id, "status": "stale",
+                        "stop_reason": None, "execution_enabled": False,
+                    }
+                return {
+                    "id": action_id, "status": action["status"],
+                    "stop_reason": None, "execution_enabled": False,
+                    "deferred_stop_checks": [
+                        "delivery_failure_threshold",
+                        "intent_weighted_response",
+                        "provider_freshness",
+                    ],
+                }
+
+        @app.post("/api/fmc/{org}/crm-actions/{action_id}/request-approval")
+        def request_crm_approval(org: str, action_id: str, request: Request):
+            a = who(request)
+            with db.user(a.id) as c:
+                role(c, org, a, ROLE_FINANCE)
+                action = one(c.execute(text("""
+                    select id::text,status,audience_eligible
+                    from public.crm_actions
+                    where id=cast(:action as uuid) and organization_id=cast(:org as uuid)
+                    for update
+                """), {"action": action_id, "org": org}))
+                if not action:
+                    raise DomainError("CRM_ACTION_NOT_FOUND", "CRM action not found.", 404)
+                if action["status"] != "shadow_ready":
+                    raise DomainError("CRM_ACTION_STATE", "Only a shadow-ready action can request approval.", 409)
+                if int(action["audience_eligible"] or 0) <= 0:
+                    raise DomainError("NO_ELIGIBLE_AUDIENCE", "There is no eligible audience to approve.", 409)
+                c.execute(text("""
+                    update public.crm_actions set status='approval_pending',updated_at=now()
+                    where id=cast(:action as uuid)
+                """), {"action": action_id})
+                audit(c, request, org, a, "crm.approval_requested", "crm_action", action_id,
+                      after={"status": "approval_pending", "execution_enabled": False})
+                return {"id": action_id, "status": "approval_pending", "execution_enabled": False}
+
+        @app.post("/api/fmc/{org}/crm-actions/{action_id}/approve")
+        def approve_crm_action(org: str, action_id: str, body: CrmApprovalIn, request: Request):
+            a = who(request)
+            decision = body.decision.strip().lower()
+            if decision not in ("approve","reject"):
+                raise DomainError("APPROVAL_DECISION", "Use approve or reject.", 422)
+            with db.user(a.id) as c:
+                actor_role = role(c, org, a, ROLE_MANAGER)
+                action = one(c.execute(text("""
+                    select ca.id::text,ca.status,ca.risk_level,ca.policy_version,
+                           ca.opportunity_id::text,ca.opportunity_version_at_plan,
+                           ca.quote_amount_minor,ca.audience_total,ca.audience_eligible,
+                           ca.audience_blocked,ca.expected_incremental_contribution_minor,
+                           ca.economics_snapshot,ca.message_template_key,
+                           ro.status opportunity_status,ro.updated_at opportunity_updated_at,
+                           ro.quote_amount_minor opportunity_quote,ro.court_id::text,
+                           ro.window_starts_at,ro.window_ends_at
+                    from public.crm_actions ca
+                    join public.revenue_opportunities ro on ro.id=ca.opportunity_id
+                    where ca.id=cast(:action as uuid) and ca.organization_id=cast(:org as uuid)
+                    for update of ca
+                """), {"action": action_id, "org": org}))
+                if not action:
+                    raise DomainError("CRM_ACTION_NOT_FOUND", "CRM action not found.", 404)
+                if action["status"] != "approval_pending":
+                    raise DomainError("CRM_ACTION_STATE", "Action is not awaiting approval.", 409)
+                if action["risk_level"] in ("medium","high") and actor_role not in ROLE_ADMIN:
+                    raise DomainError("APPROVAL_ROLE", "This action requires owner/admin approval.", 403)
+
+                offers = rows(c.execute(text("""
+                    select id::text,wave_number,status,target_starts_at,target_ends_at,
+                           authoritative_price_minor,offered_price_minor,currency::text,
+                           expires_at
+                    from public.crm_offers where action_id=cast(:action as uuid)
+                    order by wave_number
+                """), {"action": action_id}))
+                stale_reason = None
+                if action["opportunity_status"] not in ("actionable","in_progress"):
+                    stale_reason = "opportunity_not_actionable"
+                elif action["opportunity_updated_at"] != action["opportunity_version_at_plan"]:
+                    stale_reason = "opportunity_changed"
+                elif int(action["quote_amount_minor"]) != int(action["opportunity_quote"]):
+                    stale_reason = "authoritative_price_changed"
+                elif any(offer["expires_at"] <= datetime.now().astimezone() for offer in offers):
+                    stale_reason = "offer_expired"
+                elif one(c.execute(text("""
+                    select 1 found from public.bookings
+                    where organization_id=cast(:org as uuid)
+                      and court_id=cast(:court as uuid)
+                      and status in ('confirmed','pending_payment')
+                      and starts_at<:window_end and ends_at>:window_start
+                    limit 1
+                """), {"org": org, "court": action["court_id"],
+                       "window_start": action["window_starts_at"], "window_end": action["window_ends_at"]})):
+                    stale_reason = "target_inventory_booked"
+                elif one(c.execute(text("""
+                    select 1 found from public.booking_holds
+                    where organization_id=cast(:org as uuid)
+                      and court_id=cast(:court as uuid)
+                      and expires_at>now()
+                      and starts_at<:window_end and ends_at>:window_start
+                    limit 1
+                """), {"org": org, "court": action["court_id"],
+                       "window_start": action["window_starts_at"], "window_end": action["window_ends_at"]})):
+                    stale_reason = "target_inventory_held"
+
+                audience_snapshot = {
+                    "total": int(action["audience_total"]),
+                    "eligible": int(action["audience_eligible"]),
+                    "blocked": int(action["audience_blocked"]),
+                }
+                offer_snapshot = {
+                    "message_template_key": action["message_template_key"],
+                    "offers": [
+                        {
+                            "id": offer["id"], "wave": offer["wave_number"],
+                            "price_minor": offer["offered_price_minor"],
+                            "expires_at": offer["expires_at"].isoformat(),
+                        }
+                        for offer in offers
+                    ],
+                }
+                if stale_reason:
+                    approval = one(c.execute(text("""
+                        insert into public.crm_approvals
+                          (organization_id,action_id,approver_user_id,approver_role,status,
+                           policy_version,audience_snapshot,offer_snapshot,economics_snapshot)
+                        values
+                          (cast(:org as uuid),cast(:action as uuid),cast(:uid as uuid),
+                           cast(:role as public.fmc_member_role),'stale',:policy,
+                           cast(:audience as jsonb),cast(:offers as jsonb),cast(:economics as jsonb))
+                        returning id::text,status,created_at
+                    """), {
+                        "org": org, "action": action_id, "uid": a.id, "role": actor_role,
+                        "policy": action["policy_version"],
+                        "audience": json.dumps(audience_snapshot),
+                        "offers": json.dumps({**offer_snapshot, "stale_reason": stale_reason}),
+                        "economics": json.dumps(action["economics_snapshot"]),
+                    }))
+                    c.execute(text("""
+                        update public.crm_actions
+                        set status='stale',execution_enabled=false,updated_at=now()
+                        where id=cast(:action as uuid)
+                    """), {"action": action_id})
+                    audit(c, request, org, a, "crm.approval_stale", "crm_action", action_id,
+                          after={"reason": stale_reason, "approval_id": approval["id"]})
+                    raise DomainError("APPROVAL_STALE", f"Approval is stale: {stale_reason}.", 409)
+
+                approval_status = "approved" if decision == "approve" else "rejected"
+                approval = one(c.execute(text("""
+                    insert into public.crm_approvals
+                      (organization_id,action_id,approver_user_id,approver_role,status,
+                       policy_version,audience_snapshot,offer_snapshot,economics_snapshot,approved_at)
+                    values
+                      (cast(:org as uuid),cast(:action as uuid),cast(:uid as uuid),
+                       cast(:role as public.fmc_member_role),:status,:policy,
+                       cast(:audience as jsonb),cast(:offers as jsonb),cast(:economics as jsonb),
+                       case when :status='approved' then now() end)
+                    returning id::text,status,approved_at,created_at
+                """), {
+                    "org": org, "action": action_id, "uid": a.id, "role": actor_role,
+                    "status": approval_status, "policy": action["policy_version"],
+                    "audience": json.dumps(audience_snapshot),
+                    "offers": json.dumps(offer_snapshot),
+                    "economics": json.dumps(action["economics_snapshot"]),
+                }))
+                next_status = "approved" if decision == "approve" else "cancelled"
+                c.execute(text("""
+                    update public.crm_actions
+                    set status=:status,execution_enabled=false,updated_at=now()
+                    where id=cast(:action as uuid)
+                """), {"status": next_status, "action": action_id})
+                audit(c, request, org, a, f"crm.{approval_status}", "crm_action", action_id,
+                      after={"approval_id": approval["id"], "status": next_status,
+                             "execution_enabled": False, "approver_role": actor_role})
+                return {
+                    "id": action_id,
+                    "status": next_status,
+                    "approval": approval,
+                    "execution_enabled": False,
+                    "live_delivery_available": False,
+                }
+
         @app.get("/api/fmc/{org}/demand")
         def demand_signals(org: str, request: Request, date: str):
             a = who(request)
