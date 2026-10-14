@@ -887,3 +887,197 @@ def test_offline_provider_ledger_rejects_cross_tenant_and_mutation(fill_today):
                 update public.crm_provider_events_offline set event_state='cancelled'
                 where provider_connection_id=cast(:conn as uuid)
             """),{"conn":conn})
+
+
+def test_f07_reconciliation_core_cancel_idempotency_and_rollback(fill_today):
+    """Real PG16 DB-backed integration; all writes are fictional/shadow-only."""
+    url,store,uid,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        booking=c.execute(text("""
+            select id::text from public.bookings
+            where organization_id=cast(:org as uuid) and status='confirmed' limit 1
+        """),{"org":org}).scalar_one()
+    api=f"/api/fmc/{org}/bookings/{booking}/reconcile-shadow"
+    assert client.post(api,headers=hdr).status_code==409
+    first=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+                      headers=hdr,json={"booking_id":booking})
+    assert first.status_code==200,first.text
+    rec=client.post(api,headers=hdr)
+    assert rec.status_code==200,rec.text
+    assert rec.json()["proposed_maturity"]=="provisional"
+    assert rec.json()["maturity_applied"] and rec.json()["new_evidence"]
+    assert rec.json()["fee_minor"]==0 and not rec.json()["billable"]
+    repeat=client.post(api,headers=hdr)
+    assert repeat.status_code==200 and not repeat.json()["new_evidence"]
+    assert not repeat.json()["maturity_applied"]
+    # Cancel the fictional Core record only inside the test DB.
+    with store.trusted() as c:
+        c.execute(text("""
+            update public.bookings set status='cancelled',updated_at=now()+interval '1 minute'
+            where id=cast(:booking as uuid)
+        """),{"booking":booking})
+    assert client.post(api,headers=hdr).status_code==409
+    after=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+                      headers=hdr,json={"booking_id":booking})
+    assert after.status_code==200 and after.json()["maturity"]=="unverified"
+    cancelled=client.post(api,headers=hdr)
+    assert cancelled.status_code==200,cancelled.text
+    assert cancelled.json()["proposed_maturity"]=="unverified"
+    hist=client.get(f"/api/fmc/{org}/bookings/{booking}/reconciliation-history",headers=hdr)
+    assert hist.status_code==200 and len(hist.json()["items"])==2
+    assert all(x["billable"] is False and x["fee_minor"]==0 for x in hist.json()["items"])
+    with store.trusted() as c:
+        assert c.execute(text("""
+            select maturity from public.crm_attribution_records
+            where booking_id=cast(:booking as uuid)
+        """),{"booking":booking}).scalar_one()=="unverified"
+    for sql in [
+       "update public.crm_shadow_reconciliation_observations set fee_minor=1 where booking_id=cast(:booking as uuid)",
+       "delete from public.crm_shadow_reconciliation_observations where booking_id=cast(:booking as uuid)",
+    ]:
+        with pytest.raises(Exception):
+            with store.trusted() as c:
+                c.execute(text(sql),{"booking":booking})
+    # Aborted SQL statements roll back; pre-existing immutable evidence is preserved.
+    with store.trusted() as c:
+        count=c.execute(text("""
+            select count(*) from public.crm_shadow_reconciliation_observations
+            where booking_id=cast(:booking as uuid)
+        """),{"booking":booking}).scalar_one()
+        assert count==2
+        assert c.execute(text("""
+            select count(*) from public.crm_attribution_records where booking_id=cast(:booking as uuid)
+              and (billable or fee_minor<>0)
+        """),{"booking":booking}).scalar_one()==0
+    assert client.post(f"/api/fmc/{uuid.uuid4()}/bookings/{booking}/reconcile-shadow",
+                       headers=hdr).status_code in (403,404)
+
+
+def test_f07_external_fixture_dispute_and_db_four_eyes(fill_today):
+    url,store,uid,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        booking=c.execute(text("""
+            select id::text from public.bookings
+            where organization_id=cast(:org as uuid) and status='confirmed' limit 1
+        """),{"org":org}).scalar_one()
+        c.execute(text("""
+          update public.bookings set source='playtomic',external_reference='ext-f07',
+              updated_at=now()+interval '1 minute' where id=cast(:booking as uuid)
+        """),{"booking":booking})
+        conn=c.execute(text("""
+          insert into public.provider_connections(organization_id,provider)
+          values(cast(:org as uuid),'playtomic') returning id::text
+        """),{"org":org}).scalar_one()
+        event=c.execute(text("""
+          insert into public.crm_provider_events_offline
+            (organization_id,provider_connection_id,provider,event_id,provider_sequence,
+             booking_reference,event_state,event_key,payload_sha256,event_occurred_at,signed_at)
+          values(cast(:org as uuid),cast(:conn as uuid),'playtomic','evt-refund-f07',
+                 1,'ext-f07','refunded',:key,:sha,now(),now())
+          returning id::text
+        """),{"org":org,"conn":conn,"key":"b"*64,"sha":"c"*64}).scalar_one()
+    snap=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+                     headers=hdr,json={"booking_id":booking})
+    assert snap.status_code==200 and snap.json()["maturity"]=="pending_evidence"
+    api=f"/api/fmc/{org}/bookings/{booking}/reconcile-shadow"
+    observed=client.post(api,headers=hdr)
+    assert observed.status_code==200,observed.text
+    assert observed.json()["proposed_maturity"]=="disputed"
+    assert observed.json()["source_resolution"]=="provider_conflict"
+    assert observed.json()["provider_fixture_seen"] is True
+    assert observed.json()["refunds_executed"]==0
+    with store.trusted() as c:
+        attr=c.execute(text("""
+          select id::text,maturity from public.crm_attribution_records
+          where booking_id=cast(:booking as uuid)
+        """),{"booking":booking}).mappings().one()
+        assert attr["maturity"]=="disputed"
+    # SQL direct injection cannot alter immutable provider facts or maturity ledger.
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+              insert into public.crm_shadow_reconciliation_observations
+              (organization_id,booking_id,core_snapshot_key,offline_event_id,
+               event_key,booking_status,provider_claim,source_resolution,
+               shadow_maturity,reason)
+              values(cast(:org as uuid),cast(:booking as uuid),'falsified',
+                     cast(:event as uuid),:key,'confirmed','refunded',
+                     'provider_conflict','disputed','forged')
+            """),{"org":org,"booking":booking,"event":event,"key":"d"*64})
+    dispute=client.post(f"/api/fmc/{org}/disputes/shadow",headers=hdr,
+        json={"attribution_id":attr["id"],"risk":"high","reason":"Refund fixture is unverified"})
+    assert dispute.status_code==201,dispute.text
+    case_id=dispute.json()["case"]["id"]
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                update public.crm_dispute_cases set status='resolved',resolved_at=now()
+                where id=cast(:id as uuid)
+            """),{"id":case_id})
+    proposed=client.post(f"/api/fmc/{org}/disputes/{case_id}/propose",headers=hdr,
+                         json={"code":"provider_review_required","note":"External refund not verified"})
+    assert proposed.status_code==200,proposed.text
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                update public.crm_dispute_cases set status='approved',approved_by=cast(:uid as uuid)
+                where id=cast(:id as uuid)
+            """),{"uid":uid,"id":case_id})
+    outsider=str(uuid.uuid4())
+    with store.trusted() as c:
+        c.execute(text("insert into auth.users(id) values(cast(:uid as uuid))"),{"uid":outsider})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                update public.crm_dispute_cases set status='approved',approved_by=cast(:uid as uuid)
+                where id=cast(:id as uuid)
+            """),{"uid":outsider,"id":case_id})
+    approver=str(uuid.uuid4())
+    with store.trusted() as c:
+        c.execute(text("insert into auth.users(id) values(cast(:uid as uuid))"),{"uid":approver})
+        c.execute(text("""
+            insert into public.organization_members(organization_id,user_id,role)
+            values(cast(:org as uuid),cast(:uid as uuid),'manager')
+        """),{"org":org,"uid":approver})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                update public.crm_dispute_cases set status='approved',approved_by=cast(:uid as uuid)
+                where id=cast(:id as uuid)
+            """),{"uid":approver,"id":case_id})
+    with store.trusted() as c:
+        c.execute(text("""
+            update public.organization_members set role='admin'
+            where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
+        """),{"org":org,"uid":approver})
+    second=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(approver)))
+    approved=second.post(f"/api/fmc/{org}/disputes/{case_id}/approve",headers=hdr,
+                         json={"note":"Independent admin review, no financial action"})
+    assert approved.status_code==200,approved.text
+    resolved=client.post(f"/api/fmc/{org}/disputes/{case_id}/resolve",headers=hdr,
+                         json={"note":"Closed as no financial action permitted"})
+    assert resolved.status_code==200,resolved.text
+    for sql in [
+        "update public.crm_dispute_cases set status='open' where id=cast(:id as uuid)",
+        "update public.crm_dispute_cases set risk='low' where id=cast(:id as uuid)",
+    ]:
+        with pytest.raises(Exception):
+            with store.trusted() as c:
+                c.execute(text(sql),{"id":case_id})
+    after=client.post(f"/api/fmc/{org}/disputes/evaluate-sla-shadow",headers=hdr)
+    assert after.status_code==200 and after.json()["new_escalations"]==0
+    history=client.get(f"/api/fmc/{org}/disputes/{case_id}/decisions",headers=hdr)
+    assert [x["transition"] for x in history.json()["items"]]==["PROPOSED","APPROVED","RESOLVED"]
+    with store.trusted() as c:
+        c.execute(text("delete from auth.users where id=cast(:uid as uuid)"),{"uid":outsider})
+        c.execute(text("delete from auth.users where id=cast(:uid as uuid)"),{"uid":approver})

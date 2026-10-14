@@ -19,6 +19,7 @@ from .common import DomainError
 from .supabase_v1 import one, rows
 from .revenue_finance import dispute_policy
 from .offline_evidence import EvidenceRejected, build_shadow_offer_link
+from .reconciliation_maturity import reconcile_shadow, shadow_reconciliation_key
 
 FINANCE = {"owner", "admin", "manager", "analyst"}
 MANAGER = {"owner", "admin", "manager"}
@@ -395,6 +396,126 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
                   after={"financial_execution":False,"commission_changed":False})
             return {"id":str(case_id),"status":"resolved","financial_execution":False}
 
+
+
+    @app.post("/api/fmc/{org}/bookings/{booking_id}/reconcile-shadow")
+    def reconcile_core_booking_shadow(org: str, booking_id: uuid.UUID, request: Request):
+        """Transactional Core-vs-offline-fixture observation; never financial action."""
+        staging_only()
+        actor=who(request)
+        with db.user(actor.id) as c:
+            role(c,org,actor,MANAGER)
+        with db.trusted() as c:
+            db.require_role(c,org,actor.id,MANAGER)
+            booking=one(c.execute(text("""
+              select id::text,organization_id::text,status::text,source,
+                     external_reference,updated_at
+              from public.bookings where id=cast(:booking as uuid)
+                 and organization_id=cast(:org as uuid) for update
+            """),{"org":org,"booking":str(booking_id)}))
+            if not booking:
+                raise DomainError("BOOKING_NOT_FOUND","Booking not found in this organization.",404)
+            snapshot_key=core_snapshot_key(booking)
+            snap=c.execute(text("""
+              select 1 from public.crm_booking_evidence
+              where organization_id=cast(:org as uuid)
+                and booking_id=cast(:booking as uuid) and event_key=:key
+            """),{"org":org,"booking":booking["id"],"key":snapshot_key}).scalar_one_or_none()
+            if not snap:
+                raise DomainError("BOOKING_SNAPSHOT_REQUIRED",
+                                  "Evaluate latest Core booking evidence before reconciling.",409)
+            provider=None
+            if booking["external_reference"] and booking["source"] not in NATIVE_SOURCES:
+                provider=one(c.execute(text("""
+                  select p.id::text,p.event_key,p.event_state,p.provider_sequence
+                  from public.crm_provider_events_offline p
+                  where p.organization_id=cast(:org as uuid)
+                    and p.provider=:provider and p.booking_reference=:reference
+                  order by p.provider_sequence desc,p.created_at desc limit 1
+                """),{"org":org,"provider":booking["source"],
+                       "reference":booking["external_reference"]}))
+            previous=one(c.execute(text("""
+              select id::text,maturity,primary_offer_id::text,confidence
+              from public.crm_attribution_records
+              where organization_id=cast(:org as uuid) and booking_id=cast(:booking as uuid)
+              for update
+            """),{"org":org,"booking":booking["id"]}))
+            if not previous:
+                raise DomainError("ATTRIBUTION_NOT_EVALUATED",
+                                  "Evaluate Core booking snapshot before reconciliation.",409)
+            proposed=reconcile_shadow(booking["status"],booking["source"],
+                provider["event_state"] if provider else None,previous["maturity"])
+            event_key=shadow_reconciliation_key(
+                org,booking["id"],snapshot_key,provider["event_key"] if provider else None)
+            inserted=one(c.execute(text("""
+              insert into public.crm_shadow_reconciliation_observations
+                (organization_id,booking_id,core_snapshot_key,offline_event_id,
+                 event_key,booking_status,provider_claim,source_resolution,
+                 shadow_maturity,reason,review_required)
+              values(cast(:org as uuid),cast(:booking as uuid),:snapshot,
+                     cast(:provider_event as uuid),:event,:status,:claim,
+                     :source,:maturity,:reason,:review)
+              on conflict(event_key) do nothing returning id::text
+            """),{"org":org,"booking":booking["id"],"snapshot":snapshot_key,
+                  "provider_event":provider["id"] if provider else None,
+                  "event":event_key,"status":booking["status"],
+                  "claim":provider["event_state"] if provider else None,
+                  "source":proposed.source_resolution,
+                  "maturity":proposed.maturity,"reason":proposed.reason,
+                  "review":proposed.review_required}))
+            terminal=previous["maturity"] in ("finalized","adjusted")
+            protected=previous["primary_offer_id"] is not None
+            if inserted and not terminal and not protected:
+                c.execute(text("""
+                  update public.crm_attribution_records
+                  set maturity=:maturity,confidence='ambiguous',
+                      primary_action_id=null,primary_offer_id=null,
+                      assisted_actions='[]'::jsonb,
+                      authority_source=:authority,
+                      gross_attributed_minor=0,fee_minor=0,billable=false,
+                      policy_version='reconciliation_shadow_v1',
+                      evidence_snapshot=cast(:evidence as jsonb),updated_at=now()
+                  where id=cast(:record as uuid)
+                """),{"maturity":proposed.maturity,
+                      "authority":proposed.source_resolution,
+                      "record":previous["id"],
+                      "evidence":json.dumps({
+                         "core_snapshot_key":snapshot_key,
+                         "provider_event_key":provider["event_key"] if provider else None,
+                         "provider_offline_only":bool(provider),
+                         "causal_evidence_verified":False,
+                         "financial_execution":False})})
+            if inserted:
+                audit(c,request,org,actor,"reconciliation.shadow_observed",
+                    "booking",booking["id"],after={
+                      "event_key":event_key,"maturity":proposed.maturity,
+                      "provider_offline_only":bool(provider),"billable":False})
+            return {"booking_id":booking["id"],
+                    "observation_id":inserted["id"] if inserted else None,
+                    "new_evidence":bool(inserted),"prior_maturity":previous["maturity"],
+                    "proposed_maturity":proposed.maturity,
+                    "maturity_applied":bool(inserted and not terminal and not protected),
+                    "review_required":bool(proposed.review_required or terminal or protected),
+                    "reason":proposed.reason,"source_resolution":proposed.source_resolution,
+                    "provider_fixture_seen":bool(provider),
+                    "fee_minor":0,"billable":False,"customer_messages_sent":0,
+                    "refunds_executed":0,"mode":"shadow"}
+
+    @app.get("/api/fmc/{org}/bookings/{booking_id}/reconciliation-history")
+    def shadow_reconciliation_history(org: str, booking_id: uuid.UUID, request: Request):
+        actor=who(request)
+        with db.user(actor.id) as c:
+            role(c,org,actor,FINANCE)
+            records=rows(c.execute(text("""
+              select id::text,core_snapshot_key,event_key,booking_status,
+                     provider_claim,source_resolution,shadow_maturity,reason,
+                     review_required,billable,fee_minor,observed_at
+              from public.crm_shadow_reconciliation_observations
+              where organization_id=cast(:org as uuid)
+                and booking_id=cast(:booking as uuid)
+              order by observed_at,id
+            """),{"org":org,"booking":str(booking_id)}))
+        return {"items":records,"mode":"shadow","financial_execution":False}
 
     @app.post("/api/fmc/{org}/attributions/link-offer-shadow", status_code=200)
     def link_offer_shadow(org: str, body: OfferLinkIn, request: Request):
