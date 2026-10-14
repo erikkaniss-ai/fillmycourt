@@ -211,7 +211,7 @@ def register_crm_delivery(app, db, who, role, audit):
                 join public.crm_delivery_attempts a on a.id=ev.attempt_id
                 where a.action_id=cast(:action as uuid)
                   and a.organization_id=cast(:org as uuid)
-                order by ev.received_at,ev.id
+                order by ev.ingest_seq
             """), {"action": action_id, "org": org}))
             return {"action_id": action_id, "attempts": attempts, "events": events,
                     "external_send": False, "live_delivery_available": False}

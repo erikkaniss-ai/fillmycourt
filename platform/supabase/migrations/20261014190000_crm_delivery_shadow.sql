@@ -26,6 +26,7 @@ create table public.crm_delivery_events (
   organization_id uuid not null references public.organizations(id) on delete cascade,
   attempt_id uuid not null references public.crm_delivery_attempts(id) on delete cascade,
   event_key text not null unique,
+  ingest_seq bigint generated always as identity unique,
   event_type text not null check (event_type in
     ('CREATED','QUEUED','SHADOW_SIMULATED','PROVIDER_ACCEPTED','DELIVERED',
      'READ','CLICKED','REPLIED','FAILED_TRANSIENT','RETRY_SCHEDULED',
@@ -79,6 +80,11 @@ for each row execute function private.guard_crm_delivery_links();
 create function private.block_delivery_event_mutation() returns trigger
 language plpgsql security invoker set search_path='' as $$
 begin
+  -- Only explicit trusted tenant erasure (never ordinary ledger updates).
+  -- Authenticated/anon roles have no DELETE grant.
+  if tg_op='DELETE' and current_setting('fmc.allow_delivery_purge',true)='on' then
+    return old;
+  end if;
   raise exception 'delivery events are append-only' using errcode='23514';
 end;
 $$;

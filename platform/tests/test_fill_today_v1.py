@@ -72,6 +72,7 @@ def fill_today():
         """), {"org": org_id, "court": court_id, "uid": user_id})
     yield url, store, user_id, org_id, court_id
     with store.trusted() as c:
+        c.execute(text("select set_config('fmc.allow_delivery_purge','on',true)"))
         c.execute(text("delete from public.organizations where id=cast(:org as uuid)"), {"org": org_id})
         c.execute(text("delete from auth.users where id=cast(:uid as uuid)"), {"uid": user_id})
 
