@@ -104,7 +104,7 @@ def register_financial_foundation(app, db, who, role):
             role(c, org, actor, FINANCE_ROLES)
             items = rows(c.execute(text("""
                 select id::text,attribution_id::text,kind,delta_minor,evidence,
-                       correction_reference,created_at
+                       correction_reference,source_observation_id::text,created_at
                 from public.crm_attribution_adjustments
                 where organization_id=cast(:org as uuid)
                 order by created_at desc,id limit 200
