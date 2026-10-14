@@ -82,6 +82,8 @@ def verify_offline_provider_event(*, payload: bytes, signature_hex: str,
         raise EvidenceRejected("INVALID_SIGNATURE")
     try:
         body = json.loads(payload.decode("utf-8"), object_pairs_hook=_pairs_unique)
+    except EvidenceRejected:
+        raise
     except (ValueError, UnicodeError, TypeError):
         raise EvidenceRejected("INVALID_JSON") from None
     if not isinstance(body, dict) or set(body) != {
