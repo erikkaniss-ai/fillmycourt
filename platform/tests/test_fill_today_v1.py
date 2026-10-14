@@ -564,6 +564,38 @@ def test_crm_shadow_requires_verified_channel_permission_and_never_executes_live
     assert approval.json()["execution_enabled"] is False
     assert approval.json()["live_delivery_available"] is False
 
+    # Phase 1: a Null adapter stores only evidence of simulation, never delivery.
+    prepared = client.post(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}/shadow-delivery", headers=headers,
+    )
+    assert prepared.status_code == 200, prepared.text
+    assert prepared.json()["prepared"] == 1
+    assert prepared.json()["adapter"] == "null"
+    assert prepared.json()["external_send"] is False
+    assert prepared.json()["provider_message_ids"] == []
+
+    replay = client.post(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}/shadow-delivery", headers=headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["prepared"] == 0
+    assert replay.json()["existing"] == 1
+
+    delivery = client.get(
+        f"/api/fmc/{org_id}/crm-actions/{action_id}/delivery", headers=headers,
+    )
+    assert delivery.status_code == 200, delivery.text
+    assert len(delivery.json()["attempts"]) == 1
+    assert [e["event_type"] for e in delivery.json()["events"]] == [
+        "CREATED", "SHADOW_SIMULATED",
+    ]
+    assert delivery.json()["external_send"] is False
+    with store.trusted() as c:
+        assert c.execute(text("""
+            select count(*) from public.crm_delivery_events
+            where organization_id=cast(:org as uuid) and event_type='DELIVERED'
+        """), {"org": org_id}).scalar_one() == 0
+
     with store.trusted() as c:
         offer = c.execute(text("""
             select target_starts_at,target_ends_at from public.crm_offers

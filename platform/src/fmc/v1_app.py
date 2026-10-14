@@ -3239,6 +3239,10 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 return {"id": booking_id, "status": "cancelled"}
 
     if service in ("operations", "all"):
+        from .crm_delivery import register_crm_delivery
+        register_crm_delivery(app, db, who, role, audit)
+
+    if service in ("operations", "all"):
         fill_ui = Path(__file__).resolve().parents[2] / "public" / "fill"
         if fill_ui.exists():
             app.mount("/fill", StaticFiles(directory=str(fill_ui), html=True), name="fill-v1")
