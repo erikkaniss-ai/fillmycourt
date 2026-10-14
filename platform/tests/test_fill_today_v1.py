@@ -591,6 +591,13 @@ def test_crm_shadow_requires_verified_channel_permission_and_never_executes_live
         "CREATED", "SHADOW_SIMULATED",
     ]
     assert delivery.json()["external_send"] is False
+
+    for route in ("attributions", "attribution-adjustments", "disputes"):
+        empty = client.get(f"/api/fmc/{org_id}/{route}", headers=headers)
+        assert empty.status_code == 200, empty.text
+        assert empty.json()["items"] == []
+        assert empty.json()["mode"] == "shadow"
+
     with store.trusted() as c:
         assert c.execute(text("""
             select count(*) from public.crm_delivery_events
