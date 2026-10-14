@@ -66,6 +66,11 @@ class OfferLinkIn(BaseModel):
     tracking_token: str = Field(min_length=8, max_length=180)
 
 
+class ShadowAdjustmentIn(BaseModel):
+    observation_id: uuid.UUID
+    kind: str = Field(pattern="^(cancellation|provider_correction)$")
+
+
 class CreateDisputeIn(BaseModel):
     attribution_id: uuid.UUID | None = None
     reconciliation_item_id: uuid.UUID | None = None
@@ -429,6 +434,10 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
                 provider=one(c.execute(text("""
                   select p.id::text,p.event_key,p.event_state,p.provider_sequence
                   from public.crm_provider_events_offline p
+                  join public.crm_provider_signature_receipts_shadow receipt
+                    on receipt.provider_event_id=p.id
+                   and receipt.organization_id=p.organization_id
+                   and receipt.provider_connection_id=p.provider_connection_id
                   where p.organization_id=cast(:org as uuid)
                     and p.provider=:provider and p.booking_reference=:reference
                   order by p.provider_sequence desc,p.created_at desc limit 1
@@ -516,6 +525,87 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
               order by observed_at,id
             """),{"org":org,"booking":str(booking_id)}))
         return {"items":records,"mode":"shadow","financial_execution":False}
+
+
+    @app.post("/api/fmc/{org}/bookings/{booking_id}/adjustment-observe-shadow")
+    def record_shadow_adjustment(org: str, booking_id: uuid.UUID,
+                                 body: ShadowAdjustmentIn, request: Request):
+        """Zero-delta observation only: cancellation fact or disputed claim."""
+        staging_only()
+        actor = who(request)
+        with db.user(actor.id) as c:
+            role(c,org,actor,MANAGER)
+        with db.trusted() as c:
+            db.require_role(c,org,actor.id,MANAGER)
+            booking = one(c.execute(text("""
+                select id::text,organization_id::text,status::text,source,updated_at
+                from public.bookings where organization_id=cast(:org as uuid)
+                  and id=cast(:booking as uuid) for update
+            """),{"org":org,"booking":str(booking_id)}))
+            if not booking:
+                raise DomainError("BOOKING_NOT_FOUND","Booking is missing in this organization.",404)
+            latest_key=core_snapshot_key(booking)
+            obs=one(c.execute(text("""
+                select id::text,event_key,booking_status,provider_claim,
+                       shadow_maturity,review_required,core_snapshot_key
+                from public.crm_shadow_reconciliation_observations
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid)
+                  and id=cast(:observation as uuid)
+            """),{"org":org,"booking":str(booking_id),
+                  "observation":str(body.observation_id)}))
+            if not obs:
+                raise DomainError("OBSERVATION_NOT_FOUND","No matching tenant observation.",404)
+            if obs["core_snapshot_key"] != latest_key:
+                raise DomainError("STALE_OBSERVATION",
+                                  "Reconcile the latest Core booking state first.",409)
+            if body.kind=="cancellation" and not (
+                obs["booking_status"]=="cancelled" and
+                obs["shadow_maturity"] in ("unverified","disputed")):
+                raise DomainError("ADJUSTMENT_SOURCE",
+                                  "Authoritative Core cancellation required.",422)
+            if body.kind=="provider_correction" and not (
+                obs["provider_claim"] is not None and obs["review_required"]
+                and obs["shadow_maturity"]=="disputed"):
+                raise DomainError("ADJUSTMENT_SOURCE",
+                                  "Disputed external claim required.",422)
+            attr=one(c.execute(text("""
+                select id::text,maturity,billable,fee_minor
+                from public.crm_attribution_records
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid) for update
+            """),{"org":org,"booking":str(booking_id)}))
+            if not attr or attr["billable"] or attr["fee_minor"]!=0:
+                raise DomainError("FINANCE_LOCK","Financial adjustment prohibited.",409)
+            ref=f"shadow:{obs['event_key'].strip()}:{body.kind}"
+            evidence={"shadow_only":True,"financial_execution":False,
+                      "causal_evidence_verified":False,
+                      "source_observation_id":obs["id"],
+                      "observation_kind":"external_claim_needs_review"
+                      if body.kind=="provider_correction" else "core_cancellation_observed"}
+            inserted=one(c.execute(text("""
+                insert into public.crm_attribution_adjustments
+                  (organization_id,attribution_id,kind,delta_minor,evidence,
+                   correction_reference,created_by,source_observation_id)
+                values(cast(:org as uuid),cast(:attr as uuid),:kind,0,
+                       cast(:evidence as jsonb),:ref,cast(:actor as uuid),
+                       cast(:observation as uuid))
+                on conflict(attribution_id,correction_reference) do nothing
+                returning id::text
+            """),{"org":org,"attr":attr["id"],"kind":body.kind,
+                  "evidence":json.dumps(evidence),"ref":ref,
+                  "actor":actor.id,"observation":obs["id"]}))
+            if inserted:
+                audit(c,request,org,actor,"attribution.shadow_adjustment_observed",
+                    "booking",str(booking_id),after={"kind":body.kind,
+                    "source_observation_id":obs["id"],"delta_minor":0,
+                    "financial_execution":False})
+            return {"booking_id":str(booking_id),"observation_id":obs["id"],
+                    "attribution_id":attr["id"],
+                    "adjustment_id":inserted["id"] if inserted else None,
+                    "new_evidence":bool(inserted),"kind":body.kind,
+                    "delta_minor":0,"fee_minor":0,"billable":False,
+                    "refunds_executed":0,"mode":"shadow"}
 
     @app.post("/api/fmc/{org}/attributions/link-offer-shadow", status_code=200)
     def link_offer_shadow(org: str, body: OfferLinkIn, request: Request):

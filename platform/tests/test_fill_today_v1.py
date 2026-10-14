@@ -978,14 +978,22 @@ def test_f07_external_fixture_dispute_and_db_four_eyes(fill_today):
           insert into public.provider_connections(organization_id,provider)
           values(cast(:org as uuid),'playtomic') returning id::text
         """),{"org":org}).scalar_one()
-        event=c.execute(text("""
-          insert into public.crm_provider_events_offline
-            (organization_id,provider_connection_id,provider,event_id,provider_sequence,
-             booking_reference,event_state,event_key,payload_sha256,event_occurred_at,signed_at)
-          values(cast(:org as uuid),cast(:conn as uuid),'playtomic','evt-refund-f07',
-                 1,'ext-f07','refunded',:key,:sha,now(),now())
-          returning id::text
-        """),{"org":org,"conn":conn,"key":"b"*64,"sha":"c"*64}).scalar_one()
+        import hashlib,hmac,json
+        from fmc.signed_fixture_store import record_signed_provider_fixture
+        from datetime import datetime,timezone
+        now=datetime.now(timezone.utc).replace(microsecond=0)
+        epoch=int(now.timestamp())
+        fixture={"schema_version":1,"organization_id":org,"connection_id":conn,
+                 "provider":"playtomic","event_id":"evt-refund-f07","sequence":1,
+                 "booking_reference":"ext-f07","state":"refunded",
+                 "occurred_at":now.isoformat()}
+        payload=json.dumps(fixture).encode()
+        secret="fixture-F07-regression-only"
+        signature=hmac.new(secret.encode(),str(epoch).encode()+b"."+payload,
+                           hashlib.sha256).hexdigest()
+        event=record_signed_provider_fixture(c,organization_id=org,
+                 connection_id=conn,payload=payload,signature_hex=signature,
+                 signed_epoch=epoch,fixture_secret=secret,now=now)["event_id"]
     snap=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
                      headers=hdr,json={"booking_id":booking})
     assert snap.status_code==200 and snap.json()["maturity"]=="pending_evidence"
@@ -1081,3 +1089,183 @@ def test_f07_external_fixture_dispute_and_db_four_eyes(fill_today):
     # The fixture removes the tenant and its immutable decision history via cascade.
     # Do not delete an approver before it is removed: the FK ON DELETE SET NULL
     # would rewrite a resolved case and correctly violate the immutable guard.
+
+
+def test_f08_signature_receipt_adapter_replay_collision_and_claim_filter(fill_today):
+    import hashlib, hmac, json
+    from datetime import timezone, datetime, timedelta
+    from fmc.signed_fixture_store import record_signed_provider_fixture
+    from fmc.offline_evidence import EvidenceRejected
+    url,store,uid,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        booking=c.execute(text("""
+          select id::text from public.bookings
+          where organization_id=cast(:org as uuid) and status='confirmed' limit 1
+        """),{"org":org}).scalar_one()
+        c.execute(text("""
+          update public.bookings set source='playtomic',external_reference='f08-ext',
+            updated_at=now()+interval '1 minute' where id=cast(:id as uuid)
+        """),{"id":booking})
+        conn=c.execute(text("""
+          insert into public.provider_connections(organization_id,provider)
+          values(cast(:org as uuid),'playtomic') returning id::text
+        """),{"org":org}).scalar_one()
+        # An unsigned fixture is not eligible for source arbitration.
+        c.execute(text("""
+          insert into public.crm_provider_events_offline
+            (organization_id,provider_connection_id,provider,event_id,provider_sequence,
+             booking_reference,event_state,event_key,payload_sha256,event_occurred_at,signed_at)
+          values(cast(:org as uuid),cast(:conn as uuid),'playtomic','fake-unverified',
+                1,'f08-ext','refunded',:key,:digest,now(),now())
+        """),{"org":org,"conn":conn,"key":"a"*64,"digest":"b"*64})
+    snap=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+                     headers=hdr,json={"booking_id":booking})
+    assert snap.status_code==200,snap.text
+    endpoint=f"/api/fmc/{org}/bookings/{booking}/reconcile-shadow"
+    first=client.post(endpoint,headers=hdr)
+    assert first.status_code==200 and first.json()["proposed_maturity"]=="pending_evidence"
+    assert first.json()["provider_fixture_seen"] is False
+    now=datetime.now(timezone.utc).replace(microsecond=0)
+    epoch=int(now.timestamp())
+    secret="fixture-hmac-key-for-F08-only"
+    def envelope(eventid,seq,state="refunded",org_id=org):
+        data={"schema_version":1,"organization_id":org_id,"connection_id":conn,
+              "provider":"playtomic","event_id":eventid,"sequence":seq,
+              "booking_reference":"f08-ext","state":state,
+              "occurred_at":now.isoformat()}
+        payload=json.dumps(data).encode()
+        signature=hmac.new(secret.encode(),str(epoch).encode()+b"."+payload,
+                           hashlib.sha256).hexdigest()
+        return payload,signature
+    p,s=envelope("real-fixture-2",2)
+    with store.trusted() as c:
+        result=record_signed_provider_fixture(c,organization_id=org,connection_id=conn,
+            payload=p,signature_hex=s,signed_epoch=epoch,fixture_secret=secret,now=now)
+    assert result["new_evidence"] and result["verified_mode"]=="offline_signed_fixture"
+    with store.trusted() as c:
+        duplicate=record_signed_provider_fixture(c,organization_id=org,connection_id=conn,
+            payload=p,signature_hex=s,signed_epoch=epoch,fixture_secret=secret,now=now)
+    assert not duplicate["new_evidence"] and duplicate["receipt_id"]==result["receipt_id"]
+    with pytest.raises(EvidenceRejected,match="INVALID_SIGNATURE"):
+        with store.trusted() as c:
+            record_signed_provider_fixture(c,organization_id=org,connection_id=conn,
+                payload=p+b" ",signature_hex=s,signed_epoch=epoch,
+                fixture_secret=secret,now=now)
+    low,low_sig=envelope("late-sequence",1)
+    with pytest.raises(EvidenceRejected,match="STALE_OR_REORDERED_EVENT"):
+        with store.trusted() as c:
+            record_signed_provider_fixture(c,organization_id=org,connection_id=conn,
+                payload=low,signature_hex=low_sig,signed_epoch=epoch,
+                fixture_secret=secret,now=now)
+    with pytest.raises(EvidenceRejected,match="SOURCE_NOT_FOUND"):
+        with store.trusted() as c:
+            record_signed_provider_fixture(c,organization_id=str(uuid.uuid4()),
+                connection_id=conn,payload=p,signature_hex=s,signed_epoch=epoch,
+                fixture_secret=secret,now=now)
+    p3,s3=envelope("real-fixture-2",3,"cancelled")
+    with pytest.raises(EvidenceRejected,match="EVENT_ID_CONFLICT"):
+        with store.trusted() as c:
+            record_signed_provider_fixture(c,organization_id=org,connection_id=conn,
+                payload=p3,signature_hex=s3,signed_epoch=epoch,
+                fixture_secret=secret,now=now)
+    second=client.post(endpoint,headers=hdr)
+    assert second.status_code==200,second.text
+    assert second.json()["proposed_maturity"]=="disputed"
+    assert second.json()["provider_fixture_seen"] is True
+    assert second.json()["refunds_executed"]==0
+    observed=client.get(f"/api/fmc/{org}/bookings/{booking}/reconciliation-history",headers=hdr)
+    assert observed.status_code==200 and len(observed.json()["items"])==2
+    with store.trusted() as c:
+        cnt=c.execute(text("""
+          select count(*) from public.crm_provider_signature_receipts_shadow
+          where organization_id=cast(:org as uuid)
+        """),{"org":org}).scalar_one()
+        assert cnt==1
+        assert c.execute(text("""
+          select count(*) from public.crm_provider_events_offline
+          where organization_id=cast(:org as uuid)
+        """),{"org":org}).scalar_one()==2
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+              update public.crm_provider_signature_receipts_shadow
+              set verification_scheme='forged'
+              where id=cast(:id as uuid)
+            """),{"id":result["receipt_id"]})
+
+
+def test_f08_zero_delta_shadow_adjustments_and_multi_tenant_negative(fill_today):
+    url,store,uid,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        booking=c.execute(text("""
+          select id::text from public.bookings
+          where organization_id=cast(:org as uuid) and status='confirmed' limit 1
+        """),{"org":org}).scalar_one()
+    evaluate=f"/api/fmc/{org}/attributions/evaluate-shadow"
+    reconcile=f"/api/fmc/{org}/bookings/{booking}/reconcile-shadow"
+    adjust=f"/api/fmc/{org}/bookings/{booking}/adjustment-observe-shadow"
+    assert client.post(adjust,headers=hdr,
+         json={"observation_id":str(uuid.uuid4()),"kind":"cancellation"}).status_code==404
+    assert client.post(evaluate,headers=hdr,json={"booking_id":booking}).status_code==200
+    rec=client.post(reconcile,headers=hdr)
+    assert rec.status_code==200 and rec.json()["new_evidence"]
+    assert client.post(adjust,headers=hdr,
+         json={"observation_id":rec.json()["observation_id"],"kind":"cancellation"}).status_code==422
+    with store.trusted() as c:
+        c.execute(text("""
+          update public.bookings set status='cancelled',updated_at=now()+interval '2 minutes'
+          where id=cast(:id as uuid)
+        """),{"id":booking})
+    assert client.post(evaluate,headers=hdr,json={"booking_id":booking}).status_code==200
+    assert client.post(adjust,headers=hdr,
+         json={"observation_id":rec.json()["observation_id"],"kind":"cancellation"}).status_code==409
+    newer=client.post(reconcile,headers=hdr)
+    assert newer.status_code==200 and newer.json()["proposed_maturity"]=="unverified"
+    payload={"observation_id":newer.json()["observation_id"],"kind":"cancellation"}
+    accepted=client.post(adjust,headers=hdr,json=payload)
+    assert accepted.status_code==200,accepted.text
+    assert accepted.json()["delta_minor"]==0 and accepted.json()["refunds_executed"]==0
+    assert accepted.json()["new_evidence"]
+    repeat=client.post(adjust,headers=hdr,json=payload)
+    assert repeat.status_code==200 and repeat.json()["new_evidence"] is False
+    assert client.post(adjust,headers=hdr,
+         json={**payload,"kind":"full_refund"}).status_code==422
+    assert client.post(f"/api/fmc/{uuid.uuid4()}/bookings/{booking}/adjustment-observe-shadow",
+         headers=hdr,json=payload).status_code in (403,404)
+    items=client.get(f"/api/fmc/{org}/attribution-adjustments",headers=hdr)
+    assert items.status_code==200,items.text
+    assert len(items.json()["items"])==1
+    assert items.json()["items"][0]["source_observation_id"]==payload["observation_id"]
+    with store.trusted() as c:
+        attr=c.execute(text("""
+          select id::text from public.crm_attribution_records where booking_id=cast(:id as uuid)
+        """),{"id":booking}).scalar_one()
+    for source,delta in [(payload["observation_id"],10),(str(uuid.uuid4()),0)]:
+        with pytest.raises(Exception):
+            with store.trusted() as c:
+                c.execute(text("""
+                  insert into public.crm_attribution_adjustments
+                   (organization_id,attribution_id,kind,delta_minor,evidence,
+                    correction_reference,created_by,source_observation_id)
+                  values(cast(:org as uuid),cast(:attr as uuid),'cancellation',:delta,
+                    '{"shadow_only":true,"financial_execution":false,"causal_evidence_verified":false}'::jsonb,
+                    'forged',cast(:uid as uuid),cast(:observation as uuid))
+                """),{"org":org,"attr":attr,"delta":delta,"uid":uid,"observation":source})
+    with store.trusted() as c:
+        assert c.execute(text("""
+          select count(*) from public.crm_attribution_adjustments where organization_id=cast(:org as uuid)
+        """),{"org":org}).scalar_one()==1
+        assert c.execute(text("""
+          select count(*) from public.crm_attribution_records
+          where organization_id=cast(:org as uuid) and (billable or fee_minor<>0)
+        """),{"org":org}).scalar_one()==0
