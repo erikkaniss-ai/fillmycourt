@@ -1078,6 +1078,6 @@ def test_f07_external_fixture_dispute_and_db_four_eyes(fill_today):
     assert after.status_code==200 and after.json()["new_escalations"]==0
     history=client.get(f"/api/fmc/{org}/disputes/{case_id}/decisions",headers=hdr)
     assert [x["transition"] for x in history.json()["items"]]==["PROPOSED","APPROVED","RESOLVED"]
-    with store.trusted() as c:
-        c.execute(text("delete from auth.users where id=cast(:uid as uuid)"),{"uid":outsider})
-        c.execute(text("delete from auth.users where id=cast(:uid as uuid)"),{"uid":approver})
+    # The fixture removes the tenant and its immutable decision history via cascade.
+    # Do not delete an approver before it is removed: the FK ON DELETE SET NULL
+    # would rewrite a resolved case and correctly violate the immutable guard.
