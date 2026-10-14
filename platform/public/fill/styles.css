@@ -79,3 +79,10 @@
 .crm-shadow-error{margin:0;color:#9c2b3b;font-size:10px}
 .crm-approved{display:inline-block;padding:6px 9px;border-radius:8px;background:var(--soft);color:#1558a6;font-size:10px;font-weight:800}
 .crm-approval-state{display:block;margin-top:4px;color:var(--muted);font-size:9px}
+
+.dispute-queue{display:grid;gap:2px;margin-top:14px}
+.dispute-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid #edf2f6}
+.dispute-row strong{font-size:12px}
+.dispute-row small{display:block;color:var(--muted);font-size:10px;margin-top:3px}
+.dispute-row>span{white-space:nowrap;font-size:12px;font-weight:750}
+.crm-delivery-simulate{margin-top:6px;justify-self:start}

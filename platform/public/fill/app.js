@@ -10,6 +10,7 @@
     kpis: q("#kpis"), util: q("#courtUtilisation"), utilBadge: q("#utilisationBadge"),
     empty: q("#emptyCapacity"), timeline: q("#calendarTimeline"), revenueKpis: q("#revenueKpis"),
     opportunityQueue: q("#opportunityQueue"), courtComparison: q("#courtComparison"),
+    financeSummary: q("#financeSummary"), disputesQueue: q("#disputesQueue"),
   };
 
   el.date.value = new Date().toISOString().slice(0, 10);
@@ -120,9 +121,61 @@
       state.opportunities = null;
       renderToday();
       if (state.view === "calendar") await loadCalendar();
-      if (state.view === "revenue") await loadOpportunities();
+      if (state.view === "revenue") { await loadOpportunities(); await loadFinance(); }
     } catch (error) {
       fail(error);
+    }
+  }
+
+  async function loadFinance() {
+    if (!state.org || !el.financeSummary || !el.disputesQueue) return;
+    const org = state.org;
+    const prefix = "/api/fmc/" + encodeURIComponent(org);
+    try {
+      const [attributions, adjustments, disputes, reconciliation] = await Promise.all([
+        api(prefix + "/attributions"),
+        api(prefix + "/attribution-adjustments"),
+        api(prefix + "/disputes"),
+        api(prefix + "/reconciliation/items?limit=100"),
+      ]);
+      if (state.org !== org) return;
+      const ledger = attributions.items || [];
+      const changed = adjustments.items || [];
+      const cases = disputes.items || [];
+      const reconciliationCases = (reconciliation.items || []).filter(item => (
+        !["resolved", "ignored"].includes(item.status)
+      ));
+      const open = cases.filter(item => !["resolved", "unverified"].includes(item.status));
+      el.financeSummary.textContent =
+        ledger.length + " attribution records · " + changed.length +
+        " adjustments · " + (open.length + reconciliationCases.length) +
+        " open cases · billing OFF";
+      const combined = [
+        ...open.map(item => ({
+          risk: item.risk, label: item.reason, status: item.status,
+          deadline: item.sla_due_at, overdue: item.sla_overdue,
+          amount: item.amount_at_risk_minor, currency: item.currency, kind: "Revenue",
+        })),
+        ...reconciliationCases.map(item => ({
+          risk: item.severity === "critical" ? "high" : "medium",
+          label: item.category, status: item.status,
+          deadline: null, overdue: false, amount: null,
+          currency: "EUR", kind: "Reconciliation",
+        })),
+      ].sort((a, b) => Number(b.overdue) - Number(a.overdue)
+        || ({ high: 0, medium: 1, low: 2 }[a.risk] ?? 3)
+         - ({ high: 0, medium: 1, low: 2 }[b.risk] ?? 3));
+      el.disputesQueue.innerHTML = combined.map(item => (
+        '<div class="dispute-row"><div><strong>' + esc(item.kind + " · " + item.label) +
+        '</strong><small>' + esc(item.status) + ' · ' + esc(item.risk) + " risk" +
+        (item.deadline ? " · SLA " + esc(new Date(item.deadline).toLocaleDateString("en-GB")) : "") +
+        (item.overdue ? " · OVERDUE" : "") + '</small></div><span>' +
+        (item.amount == null ? "—" : mon(item.amount, item.currency)) +
+        '</span></div>'
+      )).join("") || '<p class="muted">No unresolved reconciliation or attribution disputes.</p>';
+    } catch (error) {
+      el.financeSummary.textContent = "Read-only finance data unavailable";
+      el.disputesQueue.innerHTML = '<p class="muted">' + esc(error.message || String(error)) + '</p>';
     }
   }
 
@@ -411,6 +464,29 @@
       return;
     }
 
+    const simulateButton = event.target.closest(".crm-delivery-simulate");
+    if (simulateButton) {
+      simulateButton.disabled = true;
+      try {
+        const result = await api(
+          "/api/fmc/" + encodeURIComponent(state.org) + "/crm-actions/" +
+          encodeURIComponent(simulateButton.dataset.actionId) + "/shadow-delivery",
+          { method: "POST" }
+        );
+        simulateButton.insertAdjacentHTML("afterend",
+          '<small class="crm-approval-state">' +
+          esc(result.prepared) + " simulated, " + esc(result.existing) +
+          " already prepared, " + esc(result.blocked) +
+          " blocked · 0 messages sent</small>");
+      } catch (error) {
+        simulateButton.insertAdjacentHTML("afterend",
+          '<small class="crm-shadow-error">' + esc(error.message || String(error)) + '</small>');
+      } finally {
+        simulateButton.disabled = false;
+      }
+      return;
+    }
+
     const approveButton = event.target.closest(".crm-approval-approve");
     if (approveButton) {
       approveButton.disabled = true;
@@ -419,7 +495,7 @@
           `/api/fmc/${encodeURIComponent(state.org)}/crm-actions/${encodeURIComponent(approveButton.dataset.actionId)}/approve`,
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve" }) }
         );
-        approveButton.outerHTML = `<span class="crm-approved">Approved · execution still disabled</span><small class="crm-approval-state">${esc(result.status)}</small>`;
+        approveButton.outerHTML = `<span class="crm-approved">Approved · execution still disabled</span><button class="button secondary crm-delivery-simulate" data-action-id="${esc(approveButton.dataset.actionId)}">Simulate delivery · no send</button><small class="crm-approval-state">${esc(result.status)}</small>`;
       } catch (error) {
         approveButton.insertAdjacentHTML("afterend", `<small class="crm-shadow-error">${esc(error.message || String(error))}</small>`);
         approveButton.disabled = false;
@@ -437,7 +513,7 @@
     if (state.view === "calendar") {
       try { await loadCalendar(); } catch (error) { fail(error); }
     } else if (state.view === "revenue") {
-      try { await loadOpportunities(); } catch (error) { fail(error); }
+      try { await loadOpportunities(); await loadFinance(); } catch (error) { fail(error); }
     }
   }));
 

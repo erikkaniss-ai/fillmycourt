@@ -40,6 +40,8 @@ jobs:
         run: pip install -r platform/requirements-dev.txt
       - name: Compile
         run: python -m compileall -q platform/src
+      - name: Verify Fill UI JavaScript syntax
+        run: node --check platform/public/fill/app.js
       - name: Bootstrap Supabase auth contract
         run: |
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
