@@ -18,6 +18,7 @@ from sqlalchemy import text
 from .common import DomainError
 from .supabase_v1 import one, rows
 from .revenue_finance import dispute_policy
+from .offline_evidence import EvidenceRejected, build_shadow_offer_link
 
 FINANCE = {"owner", "admin", "manager", "analyst"}
 MANAGER = {"owner", "admin", "manager"}
@@ -56,6 +57,12 @@ def core_maturity(status: str, source: str) -> str:
 
 class BookingEvidenceIn(BaseModel):
     booking_id: uuid.UUID
+
+
+class OfferLinkIn(BaseModel):
+    booking_id: uuid.UUID
+    offer_id: uuid.UUID
+    tracking_token: str = Field(min_length=8, max_length=180)
 
 
 class CreateDisputeIn(BaseModel):
@@ -387,6 +394,81 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
             audit(c,request,org,actor,"dispute.shadow_resolved","crm_dispute",str(case_id),
                   after={"financial_execution":False,"commission_changed":False})
             return {"id":str(case_id),"status":"resolved","financial_execution":False}
+
+
+    @app.post("/api/fmc/{org}/attributions/link-offer-shadow", status_code=200)
+    def link_offer_shadow(org: str, body: OfferLinkIn, request: Request):
+        """Internal operator observation only. Never confirms causal credit or fees."""
+        staging_only()
+        actor = who(request)
+        with db.user(actor.id) as c:
+            role(c, org, actor, MANAGER)
+        with db.trusted() as c:
+            db.require_role(c, org, actor.id, MANAGER)
+            booking = one(c.execute(text("""
+                select id::text,organization_id::text,court_id::text,
+                       starts_at,ends_at,currency::text,source,status::text,updated_at
+                from public.bookings
+                where organization_id=cast(:org as uuid) and id=cast(:booking as uuid)
+                for update
+            """), {"org":org,"booking":str(body.booking_id)}))
+            offer = one(c.execute(text("""
+                select id::text,organization_id::text,action_id::text,
+                       target_court_id::text,target_starts_at,target_ends_at,
+                       currency::text,tracking_token
+                from public.crm_offers
+                where organization_id=cast(:org as uuid) and id=cast(:offer as uuid)
+            """), {"org":org,"offer":str(body.offer_id)}))
+            if not booking or not offer:
+                raise DomainError("LINK_SOURCE_NOT_FOUND","Core booking or Offer missing in this organization.",404)
+            snapshot_key = core_snapshot_key(booking)
+            snapshot = c.execute(text("""
+                select 1 from public.crm_booking_evidence
+                where organization_id=cast(:org as uuid) and booking_id=cast(:booking as uuid)
+                  and event_key=:key
+            """), {"org":org,"booking":booking["id"],"key":snapshot_key}).scalar_one_or_none()
+            if not snapshot:
+                raise DomainError("BOOKING_SNAPSHOT_REQUIRED","Evaluate Core booking snapshot first.",409)
+            try:
+                link = build_shadow_offer_link(booking,offer,body.tracking_token,snapshot_key)
+            except EvidenceRejected as exc:
+                raise DomainError("OFFER_LINK_REJECTED",str(exc),422) from None
+            inserted = one(c.execute(text("""
+                insert into public.crm_booking_offer_links_shadow
+                  (organization_id,booking_id,offer_id,booking_snapshot_key,
+                   event_key,tracking_digest,outcome)
+                values(cast(:org as uuid),cast(:booking as uuid),cast(:offer as uuid),
+                       :snapshot,:key,:digest,:outcome)
+                on conflict(event_key) do nothing returning id::text
+            """), {"org":org,"booking":booking["id"],"offer":offer["id"],
+                  "snapshot":snapshot_key,"key":link["event_key"],
+                  "digest":link["tracking_digest"],"outcome":link["outcome"]}))
+            if inserted:
+                audit(c,request,org,actor,"attribution.shadow_offer_link_observed",
+                      "booking",booking["id"],after={
+                       "offer_id":offer["id"],"evidence_key":link["event_key"],
+                       "causal_evidence_verified":False,"fee_minor":0})
+            return {"booking_id":booking["id"],"offer_id":offer["id"],
+                    "link_id":inserted["id"] if inserted else None,
+                    "new_evidence":bool(inserted),"outcome":link["outcome"],
+                    "causal_evidence_verified":False,"primary_winner":None,
+                    "billable":False,"fee_minor":0,"mode":"shadow"}
+
+    @app.get("/api/fmc/{org}/bookings/{booking_id}/offer-links")
+    def list_shadow_offer_links(org: str, booking_id: uuid.UUID, request: Request):
+        actor = who(request)
+        with db.user(actor.id) as c:
+            role(c, org, actor, FINANCE)
+            items = rows(c.execute(text("""
+                select id::text,booking_id::text,offer_id::text,
+                       booking_snapshot_key,outcome,causal_evidence_verified,
+                       fee_minor,created_at
+                from public.crm_booking_offer_links_shadow
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid)
+                order by created_at,id
+            """), {"org":org,"booking":str(booking_id)}))
+        return {"items":items,"mode":"shadow","financial_execution":False}
 
     @app.get("/api/fmc/{org}/disputes/{case_id}/decisions")
     def list_dispute_decisions(org:str,case_id:uuid.UUID,request:Request):

@@ -748,3 +748,142 @@ def test_authoritative_booking_shadow_and_four_eyes_dispute_review(fill_today):
         c.execute(text("delete from public.crm_dispute_cases where organization_id=cast(:org as uuid)"),{"org":org})
         c.execute(text("delete from public.crm_attribution_records where organization_id=cast(:org as uuid)"),{"org":org})
         c.execute(text("delete from auth.users where id=cast(:id as uuid)"),{"id":other_owner})
+
+
+def test_offline_link_uses_core_booking_and_real_offer_without_causal_fees(fill_today):
+    from fmc.offline_evidence import build_shadow_offer_link
+    from fmc.revenue_evidence import core_snapshot_key
+    url, store, uid, org, court = fill_today
+    with store.trusted() as c:
+        booking = c.execute(text("""
+            select id::text,organization_id::text,court_id::text,starts_at,
+                   ends_at,currency::text,source,status::text,updated_at
+            from public.bookings where organization_id=cast(:org as uuid)
+              and status='confirmed' limit 1
+        """),{"org":org}).mappings().one()
+        venue = c.execute(text("""
+            select id::text from public.venues
+            where organization_id=cast(:org as uuid) limit 1
+        """),{"org":org}).scalar_one()
+        opportunity = c.execute(text("""
+            insert into public.revenue_opportunities
+              (organization_id,venue_id,court_id,opportunity_key,target_date,
+               window_starts_at,window_ends_at,currency)
+            values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),
+                   :key,:date,:starts,:ends,'EUR') returning id::text
+        """),{"org":org,"venue":venue,"court":court,"key":"offline-"+uuid.uuid4().hex,
+               "date":booking["starts_at"].date(),"starts":booking["starts_at"],
+               "ends":booking["ends_at"]}).scalar_one()
+        action = c.execute(text("""
+            insert into public.crm_actions
+              (organization_id,opportunity_id,quote_amount_minor,currency,opportunity_version_at_plan)
+            values(cast(:org as uuid),cast(:opp as uuid),3600,'EUR',now())
+            returning id::text
+        """),{"org":org,"opp":opportunity}).scalar_one()
+        offer_id = c.execute(text("""
+            insert into public.crm_offers
+              (organization_id,action_id,opportunity_id,tracking_token,
+               target_court_id,target_starts_at,target_ends_at,
+               authoritative_price_minor,offered_price_minor,currency,
+               expires_at,attribution_window_ends_at)
+            values(cast(:org as uuid),cast(:action as uuid),cast(:opp as uuid),
+                   :token,cast(:court as uuid),:starts,:ends,3600,3600,'EUR',
+                   now()+interval '1 day',now()+interval '2 days')
+            returning id::text
+        """),{"org":org,"action":action,"opp":opportunity,
+               "token":"crm_"+uuid.uuid4().hex,"court":court,
+               "starts":booking["starts_at"],"ends":booking["ends_at"]}).scalar_one()
+        token=c.execute(text("select tracking_token from public.crm_offers where id=cast(:offer as uuid)"),
+                        {"offer":offer_id}).scalar_one()
+    settings = Settings(origin="https://fill.test",environment="test",database=url,
+                        supabase_url="https://example.supabase.co",
+                        supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    path=f"/api/fmc/{org}/attributions/link-offer-shadow"
+    payload={"booking_id":booking["id"],"offer_id":offer_id,"tracking_token":token}
+    assert client.post(path,json=payload,headers=hdr).status_code==409
+    snapshot=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+                         json={"booking_id":booking["id"]},headers=hdr)
+    assert snapshot.status_code==200,snapshot.text
+    result=client.post(path,json=payload,headers=hdr)
+    assert result.status_code==200,result.text
+    assert result.json()["outcome"]=="observed_match"
+    assert result.json()["new_evidence"] is True
+    assert result.json()["primary_winner"] is None
+    assert result.json()["fee_minor"]==0 and result.json()["billable"] is False
+    replay=client.post(path,json=payload,headers=hdr)
+    assert replay.status_code==200 and replay.json()["new_evidence"] is False
+    wrong=client.post(path,json={**payload,"tracking_token":"wrong"},headers=hdr)
+    assert wrong.status_code==422
+    other=client.post(f"/api/fmc/{uuid.uuid4()}/attributions/link-offer-shadow",
+                      json=payload,headers=hdr)
+    assert other.status_code in (403,404)
+    items=client.get(f"/api/fmc/{org}/bookings/{booking['id']}/offer-links",headers=hdr)
+    assert items.status_code==200 and len(items.json()["items"])==1
+    assert items.json()["items"][0]["causal_evidence_verified"] is False
+    with store.trusted() as c:
+        count=c.execute(text("""
+            select count(*) from public.crm_booking_offer_links_shadow
+            where booking_id=cast(:booking as uuid)
+        """),{"booking":booking["id"]}).scalar_one()
+        assert count==1
+        assert c.execute(text("""
+            select count(*) from public.crm_attribution_records
+            where organization_id=cast(:org as uuid) and billable=true
+        """),{"org":org}).scalar_one()==0
+    # SQL constraints are independently enforced, not just API-side validation.
+    import pytest
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                insert into public.crm_booking_offer_links_shadow
+                (organization_id,booking_id,offer_id,booking_snapshot_key,
+                 event_key,tracking_digest,outcome,causal_evidence_verified)
+                values(cast(:org as uuid),cast(:booking as uuid),cast(:offer as uuid),
+                       :snapshot,:key,:digest,'observed_match',true)
+            """),{"org":org,"booking":booking["id"],"offer":offer_id,
+                   "snapshot":core_snapshot_key(dict(booking)),
+                   "key":"f"*64,"digest":"a"*64})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                update public.crm_booking_offer_links_shadow set outcome='ambiguous'
+                where booking_id=cast(:booking as uuid)
+            """),{"booking":booking["id"]})
+
+
+def test_offline_provider_ledger_rejects_cross_tenant_and_mutation(fill_today):
+    import hashlib
+    import pytest
+    url,store,uid,org,court=fill_today
+    with store.trusted() as c:
+        conn=c.execute(text("""
+            insert into public.provider_connections (organization_id,provider)
+            values(cast(:org as uuid),'playtomic') returning id::text
+        """),{"org":org}).scalar_one()
+        params={"org":org,"conn":conn,"id":"evt-01","key":"a"*64,"sha":"b"*64}
+        statement=text("""
+          insert into public.crm_provider_events_offline
+            (organization_id,provider_connection_id,provider,event_id,provider_sequence,
+             booking_reference,event_state,event_key,payload_sha256,event_occurred_at,signed_at)
+          values(cast(:org as uuid),cast(:conn as uuid),'playtomic',:id,5,
+                 'external-booking-1','confirmed',:key,:sha,now(),now())
+        """)
+        c.execute(statement,params)
+        assert c.execute(text("""
+            select count(*) from public.crm_provider_events_offline
+            where provider_connection_id=cast(:conn as uuid)
+        """),{"conn":conn}).scalar_one()==1
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(statement,params)
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(statement,{**params,"org":str(uuid.uuid4()),"id":"evt-02","key":"c"*64})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                update public.crm_provider_events_offline set event_state='cancelled'
+                where provider_connection_id=cast(:conn as uuid)
+            """),{"conn":conn})
