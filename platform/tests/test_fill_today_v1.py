@@ -679,6 +679,26 @@ def test_authoritative_booking_shadow_and_four_eyes_dispute_review(fill_today):
        json={"attribution_id":rec["id"],"risk":"high","reason":"No matching verified provider response"})
     assert dispute.status_code==201,dispute.text
     case_id=dispute.json()["case"]["id"]
+    duplicate=client.post(f"/api/fmc/{org}/disputes/shadow",headers=hdr,
+       json={"attribution_id":rec["id"],"risk":"high","reason":"Another report of same open issue"})
+    assert duplicate.status_code==201,duplicate.text
+    assert duplicate.json()["case"]["id"]==case_id
+    assert duplicate.json()["reused"] is True
+    with store.trusted() as c:
+        c.execute(text("""
+            update public.crm_dispute_cases set sla_due_at=now()-interval '1 minute'
+            where id=cast(:id as uuid)
+        """),{"id":case_id})
+    sla=client.post(f"/api/fmc/{org}/disputes/evaluate-sla-shadow",headers=hdr)
+    assert sla.status_code==200,sla.text
+    assert sla.json()["new_escalations"]==1
+    assert sla.json()["notifications_sent"]==0
+    second_sla=client.post(f"/api/fmc/{org}/disputes/evaluate-sla-shadow",headers=hdr)
+    assert second_sla.status_code==200 and second_sla.json()["new_escalations"]==0
+    dispute_read=client.get(f"/api/fmc/{org}/disputes",headers=hdr)
+    assert dispute_read.status_code==200
+    assert any(item["id"]==case_id and item["sla_escalated"]
+               for item in dispute_read.json()["items"])
     propose=client.post(f"/api/fmc/{org}/disputes/{case_id}/propose",headers=hdr,
        json={"code":"evidence_pending","note":"Needs external authoritative confirmation"})
     assert propose.status_code==200,propose.text

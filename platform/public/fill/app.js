@@ -157,6 +157,7 @@
           id: item.id, kind: "Revenue", risk: item.risk,
           label: item.reason, status: item.status,
           deadline: item.sla_due_at, overdue: item.sla_overdue,
+          sla_escalated: item.sla_escalated,
           amount: item.amount_at_risk_minor, currency: item.currency,
         })),
         ...reconciliationCases.map(item => ({
@@ -194,7 +195,7 @@
         return '<div class="dispute-row"><div><strong>' + esc(item.kind + " · " + item.label) +
           '</strong><small>' + esc(item.status) + ' · ' + esc(item.risk) + " risk" +
           (item.deadline ? " · SLA " + esc(new Date(item.deadline).toLocaleDateString("en-GB")) : "") +
-          (item.overdue ? " · OVERDUE" : "") +
+          (item.overdue ? " · OVERDUE" : "") + (item.sla_escalated ? " · ESCALATED" : "") +
           '</small>' + controls + '</div><span>' +
           (item.amount == null ? "—" : mon(item.amount, item.currency)) +
           '</span></div>';

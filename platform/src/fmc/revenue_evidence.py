@@ -74,6 +74,10 @@ class ResolutionNoteIn(BaseModel):
     note: str = Field(min_length=10, max_length=1500)
 
 
+def next_sla_owner_role(risk: str) -> str:
+    return {"low": "finance", "medium": "owner", "high": "owner_admin"}[risk]
+
+
 def register_shadow_evidence(app, db, who, role, audit, settings):
     def staging_only():
         if settings.environment not in ("test", "staging"):
@@ -199,6 +203,25 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
                 """),{"ref":str(body.reconciliation_item_id),"org":org}).scalar_one_or_none()
             if not exists:
                 raise DomainError("SOURCE_NOT_FOUND","Dispute source unavailable in this organization.",404)
+            # Unique active source indexes enforce this in concurrent requests as well.
+            params = {
+                "org": org,
+                "attr": str(body.attribution_id) if body.attribution_id else None,
+                "recon": str(body.reconciliation_item_id) if body.reconciliation_item_id else None,
+            }
+            existing = one(c.execute(text("""
+                select id::text,risk,status,sla_due_at from public.crm_dispute_cases
+                where organization_id=cast(:org as uuid)
+                  and status in ('open','pending_evidence','review','approved')
+                  and ((cast(:attr as uuid) is not null
+                         and attribution_id=cast(:attr as uuid))
+                    or (cast(:recon as uuid) is not null
+                         and reconciliation_item_id=cast(:recon as uuid)))
+                limit 1 for update
+            """), params))
+            if existing:
+                return {"case": existing, "mode": "shadow",
+                        "reused": True, "financial_execution": False}
             policy=dispute_policy(body.risk)
             due=datetime.now(timezone.utc)+timedelta(hours=policy["target_hours"])
             item=one(c.execute(text("""
@@ -207,13 +230,73 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
                  reason,amount_at_risk_minor,initiated_by,policy_version,sla_due_at)
                 values(cast(:org as uuid),cast(:attr as uuid),cast(:recon as uuid),:risk,'open',
                        :reason,0,cast(:actor as uuid),'disputes_shadow_v1',:due)
+                on conflict do nothing
                 returning id::text,risk,status,sla_due_at
             """),{"org":org,"attr":str(body.attribution_id) if body.attribution_id else None,
                   "recon":str(body.reconciliation_item_id) if body.reconciliation_item_id else None,
                   "risk":body.risk,"reason":body.reason,"actor":actor.id,"due":due}))
+            if not item:
+                # Conflict from concurrent request; return the active canonical case.
+                item = one(c.execute(text("""
+                    select id::text,risk,status,sla_due_at from public.crm_dispute_cases
+                    where organization_id=cast(:org as uuid)
+                      and status in ('open','pending_evidence','review','approved')
+                      and ((cast(:attr as uuid) is not null
+                             and attribution_id=cast(:attr as uuid))
+                        or (cast(:recon as uuid) is not null
+                             and reconciliation_item_id=cast(:recon as uuid)))
+                    limit 1
+                """),params))
+                if not item:
+                    raise DomainError("DISPUTE_CONFLICT","Source changed while creating dispute.",409)
+                return {"case":item,"mode":"shadow","reused":True,"financial_execution":False}
             audit(c,request,org,actor,"dispute.shadow_opened","crm_dispute",item["id"],
                   after={"risk":item["risk"],"billable":False})
-            return {"case":item,"mode":"shadow","financial_execution":False}
+            return {"case":item,"mode":"shadow","reused":False,"financial_execution":False}
+
+    @app.post("/api/fmc/{org}/disputes/evaluate-sla-shadow")
+    def evaluate_shadow_dispute_sla(org: str, request: Request, limit: int = 100):
+        staging_only()
+        if not 1 <= limit <= 200:
+            raise DomainError("LIMIT", "Use limit between 1 and 200.", 422)
+        actor = who(request)
+        with db.user(actor.id) as c:
+            role(c, org, actor, MANAGER)
+        with db.trusted() as c:
+            db.require_role(c, org, actor.id, MANAGER)
+            due = rows(c.execute(text("""
+                select id::text,risk,policy_version,sla_due_at
+                from public.crm_dispute_cases
+                where organization_id=cast(:org as uuid)
+                  and status in ('open','pending_evidence','review','approved')
+                  and sla_due_at<=now()
+                order by sla_due_at,id
+                for update skip locked limit :limit
+            """), {"org":org,"limit":limit}))
+            created = 0
+            for item in due:
+                key = f"{item['id']}:{item['policy_version']}:sla_breached"
+                entry = one(c.execute(text("""
+                    insert into public.crm_dispute_escalations
+                      (organization_id,case_id,kind,policy_version,risk,sla_due_at,
+                       next_responsible_role,event_key)
+                    values(cast(:org as uuid),cast(:case as uuid),'sla_breached',
+                           :policy,:risk,:due,:role,:key)
+                    on conflict(case_id,policy_version,kind) do nothing
+                    returning id::text
+                """), {"org":org,"case":item["id"],"policy":item["policy_version"],
+                       "risk":item["risk"],"due":item["sla_due_at"],
+                       "role":next_sla_owner_role(item["risk"]),"key":key}))
+                if entry:
+                    created+=1
+            if created:
+                audit(c,request,org,actor,"dispute.sla_shadow_escalation_recorded",
+                      "organization",org,
+                      after={"new_escalations":created,"notifications_sent":0,
+                             "financial_execution":False})
+            return {"evaluated_due":len(due),"new_escalations":created,
+                    "already_escalated":len(due)-created,"mode":"shadow",
+                    "notifications_sent":0,"financial_execution":False}
 
     @app.post("/api/fmc/{org}/disputes/{case_id}/propose")
     def propose_dispute(org: str,case_id:uuid.UUID,body:ProposeResolutionIn,request:Request):

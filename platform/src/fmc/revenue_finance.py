@@ -117,11 +117,13 @@ def register_financial_foundation(app, db, who, role):
         with db.user(actor.id) as c:
             role(c, org, actor, FINANCE_ROLES)
             cases = rows(c.execute(text("""
-                select id::text,attribution_id::text,reconciliation_item_id::text,
-                       risk,status,reason,amount_at_risk_minor,currency,assignee_id::text,
-                       policy_version,sla_due_at,created_at,resolved_at
-                from public.crm_dispute_cases where organization_id=cast(:org as uuid)
-                order by case risk when 'high' then 0 when 'medium' then 1 else 2 end,
+                select d.id::text,d.attribution_id::text,d.reconciliation_item_id::text,
+                       d.risk,d.status,d.reason,d.amount_at_risk_minor,d.currency,
+                       d.assignee_id::text,d.policy_version,d.sla_due_at,d.created_at,d.resolved_at,
+                       exists(select 1 from public.crm_dispute_escalations e
+                              where e.case_id=d.id and e.kind='sla_breached') sla_escalated
+                from public.crm_dispute_cases d where d.organization_id=cast(:org as uuid)
+                order by case d.risk when 'high' then 0 when 'medium' then 1 else 2 end,
                          sla_due_at nulls last,created_at desc limit 200
             """), {"org": org}))
             for item in cases:
