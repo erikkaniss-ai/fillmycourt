@@ -174,7 +174,7 @@ def register_crm_delivery(app, db, who, role, audit):
                            'null',cast(:ev as jsonb))
                 """), {"org": org, "attempt": attempt_id, "created":key+":created",
                        "simulated":key+":shadow", "ev":json.dumps({"adapter":"null",
-                              "external_send":False, "test_only":True})}))
+                              "external_send":False, "test_only":True})})
                 prepared += 1
             if prepared:
                 audit(c, request, org, actor, "crm.shadow_delivery_prepared",
