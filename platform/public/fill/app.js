@@ -146,15 +146,18 @@
         !["resolved", "ignored"].includes(item.status)
       ));
       const open = cases.filter(item => !["resolved", "unverified"].includes(item.status));
+      const operatorRole = state.orgs.find(item => item.id === org)?.role || "";
+      const canReview = ["owner","admin","manager"].includes(operatorRole);
       el.financeSummary.textContent =
         ledger.length + " attribution records · " + changed.length +
         " adjustments · " + (open.length + reconciliationCases.length) +
         " open cases · billing OFF";
       const combined = [
         ...open.map(item => ({
-          risk: item.risk, label: item.reason, status: item.status,
+          id: item.id, kind: "Revenue", risk: item.risk,
+          label: item.reason, status: item.status,
           deadline: item.sla_due_at, overdue: item.sla_overdue,
-          amount: item.amount_at_risk_minor, currency: item.currency, kind: "Revenue",
+          amount: item.amount_at_risk_minor, currency: item.currency,
         })),
         ...reconciliationCases.map(item => ({
           risk: item.severity === "critical" ? "high" : "medium",
@@ -165,19 +168,73 @@
       ].sort((a, b) => Number(b.overdue) - Number(a.overdue)
         || ({ high: 0, medium: 1, low: 2 }[a.risk] ?? 3)
          - ({ high: 0, medium: 1, low: 2 }[b.risk] ?? 3));
-      el.disputesQueue.innerHTML = combined.map(item => (
-        '<div class="dispute-row"><div><strong>' + esc(item.kind + " · " + item.label) +
-        '</strong><small>' + esc(item.status) + ' · ' + esc(item.risk) + " risk" +
-        (item.deadline ? " · SLA " + esc(new Date(item.deadline).toLocaleDateString("en-GB")) : "") +
-        (item.overdue ? " · OVERDUE" : "") + '</small></div><span>' +
-        (item.amount == null ? "—" : mon(item.amount, item.currency)) +
-        '</span></div>'
-      )).join("") || '<p class="muted">No unresolved reconciliation or attribution disputes.</p>';
+      el.disputesQueue.innerHTML = combined.map(item => {
+        const action = item.kind === "Revenue" && canReview
+          ? ({ open: "propose", pending_evidence: "propose", review: "approve",
+               approved: "resolve" }[item.status] || null) : null;
+        const controls = action ? (
+          '<details class="dispute-review"><summary>' +
+          esc(action === "approve" ? "Independent approval (shadow)" :
+              action === "propose" ? "Propose resolution (shadow)" : "Resolve approved case (shadow)") +
+          '</summary><form class="dispute-review-form" data-case-id="' + esc(item.id) +
+          '" data-action="' + esc(action) + '">' +
+          (action === "propose" ?
+            '<label>Non-financial resolution<select name="code">' +
+            '<option value="evidence_pending">Request authoritative evidence</option>' +
+            '<option value="no_financial_action">No financial action</option>' +
+            '<option value="provider_review_required">Provider review required</option>' +
+            '<option value="dismiss_duplicate">Dismiss duplicate evidence</option>' +
+            '</select></label>' : '') +
+          '<label>Reason / evidence<textarea name="note" minlength="10" maxlength="1500" required ' +
+          'placeholder="Document the decision; no fees or refunds will be executed"></textarea></label>' +
+          '<button type="submit" class="button secondary">Submit shadow ' + esc(action) + '</button>' +
+          '<small class="crm-safety">No billing, refunds, provider writes or customer messages.</small>' +
+          '<div class="dispute-submit-result" role="status"></div></form></details>'
+        ) : "";
+        return '<div class="dispute-row"><div><strong>' + esc(item.kind + " · " + item.label) +
+          '</strong><small>' + esc(item.status) + ' · ' + esc(item.risk) + " risk" +
+          (item.deadline ? " · SLA " + esc(new Date(item.deadline).toLocaleDateString("en-GB")) : "") +
+          (item.overdue ? " · OVERDUE" : "") +
+          '</small>' + controls + '</div><span>' +
+          (item.amount == null ? "—" : mon(item.amount, item.currency)) +
+          '</span></div>';
+      }).join("") || '<p class="muted">No unresolved reconciliation or attribution disputes.</p>';
     } catch (error) {
       el.financeSummary.textContent = "Read-only finance data unavailable";
       el.disputesQueue.innerHTML = '<p class="muted">' + esc(error.message || String(error)) + '</p>';
     }
   }
+
+  el.disputesQueue?.addEventListener("submit", async (event) => {
+    const form = event.target.closest(".dispute-review-form");
+    if (!form) return;
+    event.preventDefault();
+    if (!state.org) return;
+    const org = state.org;
+    const submit = form.querySelector('button[type="submit"]');
+    const feedback = form.querySelector(".dispute-submit-result");
+    submit.disabled = true;
+    feedback.textContent = "Recording shadow review…";
+    const action = form.dataset.action;
+    const note = form.querySelector('[name="note"]').value.trim();
+    const code = form.querySelector('[name="code"]')?.value;
+    try {
+      const payload = action === "propose" ? { note, code } : { note };
+      const result = await api(
+        "/api/fmc/" + encodeURIComponent(org) + "/disputes/" +
+        encodeURIComponent(form.dataset.caseId) + "/" + encodeURIComponent(action),
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload) }
+      );
+      if (state.org !== org) return;
+      feedback.textContent = "Shadow: " + result.status + " · 0 financial actions";
+      await loadFinance();
+    } catch (error) {
+      feedback.textContent = error.message || String(error);
+    } finally {
+      submit.disabled = false;
+    }
+  });
 
   function renderKpis(target, values) {
     target.innerHTML = values.map(([label, value, hint]) => (
