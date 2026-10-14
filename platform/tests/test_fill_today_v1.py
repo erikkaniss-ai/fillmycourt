@@ -73,6 +73,7 @@ def fill_today():
     yield url, store, user_id, org_id, court_id
     with store.trusted() as c:
         c.execute(text("select set_config('fmc.allow_delivery_purge','on',true)"))
+        c.execute(text("select set_config('fmc.allow_finance_purge','on',true)"))
         c.execute(text("delete from public.organizations where id=cast(:org as uuid)"), {"org": org_id})
         c.execute(text("delete from auth.users where id=cast(:uid as uuid)"), {"uid": user_id})
 
@@ -640,3 +641,90 @@ def test_crm_shadow_requires_verified_channel_permission_and_never_executes_live
     assert stopped.json()["status"] == "stopped"
     assert stopped.json()["stop_reason"] == "target_inventory_booked"
     assert stopped.json()["execution_enabled"] is False
+
+
+def test_authoritative_booking_shadow_and_four_eyes_dispute_review(fill_today):
+    url, store, owner_id, org, court = fill_today
+    with store.trusted() as c:
+        booking_id = c.execute(text("""
+            select id::text from public.bookings
+            where organization_id=cast(:org as uuid) and source='getacourt'
+              and status='confirmed' limit 1
+        """), {"org":org}).scalar_one()
+
+    settings = Settings(origin="https://fill.test",environment="test",database=url,
+                        supabase_url="https://example.supabase.co",
+                        supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(owner_id)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    endpoint=f"/api/fmc/{org}/attributions/evaluate-shadow"
+    first=client.post(endpoint,json={"booking_id":booking_id},headers=hdr)
+    assert first.status_code==200,first.text
+    assert first.json()["maturity"]=="provisional"
+    assert first.json()["primary_winner"] is None
+    assert first.json()["billable"] is False
+    assert first.json()["new_evidence"] is True
+    again=client.post(endpoint,json={"booking_id":booking_id},headers=hdr)
+    assert again.status_code==200,again.text
+    assert again.json()["new_evidence"] is False
+    assert again.json()["record_id"]==first.json()["record_id"]
+    evidence=client.get(f"/api/fmc/{org}/bookings/{booking_id}/evidence",headers=hdr)
+    assert evidence.status_code==200 and len(evidence.json()["items"])==1
+    assert evidence.json()["items"][0]["evidence"]["causal_evidence_verified"] is False
+    finance=client.get(f"/api/fmc/{org}/attributions",headers=hdr).json()["items"]
+    rec=next(x for x in finance if x["booking_id"]==booking_id)
+    assert rec["fee_minor"]==0 and rec["billable"] is False
+    assert rec["primary_offer_id"] is None
+    dispute=client.post(f"/api/fmc/{org}/disputes/shadow",headers=hdr,
+       json={"attribution_id":rec["id"],"risk":"high","reason":"No matching verified provider response"})
+    assert dispute.status_code==201,dispute.text
+    case_id=dispute.json()["case"]["id"]
+    propose=client.post(f"/api/fmc/{org}/disputes/{case_id}/propose",headers=hdr,
+       json={"code":"evidence_pending","note":"Needs external authoritative confirmation"})
+    assert propose.status_code==200,propose.text
+    self_approve=client.post(f"/api/fmc/{org}/disputes/{case_id}/approve",headers=hdr,
+       json={"note":"Attempting to approve own case"})
+    assert self_approve.status_code==409
+    assert self_approve.json()["error"]=="FOUR_EYES"
+    other_owner=str(uuid.uuid4())
+    with store.trusted() as c:
+        c.execute(text("insert into auth.users(id) values(cast(:id as uuid))"),{"id":other_owner})
+        c.execute(text("""
+            insert into public.organization_members(organization_id,user_id,role)
+            values(cast(:org as uuid),cast(:uid as uuid),'admin')
+        """),{"org":org,"uid":other_owner})
+    second=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(other_owner)))
+    approve=second.post(f"/api/fmc/{org}/disputes/{case_id}/approve",headers=hdr,
+       json={"note":"Independent review approves non-financial resolution"})
+    assert approve.status_code==200,approve.text
+    resolve=client.post(f"/api/fmc/{org}/disputes/{case_id}/resolve",headers=hdr,
+       json={"note":"Case closed without any fee or provider write"})
+    assert resolve.status_code==200,resolve.text
+    history=client.get(f"/api/fmc/{org}/disputes/{case_id}/decisions",headers=hdr)
+    assert history.status_code==200
+    assert [x["transition"] for x in history.json()["items"]]==["PROPOSED","APPROVED","RESOLVED"]
+    with store.trusted() as c:
+        c.execute(text("""
+          update public.bookings set status='cancelled',updated_at=now()
+          where id=cast(:booking as uuid)
+        """),{"booking":booking_id})
+    replay=client.post(endpoint,json={"booking_id":booking_id},headers=hdr)
+    assert replay.status_code==200 and replay.json()["maturity"]=="unverified"
+    assert replay.json()["new_evidence"] is True
+    with store.trusted() as c:
+        assert c.execute(text("""
+            select count(*) from public.crm_booking_evidence
+            where organization_id=cast(:org as uuid) and booking_id=cast(:booking as uuid)
+        """),{"org":org,"booking":booking_id}).scalar_one()==2
+        assert c.execute(text("""
+            select count(*) from public.crm_attribution_records
+            where organization_id=cast(:org as uuid) and booking_id=cast(:booking as uuid)
+        """),{"org":org,"booking":booking_id}).scalar_one()==1
+        assert c.execute(text("""
+            select count(*) from public.crm_attribution_adjustments
+            where organization_id=cast(:org as uuid)
+        """),{"org":org}).scalar_one()==0
+        c.execute(text("select set_config('fmc.allow_finance_purge','on',true)"))
+        c.execute(text("delete from public.crm_dispute_cases where organization_id=cast(:org as uuid)"),{"org":org})
+        c.execute(text("delete from public.crm_attribution_records where organization_id=cast(:org as uuid)"),{"org":org})
+        c.execute(text("delete from auth.users where id=cast(:id as uuid)"),{"id":other_owner})

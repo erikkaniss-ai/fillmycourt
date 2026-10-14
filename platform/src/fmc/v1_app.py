@@ -3243,6 +3243,8 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
         register_crm_delivery(app, db, who, role, audit)
         from .revenue_finance import register_financial_foundation
         register_financial_foundation(app, db, who, role)
+        from .revenue_evidence import register_shadow_evidence
+        register_shadow_evidence(app, db, who, role, audit, settings)
 
     if service in ("operations", "all"):
         fill_ui = Path(__file__).resolve().parents[2] / "public" / "fill"
