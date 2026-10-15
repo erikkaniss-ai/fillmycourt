@@ -20,6 +20,7 @@ from .supabase_v1 import one, rows
 from .revenue_finance import dispute_policy
 from .offline_evidence import EvidenceRejected, build_shadow_offer_link
 from .reconciliation_maturity import reconcile_shadow, shadow_reconciliation_key
+from .offer_proof_shadow import assess_offer_evidence, assessment_event_key
 
 FINANCE = {"owner", "admin", "manager", "analyst"}
 MANAGER = {"owner", "admin", "manager"}
@@ -606,6 +607,114 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
                     "new_evidence":bool(inserted),"kind":body.kind,
                     "delta_minor":0,"fee_minor":0,"billable":False,
                     "refunds_executed":0,"mode":"shadow"}
+
+
+    @app.post("/api/fmc/{org}/bookings/{booking_id}/offer-proof-evaluate-shadow")
+    def evaluate_offer_proof_shadow(org: str, booking_id: uuid.UUID, request: Request):
+        """Explain a possible association; NEVER credit a financial conversion."""
+        staging_only()
+        actor=who(request)
+        with db.user(actor.id) as c:
+            role(c,org,actor,MANAGER)
+        with db.trusted() as c:
+            db.require_role(c,org,actor.id,MANAGER)
+            booking=one(c.execute(text("""
+                select id::text,organization_id::text,source,status::text,updated_at
+                from public.bookings where organization_id=cast(:org as uuid)
+                 and id=cast(:booking as uuid) for update
+            """),{"org":org,"booking":str(booking_id)}))
+            if not booking:
+                raise DomainError("BOOKING_NOT_FOUND","Booking missing in this organization.",404)
+            key=core_snapshot_key(booking)
+            source=c.execute(text("""
+                select 1 from public.crm_booking_evidence
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid) and event_key=:key
+            """),{"org":org,"booking":booking["id"],"key":key}).scalar_one_or_none()
+            if not source:
+                raise DomainError("BOOKING_SNAPSHOT_REQUIRED",
+                                  "Evaluate current Core booking snapshot first.",409)
+            links=rows(c.execute(text("""
+                select distinct l.offer_id::text as offer_id
+                from public.crm_booking_offer_links_shadow l
+                join public.crm_offers o on o.id=l.offer_id
+                  and o.organization_id=l.organization_id
+                where l.organization_id=cast(:org as uuid)
+                  and l.booking_id=cast(:booking as uuid)
+                  and l.booking_snapshot_key=:key
+                order by offer_id limit 26
+            """),{"org":org,"booking":booking["id"],"key":key}))
+            if len(links)>25:
+                raise DomainError("EVIDENCE_LIMIT",
+                                  "Too many candidate Offers for automatic assessment.",409)
+            historical=c.execute(text("""
+                select count(*) from public.crm_booking_offer_links_shadow
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid)
+                  and booking_snapshot_key<>:key
+            """),{"org":org,"booking":booking["id"],"key":key}).scalar_one()
+            last_recon=one(c.execute(text("""
+                select event_key,shadow_maturity from
+                  public.crm_shadow_reconciliation_observations
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid)
+                  and core_snapshot_key=:key
+                order by observed_at desc,id desc limit 1
+            """),{"org":org,"booking":booking["id"],"key":key}))
+            proof=assess_offer_evidence(
+                booking_status=booking["status"],booking_source=booking["source"],
+                current_candidate_ids=[item["offer_id"] for item in links],
+                historical_link_count=historical,
+                reconciliation_maturity=last_recon["shadow_maturity"] if last_recon else None)
+            event_key=assessment_event_key(
+                organization_id=org,booking_id=booking["id"],snapshot_key=key,
+                candidate_offer_ids=proof.candidate_offer_ids,
+                reconciliation_event_key=last_recon["event_key"] if last_recon else None,
+                outcome=proof.outcome)
+            inserted=one(c.execute(text("""
+                insert into public.crm_offer_proof_reviews_shadow
+                  (organization_id,booking_id,core_snapshot_key,
+                   reconciliation_event_key,event_key,outcome,
+                   candidate_offer_ids,candidate_count,review_required,created_by)
+                values(cast(:org as uuid),cast(:booking as uuid),:snapshot,:recon,
+                       :event,:outcome,cast(:offers as jsonb),:count,:review,
+                       cast(:actor as uuid))
+                on conflict(event_key) do nothing returning id::text
+            """),{"org":org,"booking":booking["id"],"snapshot":key,
+                  "recon":last_recon["event_key"] if last_recon else None,
+                  "event":event_key,"outcome":proof.outcome,
+                  "offers":json.dumps(proof.candidate_offer_ids),
+                  "count":len(proof.candidate_offer_ids),
+                  "review":proof.review_required,"actor":actor.id}))
+            if inserted:
+                audit(c,request,org,actor,"attribution.offer_proof_shadow_evaluated",
+                      "booking",booking["id"],after={
+                      "outcome":proof.outcome,
+                      "candidate_count":len(proof.candidate_offer_ids),
+                      "causal_evidence_verified":False,"billable":False})
+            return {"booking_id":booking["id"],"review_id":inserted["id"] if inserted else None,
+                    "new_evidence":bool(inserted),"outcome":proof.outcome,
+                    "candidate_offer_ids":list(proof.candidate_offer_ids),
+                    "candidate_count":len(proof.candidate_offer_ids),
+                    "review_required":proof.review_required,
+                    "primary_offer_id":None,"causal_evidence_verified":False,
+                    "billable":False,"fee_minor":0,"mode":"shadow"}
+
+    @app.get("/api/fmc/{org}/bookings/{booking_id}/offer-proof-history")
+    def list_offer_proof_history(org: str, booking_id: uuid.UUID, request: Request):
+        actor=who(request)
+        with db.user(actor.id) as c:
+            role(c,org,actor,FINANCE)
+            items=rows(c.execute(text("""
+                select id::text,event_key,core_snapshot_key,reconciliation_event_key,
+                       outcome,candidate_offer_ids,candidate_count,review_required,
+                       primary_offer_id,causal_evidence_verified,billable,fee_minor,created_at
+                from public.crm_offer_proof_reviews_shadow
+                where organization_id=cast(:org as uuid)
+                  and booking_id=cast(:booking as uuid)
+                order by created_at,id
+            """),{"org":org,"booking":str(booking_id)}))
+        return {"items":items,"mode":"shadow","causal_credit_enabled":False}
 
     @app.post("/api/fmc/{org}/attributions/link-offer-shadow", status_code=200)
     def link_offer_shadow(org: str, body: OfferLinkIn, request: Request):

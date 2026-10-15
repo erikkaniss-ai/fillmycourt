@@ -1269,3 +1269,111 @@ def test_f08_zero_delta_shadow_adjustments_and_multi_tenant_negative(fill_today)
           select count(*) from public.crm_attribution_records
           where organization_id=cast(:org as uuid) and (billable or fee_minor<>0)
         """),{"org":org}).scalar_one()==0
+
+
+def test_f09_offer_proof_single_competing_stale_and_closed_booking(fill_today):
+    """No provider, payment or customer transport: fictional DB-only evidence."""
+    url,store,uid,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        b=c.execute(text("""
+            select id::text,court_id::text,starts_at,ends_at from public.bookings
+            where organization_id=cast(:org as uuid) and status='confirmed' limit 1
+        """),{"org":org}).mappings().one()
+        venue=c.execute(text("""
+            select id::text from public.venues where organization_id=cast(:org as uuid) limit 1
+        """),{"org":org}).scalar_one()
+        opp=c.execute(text("""
+            insert into public.revenue_opportunities
+              (organization_id,venue_id,court_id,opportunity_key,target_date,
+               window_starts_at,window_ends_at,currency)
+            values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),
+                   :key,:date,:start,:end,'EUR') returning id::text
+        """),{"org":org,"venue":venue,"court":court,"key":uuid.uuid4().hex,
+              "date":b["starts_at"].date(),"start":b["starts_at"],"end":b["ends_at"]}).scalar_one()
+        action=c.execute(text("""
+            insert into public.crm_actions
+             (organization_id,opportunity_id,quote_amount_minor,currency,opportunity_version_at_plan)
+            values(cast(:org as uuid),cast(:opp as uuid),3600,'EUR',now()) returning id::text
+        """),{"org":org,"opp":opp}).scalar_one()
+        offers=[]
+        for wave in (1,2):
+            token="crm_"+uuid.uuid4().hex
+            offer=c.execute(text("""
+                insert into public.crm_offers
+                 (organization_id,action_id,opportunity_id,wave_number,tracking_token,
+                  target_court_id,target_starts_at,target_ends_at,authoritative_price_minor,
+                  offered_price_minor,currency,expires_at,attribution_window_ends_at)
+                values(cast(:org as uuid),cast(:action as uuid),cast(:opp as uuid),:wave,
+                       :token,cast(:court as uuid),:start,:end,3600,3600,'EUR',
+                       now()+interval '1 day',now()+interval '2 days') returning id::text
+            """),{"org":org,"action":action,"opp":opp,"wave":wave,"token":token,
+                  "court":court,"start":b["starts_at"],"end":b["ends_at"]}).scalar_one()
+            offers.append((offer,token))
+    path=f"/api/fmc/{org}/bookings/{b['id']}/offer-proof-evaluate-shadow"
+    assert client.post(path,headers=hdr).status_code==409
+    assert client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",headers=hdr,
+                       json={"booking_id":b["id"]}).status_code==200
+    empty=client.post(path,headers=hdr)
+    assert empty.status_code==200 and empty.json()["outcome"]=="NO_ASSOCIATION"
+    assert empty.json()["primary_offer_id"] is None
+    link=f"/api/fmc/{org}/attributions/link-offer-shadow"
+    first=client.post(link,headers=hdr,
+                      json={"booking_id":b["id"],"offer_id":offers[0][0],
+                            "tracking_token":offers[0][1]})
+    assert first.status_code==200,first.text
+    one=client.post(path,headers=hdr)
+    assert one.status_code==200 and one.json()["outcome"]=="OBSERVED_ONLY"
+    assert one.json()["candidate_offer_ids"]==[offers[0][0]]
+    again=client.post(path,headers=hdr)
+    assert again.status_code==200 and not again.json()["new_evidence"]
+    second=client.post(link,headers=hdr,
+                       json={"booking_id":b["id"],"offer_id":offers[1][0],
+                             "tracking_token":offers[1][1]})
+    assert second.status_code==200,second.text
+    tied=client.post(path,headers=hdr)
+    assert tied.status_code==200 and tied.json()["outcome"]=="COMPETING_OFFERS"
+    assert tied.json()["candidate_count"]==2 and tied.json()["primary_offer_id"] is None
+    assert tied.json()["fee_minor"]==0 and tied.json()["billable"] is False
+    assert client.post(f"/api/fmc/{uuid.uuid4()}/bookings/{b['id']}/offer-proof-evaluate-shadow",
+                       headers=hdr).status_code in (403,404)
+    hist=client.get(f"/api/fmc/{org}/bookings/{b['id']}/offer-proof-history",headers=hdr)
+    assert hist.status_code==200 and len(hist.json()["items"])==3
+    with store.trusted() as c:
+        assert c.execute(text("""
+            select count(*) from public.crm_offer_proof_reviews_shadow
+            where organization_id=cast(:org as uuid) and
+             (billable or fee_minor<>0 or causal_evidence_verified or primary_offer_id is not null)
+        """),{"org":org}).scalar_one()==0
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+              update public.crm_offer_proof_reviews_shadow set outcome='OBSERVED_ONLY'
+              where organization_id=cast(:org as uuid)
+            """),{"org":org})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+              insert into public.crm_offer_proof_reviews_shadow
+               (organization_id,booking_id,core_snapshot_key,event_key,outcome,
+                candidate_offer_ids,candidate_count,created_by)
+              values(cast(:org as uuid),cast(:booking as uuid),:snapshot,:event,
+                     'OBSERVED_ONLY',cast(:offers as jsonb),1,cast(:uid as uuid))
+            """),{"org":org,"booking":b["id"],"snapshot":"f"*64,
+                  "event":"e"*64,"offers":__import__("json").dumps([str(uuid.uuid4())]),"uid":uid})
+    with store.trusted() as c:
+        c.execute(text("""
+          update public.bookings set status='cancelled',updated_at=now()+interval '3 minutes'
+          where id=cast(:booking as uuid)
+        """),{"booking":b["id"]})
+    assert client.post(path,headers=hdr).status_code==409
+    observed=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+                         headers=hdr,json={"booking_id":b["id"]})
+    assert observed.status_code==200 and observed.json()["maturity"]=="unverified"
+    stale=client.post(path,headers=hdr)
+    assert stale.status_code==200 and stale.json()["outcome"]=="BOOKING_NOT_ACTIVE"
+    assert stale.json()["candidate_count"]==0 and not stale.json()["causal_evidence_verified"]
