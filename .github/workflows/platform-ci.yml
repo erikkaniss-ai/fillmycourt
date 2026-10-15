@@ -5,10 +5,14 @@ on:
     branches: ["get/release-candidate-mvp-qa-04"]
     paths:
       - "platform/**"
+      - "getacourt/**"
+      - "netlify/functions/**"
       - ".github/workflows/platform-ci.yml"
   pull_request:
     paths:
       - "platform/**"
+      - "getacourt/**"
+      - "netlify/functions/**"
       - ".github/workflows/platform-ci.yml"
 
 jobs:
