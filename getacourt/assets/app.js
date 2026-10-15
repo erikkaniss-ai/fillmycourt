@@ -90,8 +90,11 @@
       expiresAt:Date.now()+Number(data.expires_in||3600)*1000
     };
     const nextUser=jwtPayload(nextSession.accessToken||"").sub||null;
-    state.authEpoch++;
-    if(previousUser && (!nextUser || previousUser!==nextUser))clearPrivateViews();
+    // A rotated token for the SAME user must not invalidate in-flight
+    // profile/bookings reads. Only identity changes and sign-out do that.
+    const identityChanged=!state.session || !previousUser || !nextUser || previousUser!==nextUser;
+    if(identityChanged)state.authEpoch++;
+    if(state.session && identityChanged)clearPrivateViews();
     state.session=nextSession;
     localStorage.setItem("gac.session",JSON.stringify(state.session));
     updateAuthUI();
@@ -102,9 +105,10 @@
     const previous=jwtPayload(state.session?.accessToken||"").sub||null;
     const persisted=loadSession();
     const next=jwtPayload(persisted?.accessToken||"").sub||null;
-    state.authEpoch++;
+    const identityChanged=!persisted || !next || !previous || previous!==next;
+    if(identityChanged)state.authEpoch++;
     state.session=persisted;
-    if(!persisted || !next || previous!==next)clearPrivateViews();
+    if(identityChanged)clearPrivateViews();
     updateAuthUI();
   }
   function jwtPayload(token){

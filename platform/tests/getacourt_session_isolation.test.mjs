@@ -71,3 +71,16 @@ test("Response handlers explicitly guard stale auth epochs",()=>{
  assert.match(js,/window\.addEventListener\("pageshow"/);
  assert.match(js,/auth && res\.status===401/);
 });
+
+test("Same-user refresh rotation preserves epoch and private read contexts",()=>{
+ const c=client();
+ c.ctx.saveSession({access_token:"uid1:jwt",refresh_token:"ref1",expires_in:3600});
+ c.state.profile={full_name:"Still same player"};
+ const epoch=c.state.authEpoch,cleared=c.replaced;
+ c.ctx.saveSession({access_token:"uid1:updatedjwt",refresh_token:"ref2",expires_in:3600});
+ assert.equal(c.state.authEpoch,epoch);
+ assert.equal(c.state.profile.full_name,"Still same player");
+ assert.equal(c.replaced,cleared);
+ c.ctx.syncExternalSession();
+ assert.equal(c.state.authEpoch,epoch);
+});
