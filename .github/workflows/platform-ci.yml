@@ -2,7 +2,7 @@ name: Platform CI
 
 on:
   push:
-    branches: ["platform/v0.4-staging"]
+    branches: ["platform/v0.4-staging", "core/hotfix-booking-confirm-staging"]
     paths:
       - "platform/**"
       - ".github/workflows/platform-ci.yml"
