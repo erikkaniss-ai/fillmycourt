@@ -4,7 +4,7 @@ export default async req => {
   if(req.method!=="POST")return response({error:"Method not allowed"},405);
   try{
     const authorization=requireAuth(req);
-    const base=env("GETACOURT_SUPABASE_URL").replace(/\\/$/,"");
+    const base=env("GETACOURT_SUPABASE_URL").replace(/\/$/,"");
     const upstream=await fetch(base+"/auth/v1/logout",{
       method:"POST",
       headers:{"apikey":env("GETACOURT_SUPABASE_PUBLISHABLE_KEY"),authorization}

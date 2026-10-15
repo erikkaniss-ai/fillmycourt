@@ -11,7 +11,7 @@ export default async (req) => {
     const input=await body(req);
     if(!validCode(input.authCode)||!validVerifier(input.codeVerifier))
       return response({error:"INVALID_OAUTH_CODE",message:"Invalid OAuth authorization data."},400);
-    const base=env("GETACOURT_SUPABASE_URL").replace(/\\/$/,"");
+    const base=env("GETACOURT_SUPABASE_URL").replace(/\/$/,"");
     const key=env("GETACOURT_SUPABASE_PUBLISHABLE_KEY");
     const upstream=await fetch(base+"/auth/v1/token?grant_type=pkce",{
       method:"POST",

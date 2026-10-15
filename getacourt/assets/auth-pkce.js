@@ -7,7 +7,7 @@
   const bytesToBase64Url=bytes=>{
     let str="";
     for(const b of bytes)str+=String.fromCharCode(b);
-    return btoa(str).replace(/\\+/g,"-").replace(/\\//g,"_").replace(/=+$/,"");
+    return btoa(str).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
   };
   function verifier(cryptoApi){
     if(!cryptoApi?.getRandomValues)throw Error("Secure random numbers are required");
@@ -22,7 +22,7 @@
   }
   function authorizeUrl(baseUrl,redirectUrl,codeChallenge){
     const base=new URL(baseUrl);
-    if(base.protocol!=="https:"||!/^[a-z0-9-]+\\.supabase\\.co$/.test(base.hostname)||base.pathname!=="/")
+    if(base.protocol!=="https:"||!/^[a-z0-9-]+\.supabase\.co$/.test(base.hostname)||base.pathname!=="/")
       throw Error("Invalid Supabase Auth endpoint");
     const redirect=new URL(redirectUrl);
     if(redirect.protocol!=="https:"||redirect.username||redirect.password||redirect.hash)
