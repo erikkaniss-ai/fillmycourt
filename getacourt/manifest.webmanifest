@@ -1,9 +1,28 @@
 {
-  "name": "GetACourt",
+  "name": "GetACourt — Find a court. Play now.",
   "short_name": "GetACourt",
-  "start_url": "/getacourt/",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#fff8f0",
   "theme_color": "#0d1726",
-  "description": "Find a court. Play now."
+  "lang": "en",
+  "description": "Search sports clubs and book verified courts where available.",
+  "categories": [
+    "sports",
+    "lifestyle"
+  ],
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
 }

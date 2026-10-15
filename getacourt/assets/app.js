@@ -686,6 +686,32 @@
   el.profileSignOut.addEventListener("click",signOut);
   el.closeVenue?.addEventListener("click",()=>el.venueDialog.close());
 
+  // Installation never activates live booking, payments, messages or caching.
+  let installPrompt=null;
+  const installCard=q("#installCard");
+  const installStatus=q("#installStatus");
+  const installed=window.matchMedia?.("(display-mode: standalone)")?.matches || navigator.standalone===true;
+  if(installed && installCard)installCard.hidden=true;
+  window.addEventListener("beforeinstallprompt",event=>{
+    event.preventDefault();
+    installPrompt=event;
+    if(installStatus)installStatus.textContent="Tap Install app to save GetACourt to your home screen.";
+  });
+  window.addEventListener("appinstalled",()=>{installPrompt=null;if(installCard)installCard.hidden=true;});
+  q("#installAppButton")?.addEventListener("click",async()=>{
+    if(installPrompt){
+      const prompt=installPrompt;installPrompt=null;
+      try{
+        await prompt.prompt();
+        const choice=await prompt.userChoice;
+        if(installStatus)installStatus.textContent=choice?.outcome==="accepted"?"Install requested; open from your home screen.":"Install not completed; use your browser install menu.";
+      }catch{if(installStatus)installStatus.textContent="Use your browser menu to add GetACourt to your home screen.";}
+    }else if(installStatus){
+      installStatus.textContent=/iPad|iPhone|iPod/i.test(navigator.userAgent||"")
+        ? "In Safari: Share → Add to Home Screen → Open as Web App → Add."
+        : "In your browser menu, choose Install app or Add to Home screen.";
+    }
+  });
   updateAuthUI();
   loadPlatform().then(async()=>{if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}search();});
 })();
