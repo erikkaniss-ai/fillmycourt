@@ -8,7 +8,7 @@ const html=readFileSync("getacourt/index.html","utf8");
 
 // This is intentionally a small pure contract: browser-rendered calendar state
 // requires a separate real browser E2E and is never claimed by this test.
-const body=js.match(/function validSearchDate\(dateValue,minDate\)\{[^}]+\}/)?.[0];
+const body=js.split("\n").find(line=>line.includes("function validSearchDate(dateValue,minDate)"))?.trim();
 assert.ok(body,"Date validation helper must exist in player app");
 const validSearchDate=vm.runInNewContext("("+body+")");
 
