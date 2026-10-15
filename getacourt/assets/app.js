@@ -5,7 +5,7 @@
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
     platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, googleSignInEnabled:false,onlinePayments:false },
-    session:null, profile:null, authEpoch:0, geo:null, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
+    session:null, profile:null, authEpoch:0, geo:null, geoRequestEpoch:0, searchMeta:{ searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
   };
 
   const el = {
@@ -295,18 +295,30 @@
 
   function useCurrentLocation(){
     if(!navigator.geolocation){toast("Location is not available in this browser.");return;}
+    // Only a direct Near me click requests consent. Typing a new location
+    // invalidates any pending device-position callback.
+    const epoch=++state.geoRequestEpoch;
     el.nearMe.disabled=true;el.nearMe.textContent="Locating…";
     navigator.geolocation.getCurrentPosition(
       pos=>{
-        state.geo={lat:pos.coords.latitude,lon:pos.coords.longitude};
-        el.location.value="Current location";
+        if(epoch!==state.geoRequestEpoch)return;
+        const lat=Number(pos?.coords?.latitude),lon=Number(pos?.coords?.longitude);
         el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
+        if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180){
+          toast("Location is invalid. Search by city instead.");
+          return;
+        }
+        state.geo={lat,lon};
+        el.location.value="Current location";
         if(el.radiusNote) el.radiusNote.textContent="Starting with nearby courts and expanding only if needed.";
         search();
       },
-      ()=>{
+      err=>{
+        if(epoch!==state.geoRequestEpoch)return;
         el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
-        toast("Could not access your location. Search by area instead.");
+        toast(err?.code===1
+          ?"Location permission was denied. You can search by city instead."
+          :"Could not access your location. Search by area instead.");
       },
       {enableHighAccuracy:false,timeout:8000,maximumAge:300000}
     );
@@ -805,7 +817,14 @@
     if(b) selectSlot(b.dataset.v,b.dataset.s);
   });
   el.nearMe?.addEventListener("click",useCurrentLocation);
-  el.location.addEventListener("input",()=>{if(el.location.value!=="Current location"){state.geo=null;if(el.radiusNote)el.radiusNote.textContent="";}});
+  el.location.addEventListener("input",()=>{
+    if(el.location.value!=="Current location"){
+      state.geoRequestEpoch++; // discard any in-flight device position
+      state.geo=null;
+      el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
+      if(el.radiusNote)el.radiusNote.textContent="";
+    }
+  });
   el.bookingForm.addEventListener("submit",confirm);
   el.dialog.addEventListener("close",()=>{clearInterval(state.timer);reset();});
   el.myBookings.addEventListener("click",loadBookings);

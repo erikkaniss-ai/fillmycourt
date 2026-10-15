@@ -48,6 +48,8 @@ jobs:
         run: node --check getacourt/assets/app.js
       - name: GetAcourt UI date contract tests
         run: node --test platform/tests/getacourt_date_contract.test.mjs
+      - name: GetAcourt location permission + near-me contract tests
+        run: node --test platform/tests/getacourt_geolocation_contract.test.mjs
       - name: GetAcourt PWA installability contract tests
         run: node --test platform/tests/getacourt_install_contract.test.mjs
       - name: GetAcourt Google login PKCE + session contract tests
