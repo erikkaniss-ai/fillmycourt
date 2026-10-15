@@ -48,6 +48,8 @@ jobs:
         run: node --check getacourt/assets/app.js && node --check getacourt/assets/commercial-signals.js
       - name: Decision 104 GetAcourt commercial observability shadow contracts
         run: node --test platform/tests/getacourt_commercial_signals_contract.test.mjs
+      - name: GetACourt native-only booking source guard contracts
+        run: node --test platform/tests/getacourt_booking_source_guard.test.mjs
       - name: Install isolated QA-08 browser runner (no deploy)
         run: npm install --prefix platform/tests/browser --no-save --no-package-lock --ignore-scripts playwright-core@1.56.1 leaflet@1.9.4
       - name: GetAcourt QA-08 real Chromium local fixture E2E (no external requests or writes)

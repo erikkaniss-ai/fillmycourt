@@ -23,6 +23,7 @@ const fakeJwt="fixture."+Buffer.from(JSON.stringify({
  sub:"qa-local-browser-only",email:"qa-browser@example.invalid"
 })).toString("base64url")+".not-a-real-signature";
 let server,browser,origin,googleEnabled=false;
+let fixtureBookingEnabled=false, fixtureSlotProvider=null;
 let searchCalls=[],authExchanges=[],forbiddenWrites=[];
 const json=(res,code,obj)=>{
  res.writeHead(code,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});
@@ -41,7 +42,8 @@ function fixture(date){
   distanceKm:1.1,slots:[{
    id:"qa-slot-1",courtId:"qa-court-1",courtName:"QA Court One",venueId:"qa-venue-1",
    date:day,time:"17:00",startsAt:day+"T17:00:00Z",duration:90,
-   currency:"EUR",price:24,status:"available",indoor:false
+   currency:"EUR",price:24,status:"available",indoor:false,
+   ...(fixtureSlotProvider?{provider:fixtureSlotProvider}:{})
   }]
  }];
 }
@@ -57,7 +59,7 @@ async function handler(req,res){
     return json(res,503,{error:"QA_BLOCKED",message:"Writes prohibited in browser QA"});
    }
    if(pathname==="/api/gac/platform-config"){
-    return json(res,200,{bookingEnabled:false,onlinePayments:false,
+    return json(res,200,{bookingEnabled:fixtureBookingEnabled,onlinePayments:false,
      authConfigured:true,emailSignInEnabled:false,googleSignInEnabled:googleEnabled,
      supabaseAuthUrl:"https://fixture-only.supabase.co/"});
    }
@@ -158,6 +160,33 @@ test("real Chromium: fixture search → venue → preview; no hold/book calls",a
   assert.equal(await page.locator("#confirmBookingButton").isDisabled(),true);
   assert.match(await page.locator("#bookingSummary").innerText(),/no hold/i);
  }finally{await context.close();}
+});
+test("Core native hold refuses provider-owned slot even if booking flag is on",async()=>{
+ fixtureBookingEnabled=true;
+ fixtureSlotProvider="playtomic";
+ const {context,page}=await pageFixture({mobile:true});
+ try{
+  // Local synthetic session ensures absence of provider guard would reach Core hold.
+  await context.addInitScript(jwt=>{
+   localStorage.setItem("gac.session",JSON.stringify({
+    accessToken:jwt,refreshToken:"fixture-ref",expiresAt:Date.now()+3600000
+   }));
+  },fakeJwt);
+  await ready(page);
+  const blockedBefore=forbiddenWrites.length;
+  await page.locator(".venue-card .slot").first().click();
+  await page.waitForFunction(()=>document.querySelector("#toast").textContent.includes("not authorized for in-app booking"));
+  assert.equal(await page.locator("#bookingDialog").evaluate(el=>el.open),false);
+  assert.equal(await page.locator("#authDialog").evaluate(el=>el.open),false);
+  assert.equal(forbiddenWrites.length,blockedBefore,"No native holds/bookings/payment calls");
+  const stages=await page.evaluate(()=>window.GACSignals.snapshot().map(x=>x.stage));
+  assert.ok(stages.includes("slot_selected"));
+  assert.ok(!stages.includes("booking_preview"));
+ }finally{
+  await context.close();
+  fixtureBookingEnabled=false;
+  fixtureSlotProvider=null;
+ }
 });
 test("Decision 104 shadow: browser funnel remains local and labels preview non-conversion",async()=>{
  const {context,page}=await pageFixture({mobile:true});

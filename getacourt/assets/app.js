@@ -620,6 +620,13 @@
     const slot=venue&&venue.slots.find(s=>s.id===slotId);
     if(!venue||!slot||slot.status!=="available") return;
     shadowSignal("slot_selected",{venueId:venue.id,slotId:slot.id,provider:slot.provider});
+    // Preserve the established single booking authority. A global staging
+    // booking flag never grants transaction rights for provider-owned slots.
+    // Do not create a Core hold or imply confirmed availability for them.
+    if(state.platform.bookingEnabled && slot.provider!=="fillmycourt"){
+      toast("This slot is not authorized for in-app booking. Check the club's official booking channel.");
+      return;
+    }
     state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="18%";setBookingStep("court");
     const button=q("#confirmBookingButton");
     button.onclick=null;
