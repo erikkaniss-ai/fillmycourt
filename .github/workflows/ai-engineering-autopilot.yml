@@ -1,0 +1,328 @@
+name: AI Engineering Autopilot (staging PRs)
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing AI engineering task Issue number
+        required: true
+        type: string
+
+# This is the repository-wide writer lock. GitHub queues later eligible issues
+# instead of cancelling a change that is already being prepared for review.
+concurrency:
+  group: ai-engineering-autopilot-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  AUTOPILOT_MAX_ATTEMPTS: "2"
+
+jobs:
+  admission:
+    # Issue bodies are untrusted. Only the repository owner, using the explicit
+    # form marker, can put a task into this queue.
+    if: github.actor == 'erikkaniss-ai'
+    runs-on: ubuntu-latest
+    outputs:
+      qualified: ${{ steps.queue.outputs.qualified }}
+      attempt: ${{ steps.queue.outputs.attempt }}
+    steps:
+      - id: queue
+        name: Create queue status and apply admission cap
+        uses: actions/github-script@v7
+        env:
+          MAX_ATTEMPTS: ${{ env.AUTOPILOT_MAX_ATTEMPTS }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            if (!Number.isSafeInteger(issueNumber) || issueNumber < 1) {
+              core.setOutput('qualified', 'false');
+              core.setOutput('attempt', '0');
+              return;
+            }
+            const fetched = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber });
+            const issue = fetched.data;
+            if (issue.pull_request || issue.state !== 'open' || issue.user.login !== 'erikkaniss-ai' || !issue.body?.includes('<!-- ai-engineering-autopilot:v1 -->')) {
+              core.setOutput('qualified', 'false');
+              core.setOutput('attempt', '0');
+              return;
+            }
+            const marker = '<!-- ai-engineering-autopilot:attempt -->';
+            const maxAttempts = Number(process.env.MAX_ATTEMPTS);
+            const queueLabels = [
+              ['autopilot:queued', '1d76db', 'Eligible guarded task waiting for the writer lock'],
+              ['autopilot:running', 'fbca04', 'A guarded Codex attempt is running'],
+              ['autopilot:blocked', 'd73a4a', 'Activation, safety, or attempt gate blocked the task'],
+              ['autopilot:review', '0e8a16', 'Draft PR created; mandatory CI and human review remain']
+            ];
+
+            for (const [name, color, description] of queueLabels) {
+              try {
+                await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+                await github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, name, color, description });
+              }
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              per_page: 100
+            });
+            const attempt = comments.filter((comment) => comment.body?.includes(marker)).length + 1;
+            core.setOutput('attempt', String(attempt));
+
+            const current = new Set(issue.labels.map((label) => typeof label === 'string' ? label : label.name));
+            for (const label of ['autopilot:queued', 'autopilot:running', 'autopilot:blocked', 'autopilot:review']) current.delete(label);
+
+            if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || attempt > maxAttempts) {
+              current.add('autopilot:blocked');
+              await github.rest.issues.setLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber, labels: [...current] });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `${marker}\n⛔ Autopilot blocked: attempt ${attempt} exceeds the hard cap of ${maxAttempts}. Create a new, explicitly reviewed task instead of retrying indefinitely.`
+              });
+              core.setOutput('qualified', 'false');
+              return;
+            }
+
+            current.add('autopilot:running');
+            await github.rest.issues.setLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber, labels: [...current] });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `${marker}\n⏳ Autopilot attempt ${attempt}/${maxAttempts} admitted. The repository-wide staging writer lock is active; no merge or deployment will be performed.`
+            });
+            core.setOutput('qualified', 'true');
+
+  activation:
+    needs: admission
+    if: needs.admission.outputs.qualified == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+      reason: ${{ steps.check.outputs.reason }}
+    steps:
+      - id: check
+        name: Fail closed until paid execution is explicitly enabled
+        env:
+          AUTOPILOT_ENABLED: ${{ vars.AUTOPILOT_ENABLED }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
+        run: |
+          if [ "${AUTOPILOT_ENABLED:-}" != "true" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=repository variable AUTOPILOT_ENABLED is not true" >> "$GITHUB_OUTPUT"
+          elif [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "reason=OPENAI_API_KEY is absent" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "reason=enabled" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish blocked activation status
+        if: steps.check.outputs.should_run != 'true'
+        uses: actions/github-script@v7
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const fresh = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber });
+            const labels = new Set(fresh.data.labels.map((label) => typeof label === 'string' ? label : label.name));
+            labels.delete('autopilot:running');
+            labels.add('autopilot:blocked');
+            await github.rest.issues.setLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber, labels: [...labels] });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `⛔ No paid Codex run was started: ${process.env.REASON}. Add the repository secret and set the repository variable to \`true\` only after separate owner approval and an OpenAI project spend limit are in place.`
+            });
+
+  codex_patch:
+    needs: [admission, activation]
+    if: needs.activation.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: platform/v0.4-staging
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Materialize untrusted task input
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const fetched = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber });
+            const issue = fetched.data;
+            fs.writeFileSync('AUTOPILOT_TASK.md', [
+              '# Untrusted GitHub Issue Task',
+              '',
+              `Issue: #${issue.number}`,
+              '',
+              issue.body || ''
+            ].join('\n'), { encoding: 'utf8', mode: 0o600 });
+      - id: codex
+        name: Produce a local patch only
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt-file: .github/codex/prompts/ai-engineering-autopilot.md
+          output-file: ai-engineering-autopilot-output.md
+          sandbox: workspace-write
+          safety-strategy: drop-sudo
+          allow-users: erikkaniss-ai
+          effort: low
+          codex-args: '["--ephemeral"]'
+      - name: Remove untrusted input and enforce the source surface
+        shell: bash
+        run: |
+          rm -f AUTOPILOT_TASK.md
+          git diff --check
+          changed="$(git diff --name-only)"
+          if [ -z "$changed" ]; then
+            echo "::error::Codex produced no source change."
+            exit 1
+          fi
+          while IFS= read -r path; do
+            case "$path" in
+              platform/*|getacourt/*|netlify/functions/getacourt-*.mts) ;;
+              *)
+                echo "::error file=$path::Autopilot may not change this path."
+                exit 1
+                ;;
+            esac
+          done <<< "$changed"
+          git diff --binary > autopilot.patch
+          test -s autopilot.patch
+      - name: Run local non-mutating gates
+        shell: bash
+        run: |
+          python -m compileall -q platform/src
+          node --check platform/public/fill/app.js
+          node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: autopilot-patch-${{ github.event.inputs.issue_number }}-${{ needs.admission.outputs.attempt }}
+          path: autopilot.patch
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: autopilot-report-${{ github.event.inputs.issue_number }}-${{ needs.admission.outputs.attempt }}
+          path: ai-engineering-autopilot-output.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  draft_pr:
+    needs: [admission, activation, codex_patch]
+    if: needs.activation.outputs.should_run == 'true' && needs.codex_patch.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    outputs:
+      pr_url: ${{ steps.create.outputs.pr_url }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: platform/v0.4-staging
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: autopilot-patch-${{ github.event.inputs.issue_number }}-${{ needs.admission.outputs.attempt }}
+      - id: create
+        name: Apply the checked patch and open a draft staging PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+          ATTEMPT: ${{ needs.admission.outputs.attempt }}
+        shell: bash
+        run: |
+          git apply --index --whitespace=error-all autopilot.patch
+          git diff --cached --check
+          while IFS= read -r path; do
+            case "$path" in
+              platform/*|getacourt/*|netlify/functions/getacourt-*.mts) ;;
+              *)
+                echo "::error file=$path::Checked patch contains a prohibited path."
+                exit 1
+                ;;
+            esac
+          done < <(git diff --cached --name-only)
+          branch="autopilot/issue-${ISSUE_NUMBER}-attempt-${ATTEMPT}"
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(autopilot): guarded staging task #${ISSUE_NUMBER}"
+          git push origin "$branch"
+          pr_url="$(gh pr create \
+            --base platform/v0.4-staging \
+            --head "$branch" \
+            --draft \
+            --title "Autopilot staging task #${ISSUE_NUMBER}" \
+            --body "Generated from #${ISSUE_NUMBER} by the guarded staging Autopilot.\\n\\n- Base: \\`platform/v0.4-staging\\`\\n- No deployment, merge, or external operation was performed.\\n- Platform CI and human review are mandatory before this draft can be made ready.")"
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+
+  report:
+    needs: [admission, activation, codex_patch, draft_pr]
+    if: always() && needs.admission.result == 'success' && needs.admission.outputs.qualified == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Post GitHub status notification
+        uses: actions/github-script@v7
+        env:
+          ACTIVATION: ${{ needs.activation.outputs.should_run }}
+          CODEX_RESULT: ${{ needs.codex_patch.result }}
+          PR_RESULT: ${{ needs.draft_pr.result }}
+          PR_URL: ${{ needs.draft_pr.outputs.pr_url }}
+          ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const fresh = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber });
+            const labels = new Set(fresh.data.labels.map((label) => typeof label === 'string' ? label : label.name));
+            let body;
+            if (process.env.ACTIVATION !== 'true') {
+              return;
+            } else if (process.env.PR_RESULT === 'success' && process.env.PR_URL) {
+              labels.delete('autopilot:running');
+              labels.add('autopilot:review');
+              body = `✅ Guarded attempt completed. Draft PR: ${process.env.PR_URL}\n\nPlatform CI and human review are still required. The workflow cannot merge or deploy.`;
+            } else {
+              labels.delete('autopilot:running');
+              labels.add('autopilot:blocked');
+              body = `⛔ Guarded attempt stopped before a draft PR. Codex result: ${process.env.CODEX_RESULT}; PR result: ${process.env.PR_RESULT}. Review the run/artifacts, then create a new explicitly reviewed task if another attempt is justified.`;
+            }
+            await github.rest.issues.setLabels({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber, labels: [...labels] });
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber, body });
