@@ -49,9 +49,11 @@ jobs:
       - name: Decision 104 GetAcourt commercial observability shadow contracts
         run: node --test platform/tests/getacourt_commercial_signals_contract.test.mjs
       - name: Install isolated QA-08 browser runner (no deploy)
-        run: npm install --prefix platform/tests/browser --no-save --no-package-lock --ignore-scripts playwright-core@1.56.1
+        run: npm install --prefix platform/tests/browser --no-save --no-package-lock --ignore-scripts playwright-core@1.56.1 leaflet@1.9.4
       - name: GetAcourt QA-08 real Chromium local fixture E2E (no external requests or writes)
         run: node --test platform/tests/browser/getacourt_browser_e2e.mjs
+      - name: QA-09 actual upstream Leaflet/SRI local Chromium E2E (no external writes)
+        run: node --test platform/tests/browser/getacourt_real_leaflet_e2e.mjs
       - name: GetAcourt UI date contract tests
         run: node --test platform/tests/getacourt_date_contract.test.mjs
       - name: GetAcourt location permission + near-me contract tests
