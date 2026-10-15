@@ -98,9 +98,20 @@ export default async (req) => {
   const to = url.searchParams.get("to") || "23:59";
   const latRaw = url.searchParams.get("lat");
   const lonRaw = url.searchParams.get("lon");
-  const lat = latRaw == null ? null : Number(latRaw);
-  const lon = lonRaw == null ? null : Number(lonRaw);
-  const hasCoords = Number.isFinite(lat) && Number.isFinite(lon);
+  // Never coerce empty coordinates to 0,0 or silently discard a malformed
+  // geolocation. Explicit location data is an all-or-nothing contract.
+  const hasLat = latRaw != null && latRaw.trim() !== "";
+  const hasLon = lonRaw != null && lonRaw.trim() !== "";
+  if ((latRaw != null && !hasLat) || (lonRaw != null && !hasLon) || hasLat !== hasLon) {
+    return response({ error:"LOCATION_COORDS", message:"Provide both valid latitude and longitude." }, 422);
+  }
+  const lat = hasLat ? Number(latRaw) : null;
+  const lon = hasLon ? Number(lonRaw) : null;
+  const hasCoords = hasLat && hasLon;
+  if (hasCoords && (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+      lat < -90 || lat > 90 || lon < -180 || lon > 180)) {
+    return response({ error:"LOCATION_COORDS", message:"Latitude/longitude are out of range." }, 422);
+  }
 
   try {
     let venues = [];

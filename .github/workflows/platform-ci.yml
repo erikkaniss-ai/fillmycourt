@@ -2,7 +2,7 @@ name: Platform CI
 
 on:
   push:
-    branches: ["platform/v0.4-staging"]
+    branches: ["get/release-candidate-mvp-qa-04"]
     paths:
       - "platform/**"
       - ".github/workflows/platform-ci.yml"
@@ -40,6 +40,8 @@ jobs:
         run: pip install -r platform/requirements-dev.txt
       - name: Compile
         run: python -m compileall -q platform/src
+      - name: GetAcourt Netlify facade contract tests (no network / no writes)
+        run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract
         run: |
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
