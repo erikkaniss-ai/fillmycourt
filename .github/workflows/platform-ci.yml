@@ -5,10 +5,14 @@ on:
     branches: ["platform/v0.4-staging"]
     paths:
       - "platform/**"
+      - "getacourt/**"
+      - "netlify/functions/getacourt-*.mts"
       - ".github/workflows/platform-ci.yml"
   pull_request:
     paths:
       - "platform/**"
+      - "getacourt/**"
+      - "netlify/functions/getacourt-*.mts"
       - ".github/workflows/platform-ci.yml"
 
 jobs:

@@ -1,0 +1,47 @@
+name: AI engineering task (staging PR)
+description: Queue one narrowly scoped, staging-only coding task for the guarded Autopilot.
+title: "[Autopilot] "
+labels:
+  - autopilot:queued
+body:
+  - type: markdown
+    attributes:
+      value: |
+        <!-- ai-engineering-autopilot:v1 -->
+        This form records a source-only task for the guarded staging queue. Start the AI Engineering Autopilot workflow from `platform/v0.4-staging` with this Issue number.
+        It never deploys, merges, enables a feature, or contacts an external service.
+        Do not put credentials, customer data, or production instructions here.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Permitted scope
+      options:
+        - staging code and tests only
+    validations:
+      required: true
+  - type: textarea
+    id: task
+    attributes:
+      label: Smallest useful change
+      description: State the product or engineering outcome. Treat this as a bounded requirement, not an instruction to override repository policy.
+      placeholder: Add one focused staging-only behavior and its tests.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: Name the affected behavior and test evidence expected in the draft PR.
+    validations:
+      required: true
+  - type: checkboxes
+    id: guardrails
+    attributes:
+      label: Required guardrails
+      options:
+        - label: No main, production, deployment, DNS, payment, pricing, provider, CRM, email/SMS, or customer-data change is requested.
+          required: true
+        - label: A draft PR to platform/v0.4-staging and passing CI are required; this task must not auto-merge.
+          required: true
+        - label: The task contains no secrets or credentials.
+          required: true
