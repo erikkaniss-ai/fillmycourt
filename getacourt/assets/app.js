@@ -47,7 +47,7 @@
   function esc(v){return String(v==null?"":v).replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
   function money(v,currency){return new Intl.NumberFormat("en-GB",{style:"currency",currency:currency||"EUR",maximumFractionDigits:0}).format(v);}
   function prettyDate(v){return new Intl.DateTimeFormat("en-GB",{weekday:"short",day:"numeric",month:"short"}).format(new Date(v+"T12:00:00"));}
-  function validSearchDate(dateValue,minDate){return /^\\d{4}-\\d{2}-\\d{2}$/.test(dateValue)&&dateValue>=minDate;}
+  function validSearchDate(dateValue,minDate){return /^\d{4}-\d{2}-\d{2}$/.test(dateValue)&&dateValue>=minDate;}
   function toast(message){el.toast.textContent=message;el.toast.classList.add("show");setTimeout(()=>el.toast.classList.remove("show"),2600);}
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(16).slice(2);}
   function weekdayIndex(dateValue){const d=new Date(dateValue+"T12:00:00");return (d.getDay()+6)%7;}
