@@ -364,7 +364,14 @@
     if(mapMode) requestAnimationFrame(renderMap);
   }
   function renderMap(){
-    if(!el.resultsMap||!window.L) return;
+    if(!el.resultsMap)return;
+    if(!window.L){
+      // Network/CDN/SRI failure: never leave the player staring at a blank map.
+      state.view="list";
+      updateView();
+      toast("Map is temporarily unavailable. Showing courts as a list.");
+      return;
+    }
     const venues=sortedVenues().filter(v=>Number.isFinite(v.lat)&&Number.isFinite(v.lon));
     if(!venues.length){
       state.view="list";
