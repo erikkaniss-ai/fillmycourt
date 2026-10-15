@@ -1481,7 +1481,8 @@ def test_f10_signed_core_shaped_pathway_fixture_db_contract(fill_today):
     assert got.json()["core_origin_verified"] is False
     assert got.json()["causal_evidence_verified"] is False
     assert got.json()["fee_minor"]==0 and got.json()["billable"] is False
-    with pytest.raises(EvidenceRejected,match="CROSS_TENANT_OR_IDENTITY"):
+    # The tenant-scoped Core lookup fails before fixture identity parsing.
+    with pytest.raises(EvidenceRejected,match="CORE_AUTHORITY_NOT_CONFIRMED"):
         write(startp,starts,organization=str(uuid.uuid4()))
     with pytest.raises(Exception):
         with store.trusted() as c:
