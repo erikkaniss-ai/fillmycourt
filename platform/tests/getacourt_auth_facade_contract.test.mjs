@@ -8,6 +8,7 @@ async function run(handler,req,flag="false"){
  const savedFetch=globalThis.fetch,savedEnv=globalThis.Netlify;
  const calls=[];
  globalThis.Netlify={env:{get:key=>({
+ GETACOURT_CORE_API_BASE:"https://core.fixture.test",
  GETACOURT_SUPABASE_URL:"https://fixture.supabase.co",
  GETACOURT_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_ci",
  GETACOURT_GOOGLE_SIGNIN_ENABLED:flag
