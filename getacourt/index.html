@@ -6,14 +6,15 @@
   <meta name="theme-color" content="#0d1726" />
   <meta name="description" content="GetACourt helps racket-sport players find available courts across clubs and booking systems, then book in a few taps." />
   <title>GetACourt — Find a court. Play now.</title>
-  <link rel="manifest" href="/getacourt/manifest.webmanifest" />
-  <link rel="stylesheet" href="/getacourt/assets/styles.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body data-mode="preview">
-  <div class="preview-strip" id="previewStrip">Preview environment · test bookings only</div>
+  <div class="preview-strip" id="previewStrip">Staging environment · bookings disabled</div>
 
   <header class="site-header">
-    <a class="brand" href="/getacourt/" aria-label="GetACourt home">
+    <a class="brand" href="./" aria-label="GetACourt home">
       <span class="brand-mark" aria-hidden="true"><span></span></span>
       <span>GetA<span>Court</span></span>
     </a>
@@ -21,6 +22,8 @@
       <a href="#discover">Discover</a>
       <a href="#how">How it works</a>
       <button class="nav-button" id="myBookingsButton" type="button">My bookings</button>
+      <button class="nav-button" id="myWatchesButton" type="button">My watches</button>
+      <button class="nav-button" id="authButton" type="button">Sign in</button>
     </nav>
     <a class="club-link" href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">For clubs ↗</a>
   </header>
@@ -50,7 +53,11 @@
         <div class="search-grid">
           <label class="field field-location">
             <span>Where</span>
-            <input id="locationInput" name="location" value="Cascais" autocomplete="address-level2" placeholder="City, area or club" />
+            <div class="location-entry">
+              <input id="locationInput" name="location" value="Cascais" autocomplete="address-level2" placeholder="City, area or club" />
+              <button id="nearMeButton" class="near-me-button" type="button" aria-label="Use my current location">◎ Near me</button>
+            </div>
+            <small id="radiusNote" class="radius-note"></small>
           </label>
           <label class="field">
             <span>Date</span>
@@ -84,11 +91,36 @@
           <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
         </div>
       </div>
-      <div class="filter-row">
-        <button type="button" class="filter-pill active" data-filter="all">All courts</button>
-        <button type="button" class="filter-pill" data-filter="indoor">Indoor</button>
-        <button type="button" class="filter-pill" data-filter="under35">Under €35</button>
-        <button type="button" class="filter-pill" data-filter="90min">90 min</button>
+      <div class="discovery-controls">
+        <div class="filter-row">
+          <button type="button" class="filter-pill active" data-filter="all">All courts</button>
+          <button type="button" class="filter-pill" data-filter="indoor">Indoor</button>
+          <button type="button" class="filter-pill" data-filter="under35">Under €35</button>
+          <button type="button" class="filter-pill" data-filter="90min">90 min</button>
+        </div>
+        <div class="view-sort-controls">
+          <label class="sort-control">Sort
+            <select id="sortSelect">
+              <option value="recommended">Recommended</option>
+              <option value="distance">Nearest</option>
+              <option value="time">Earliest</option>
+              <option value="price">Lowest price</option>
+            </select>
+          </label>
+          <div class="view-toggle" role="group" aria-label="Results view">
+            <button id="listViewButton" class="view-button active" type="button" aria-pressed="true">List</button>
+            <button id="mapViewButton" class="view-button" type="button" aria-pressed="false">Map</button>
+          </div>
+        </div>
+      </div>
+      <div id="quickPicks" class="quick-picks" hidden></div>
+      <div id="watchPrompt" class="watch-prompt" hidden>
+        <div>
+          <span class="watch-kicker">PLAY ROUTINE</span>
+          <strong id="watchPromptTitle">Want me to keep looking?</strong>
+          <small id="watchPromptText">Save this search and GetACourt will keep watching for a useful match.</small>
+        </div>
+        <button id="watchPromptButton" class="ghost-button watch-cta" type="button">Keep looking</button>
       </div>
       <div id="resultsGrid" class="results-grid">
         <div class="empty-state">
@@ -97,6 +129,7 @@
           <p>GetACourt searches available inventory and brings the useful slots into one clean view.</p>
         </div>
       </div>
+      <div id="resultsMap" class="results-map" hidden aria-label="Map of available venues"></div>
     </section>
 
     <section class="principles" id="how">
@@ -137,30 +170,61 @@
     <p class="powered">Powered by <a href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">FillMyCourt</a></p>
   </footer>
 
+
+  <dialog class="booking-dialog venue-dialog" id="venueDialog">
+    <div class="dialog-shell venue-shell">
+      <button class="dialog-close" id="closeVenueButton" type="button" aria-label="Close">×</button>
+      <div id="venueDialogContent"></div>
+    </div>
+  </dialog>
+
   <dialog class="booking-dialog" id="bookingDialog">
     <form method="dialog" class="dialog-shell" id="bookingForm">
       <button class="dialog-close" value="cancel" aria-label="Close">×</button>
       <div class="dialog-progress"><span id="dialogProgress"></span></div>
       <p class="eyebrow">BOOKING</p>
       <h2 id="bookingHeading">Hold this court</h2>
+      <div class="checkout-steps" aria-label="Booking steps">
+        <div class="checkout-step active" data-booking-step="court"><span>1</span><b>Court</b><small>Review slot</small></div>
+        <div class="checkout-step" data-booking-step="player"><span>2</span><b>Player</b><small>Identity & details</small></div>
+        <div class="checkout-step" data-booking-step="confirm"><span>3</span><b>Confirm</b><small>Terms & payment</small></div>
+      </div>
       <div id="bookingSummary" class="booking-summary"></div>
       <div class="hold-banner" id="holdBanner" hidden>
         Court held for <strong id="holdCountdown">08:00</strong>
       </div>
 
-      <fieldset class="pay-options">
-        <legend>Payment</legend>
-        <label><input type="radio" name="paymentMode" value="full" checked /> <span><b>Pay full court</b><small>Fastest. Invite players after booking.</small></span></label>
-        <label><input type="radio" name="paymentMode" value="split" /> <span><b>Split with players</b><small>Booking owner guarantees the remaining balance.</small></span></label>
-      </fieldset>
+      <div class="booking-account-card">
+        <div>
+          <span>PLAYER ACCOUNT</span>
+          <strong id="bookingIdentityLabel">Not signed in</strong>
+          <small id="bookingIdentityNote">A player account is required before live booking.</small>
+        </div>
+        <button class="ghost-button booking-account-action" id="bookingIdentityAction" type="button">Sign in</button>
+      </div>
 
+      <div class="booking-policy-card">
+        <strong>Before confirmation</strong>
+        <div><span>Final price</span><b>Authoritative Core quote</b></div>
+        <div><span>Cancellation</span><b>Venue policy shown before confirmation</b></div>
+        <div><span>Payment</span><b id="bookingPaymentStatus">Online payments disabled in staging</b></div>
+      </div>
+
+      <p class="checkout-section-label">Player details</p>
       <div class="checkout-grid">
         <label class="field"><span>Name</span><input id="nameInput" name="name" autocomplete="name" required placeholder="Your name" /></label>
         <label class="field"><span>Email</span><input id="emailInput" name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
       </div>
+
+      <fieldset class="pay-options">
+        <legend>Payment preference</legend>
+        <label><input type="radio" name="paymentMode" value="full" checked /> <span><b>Pay full court</b><small>Fastest. Invite players after booking.</small></span></label>
+        <label><input type="radio" name="paymentMode" value="split" /> <span><b>Split with players</b><small>Booking owner guarantees the remaining balance.</small></span></label>
+      </fieldset>
+
       <label class="consent"><input type="checkbox" id="termsInput" required /> <span>I accept the venue cancellation policy and GetACourt booking terms.</span></label>
-      <button class="confirm-button" id="confirmBookingButton" type="submit">Confirm test booking</button>
-      <p class="payment-note">Preview mode: no card is charged. Production checkout will use a PSP token; GetACourt will not store raw card data.</p>
+      <button class="confirm-button" id="confirmBookingButton" type="submit">Confirm booking</button>
+      <p class="payment-note">Online payments are disabled in staging. GetACourt does not store raw card data.</p>
     </form>
   </dialog>
 
@@ -173,8 +237,87 @@
     </div>
   </dialog>
 
+  <dialog class="bookings-dialog watches-dialog" id="watchesDialog">
+    <div class="dialog-shell watches-shell">
+      <button class="dialog-close" id="closeWatchesButton" aria-label="Close">×</button>
+      <p class="eyebrow">PLAY ROUTINES</p>
+      <h2>My watches</h2>
+      <p class="payment-note">GetACourt watches the next useful dates for your routine. Booking remains manual in this staging build.</p>
+      <div id="watchAlerts" class="watch-alerts"></div>
+      <div id="watchesList" class="bookings-list"></div>
+    </div>
+  </dialog>
+
+  <dialog class="booking-dialog watch-dialog" id="watchDialog">
+    <form class="dialog-shell" id="watchForm">
+      <button class="dialog-close" id="closeWatchButton" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">KEEP LOOKING</p>
+      <h2>Save this play routine</h2>
+      <div id="watchSummary" class="booking-summary"></div>
+      <div class="checkout-grid watch-grid">
+        <label class="field"><span>Duration</span>
+          <select id="watchDuration">
+            <option value="60">60 min</option>
+            <option value="90" selected>90 min</option>
+          </select>
+        </label>
+        <label class="field"><span>Max court price</span><input id="watchMaxPrice" type="number" min="0" step="1" placeholder="No limit" /></label>
+        <label class="field"><span>Radius</span><input id="watchRadius" type="number" min="1" max="200" step="1" value="10" /></label>
+        <label class="field"><span>Court type</span>
+          <select id="watchIndoor">
+            <option value="all">Indoor or outdoor</option>
+            <option value="indoor">Indoor only</option>
+            <option value="outdoor">Outdoor only</option>
+          </select>
+        </label>
+      </div>
+      <p class="payment-note">You choose the rules. GetACourt only creates a persistent demand watch after you confirm.</p>
+      <button class="confirm-button" type="submit">Save & start watching</button>
+    </form>
+  </dialog>
+
+  <dialog class="booking-dialog auth-dialog" id="authDialog">
+    <form class="dialog-shell" id="authForm">
+      <button class="dialog-close" id="closeAuthButton" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">PLAYER ACCOUNT</p>
+      <h2>Sign in to GetACourt</h2>
+      <p class="payment-note" id="authStatus">Email sign-in is available only when staging mail delivery is explicitly enabled.</p>
+      <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+      <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
+    </form>
+  </dialog>
+
+  <dialog class="booking-dialog profile-dialog" id="profileDialog">
+    <form class="dialog-shell" id="profileForm">
+      <button class="dialog-close" id="closeProfileButton" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">PLAYER PROFILE</p>
+      <h2>Your GetACourt profile</h2>
+      <p class="payment-note" id="profileStatus">Set your home area and preferred racket sports. This profile is separate from any club CRM record.</p>
+      <div class="checkout-grid">
+        <label class="field"><span>Name</span><input id="profileName" autocomplete="name" required maxlength="120" placeholder="Your name" /></label>
+        <label class="field"><span>Home area</span><input id="profileArea" autocomplete="address-level2" maxlength="120" placeholder="Cascais" /></label>
+      </div>
+      <fieldset class="pay-options profile-sports">
+        <legend>Preferred sports</legend>
+        <div class="preference-grid">
+          <label><input type="checkbox" name="preferredSport" value="padel" /> <span><b>Padel</b></span></label>
+          <label><input type="checkbox" name="preferredSport" value="tennis" /> <span><b>Tennis</b></span></label>
+          <label><input type="checkbox" name="preferredSport" value="squash" /> <span><b>Squash</b></span></label>
+          <label><input type="checkbox" name="preferredSport" value="badminton" /> <span><b>Badminton</b></span></label>
+          <label><input type="checkbox" name="preferredSport" value="pickleball" /> <span><b>Pickleball</b></span></label>
+        </div>
+      </fieldset>
+      <label class="consent"><input type="checkbox" id="profileMarketing" /> <span>I agree to receive occasional GetACourt product and availability updates.</span></label>
+      <div class="profile-actions">
+        <button class="confirm-button" type="submit">Save profile</button>
+        <button class="ghost-button" id="profileSignOutButton" type="button">Sign out</button>
+      </div>
+    </form>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/getacourt/assets/app.js" defer></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="assets/app.js" defer></script>
 </body>
 </html>

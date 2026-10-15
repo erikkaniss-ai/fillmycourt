@@ -1,43 +1,28 @@
-import { body, bookingStore, reference, response } from "../lib/getacourt.mts";
+import { body, coreJson, errorResponse, idempotency, requireAuth, response } from "../lib/platform.mts";
 
 export default async (req) => {
   if (req.method !== "POST") return response({ error:"Method not allowed" }, 405);
-  const input = await body(req);
-  if (!input.holdId || !input.customer?.email || !input.slot?.id) {
-    return response({ error:"holdId, slot and customer email are required" }, 400);
+  try {
+    requireAuth(req);
+    const input = await body(req);
+    if (!input.holdId) return response({ error:"INVALID_BOOKING", message:"holdId is required" }, 400);
+    const data = await coreJson("/api/holds/" + encodeURIComponent(input.holdId) + "/confirm", {
+      method:"POST",
+      headers:{ "idempotency-key": idempotency(req) },
+      body:JSON.stringify({ participants:Number(input.participants || 1), accept_policy:Boolean(input.acceptPolicy) }),
+    }, req);
+    return response({
+      bookingId:data.id,
+      reference:String(data.id || "").slice(0,8).toUpperCase(),
+      status:data.status,
+      startsAt:data.starts_at,
+      endsAt:data.ends_at,
+      currency:data.currency,
+      grossAmountMinor:data.gross_amount_minor,
+    }, 201);
+  } catch (error) {
+    return errorResponse(error);
   }
-
-  const store = bookingStore();
-  const hold = await store.get("hold/" + input.holdId, { type:"json" });
-  if (!hold) return response({ error:"Hold not found or expired" }, 409);
-  if (new Date(hold.expiresAt).getTime() <= Date.now()) return response({ error:"Hold expired" }, 409);
-
-  const existing = await store.get("slot-booking/" + hold.slotKey, { type:"json" });
-  if (existing) return response({ error:"This slot has already been booked" }, 409);
-
-  const bookingId = crypto.randomUUID();
-  const booking = {
-    bookingId,
-    reference:reference(),
-    status:"confirmed",
-    paymentStatus:"test_authorized",
-    paymentMode:input.paymentMode === "split" ? "split" : "full",
-    createdAt:new Date().toISOString(),
-    customer:{
-      name:String(input.customer.name || "").slice(0,120),
-      email:String(input.customer.email).toLowerCase().slice(0,254)
-    },
-    venue:input.venue,
-    slot:input.slot,
-    provider:hold.provider,
-    providerBookingId:null
-  };
-
-  await store.setJSON("booking/" + bookingId, booking);
-  await store.setJSON("slot-booking/" + hold.slotKey, { bookingId, status:"confirmed", createdAt:booking.createdAt });
-  await store.delete("slot-hold/" + hold.slotKey);
-  await store.delete("hold/" + input.holdId);
-  return response(booking, 201);
 };
 
 export const config = { path:"/api/gac/book" };
