@@ -1377,3 +1377,136 @@ def test_f09_offer_proof_single_competing_stale_and_closed_booking(fill_today):
     stale=client.post(path,headers=hdr)
     assert stale.status_code==200 and stale.json()["outcome"]=="BOOKING_NOT_ACTIVE"
     assert stale.json()["candidate_count"]==0 and not stale.json()["causal_evidence_verified"]
+
+
+def test_f10_signed_core_shaped_pathway_fixture_db_contract(fill_today):
+    """A cryptographic fixture chain is NOT Core-origin proof or earned revenue."""
+    import hashlib,hmac,json
+    from datetime import datetime,timezone,timedelta
+    from fmc.core_pathway_fixture import record_pathway_fixture
+    from fmc.offline_evidence import EvidenceRejected
+    from fmc.revenue_evidence import core_snapshot_key
+    url,store,uid,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(uid)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        booking=c.execute(text("""
+            select id::text,source,status::text,court_id::text,starts_at,ends_at,updated_at
+            from public.bookings where organization_id=cast(:org as uuid) and status='confirmed' limit 1
+        """),{"org":org}).mappings().one()
+        venue=c.execute(text("select id::text from public.venues where organization_id=cast(:org as uuid) limit 1"),{"org":org}).scalar_one()
+        opp=c.execute(text("""
+          insert into public.revenue_opportunities
+            (organization_id,venue_id,court_id,opportunity_key,target_date,
+             window_starts_at,window_ends_at,currency)
+          values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),
+                 :key,:date,:start,:end,'EUR') returning id::text
+        """),{"org":org,"venue":venue,"court":court,"key":uuid.uuid4().hex,
+               "date":booking["starts_at"].date(),"start":booking["starts_at"],"end":booking["ends_at"]}).scalar_one()
+        act=c.execute(text("""
+          insert into public.crm_actions
+            (organization_id,opportunity_id,quote_amount_minor,currency,opportunity_version_at_plan)
+          values(cast(:org as uuid),cast(:opp as uuid),3600,'EUR',now()) returning id::text
+        """),{"org":org,"opp":opp}).scalar_one()
+        token="crm_"+uuid.uuid4().hex
+        offer=c.execute(text("""
+          insert into public.crm_offers
+            (organization_id,action_id,opportunity_id,tracking_token,target_court_id,
+             target_starts_at,target_ends_at,authoritative_price_minor,
+             offered_price_minor,currency,expires_at,attribution_window_ends_at)
+          values(cast(:org as uuid),cast(:act as uuid),cast(:opp as uuid),
+                 :token,cast(:court as uuid),:start,:end,3600,3600,'EUR',
+                 now()+interval '1 day',now()+interval '2 days') returning id::text
+        """),{"org":org,"act":act,"opp":opp,"token":token,"court":court,
+               "start":booking["starts_at"],"end":booking["ends_at"]}).scalar_one()
+    ready=f"/api/fmc/{org}/bookings/{booking['id']}/pathway-readiness"
+    absent=client.get(ready,headers=hdr)
+    assert absent.status_code==200 and absent.json()["readiness"]=="NO_PATH_FIXTURE"
+    assert client.get(f"/api/fmc/{uuid.uuid4()}/bookings/{booking['id']}/pathway-readiness",
+                      headers=hdr).status_code in (403,404)
+    before=client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",headers=hdr,
+                       json={"booking_id":booking["id"]})
+    assert before.status_code==200,before.text
+    link=client.post(f"/api/fmc/{org}/attributions/link-offer-shadow",headers=hdr,
+                     json={"booking_id":booking["id"],"offer_id":offer,"tracking_token":token})
+    assert link.status_code==200,link.text
+    with store.trusted() as c:
+        snap=core_snapshot_key(dict(booking))
+        linkrow=c.execute(text("""
+           select event_key from public.crm_booking_offer_links_shadow
+           where organization_id=cast(:org as uuid) and booking_id=cast(:booking as uuid)
+             and offer_id=cast(:offer as uuid)
+        """),{"org":org,"booking":booking["id"],"offer":offer}).scalar_one()
+    pathid=str(uuid.uuid4())
+    now=datetime.now(timezone.utc).replace(microsecond=0)
+    epoch=int(now.timestamp())
+    secret="f10-temporary-test-only-HMAC-key"
+    def fixture(seq,prior=None,eventid=None,occurred=None,path_override=pathid):
+        data=dict(schema_version=1,organization_id=org,booking_id=booking["id"],
+           offer_id=offer,path_id=path_override,event_id=eventid or f"step-{seq}",
+           sequence=seq,state="BOOKING_STARTED" if seq==1 else "BOOKING_CONFIRMED",
+           snapshot_key=snap,offer_link_key=linkrow,
+           prior_event_key=prior,occurred_at=(occurred or now).isoformat())
+        payload=json.dumps(data).encode()
+        sig=hmac.new(secret.encode(),b"fmc-core-path-fixture-v1."+
+             str(epoch).encode()+b"."+payload,hashlib.sha256).hexdigest()
+        return payload,sig
+    def write(p,s,organization=org):
+        with store.trusted() as c:
+            return record_pathway_fixture(c,organization_id=organization,
+                       booking_id=booking["id"],offer_id=offer,payload=p,
+                       signature_hex=s,signed_epoch=epoch,fixture_secret=secret,now=now)
+    secondp,seconds=fixture(2,"a"*64)
+    with pytest.raises(EvidenceRejected,match="PATH_START_REQUIRED"):
+        write(secondp,seconds)
+    startp,starts=fixture(1)
+    first=write(startp,starts)
+    assert first["new_evidence"] is True and not first["causal_evidence_verified"]
+    assert write(startp,starts)["new_evidence"] is False
+    with pytest.raises(EvidenceRejected,match="INVALID_SIGNATURE"):
+        write(startp+b" ",starts)
+    badp,bads=fixture(2,"b"*64)
+    with pytest.raises(EvidenceRejected,match="INVALID_CHAIN_OR_ORDER"):
+        write(badp,bads)
+    confirmedp,confirmeds=fixture(2,first["event_key"])
+    success=write(confirmedp,confirmeds)
+    assert success["new_evidence"] is True
+    got=client.get(ready,headers=hdr)
+    assert got.status_code==200,got.text
+    assert got.json()["readiness"]=="FIXTURE_CHAIN_COMPLETE_NONCAUSAL"
+    assert got.json()["fixture_event_count"]==2
+    assert got.json()["core_origin_verified"] is False
+    assert got.json()["causal_evidence_verified"] is False
+    assert got.json()["fee_minor"]==0 and got.json()["billable"] is False
+    with pytest.raises(EvidenceRejected,match="CROSS_TENANT_OR_IDENTITY"):
+        write(startp,starts,organization=str(uuid.uuid4()))
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+              update public.crm_core_pathway_fixtures_shadow
+              set causal_evidence_verified=true where event_key=:key
+            """),{"key":first["event_key"]})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+              insert into public.crm_core_pathway_fixtures_shadow
+               (organization_id,booking_id,offer_id,core_snapshot_key,offer_link_event_key,
+                path_id,event_id,sequence,state,event_key,payload_sha256,signature_digest,
+                occurred_at,signed_epoch)
+              values(cast(:org as uuid),cast(:booking as uuid),cast(:offer as uuid),
+                     :snapshot,:link,cast(:path as uuid),'forged',1,'BOOKING_STARTED',
+                     :event,:payload,:signature,now(),extract(epoch from now())::bigint)
+            """),{"org":org,"booking":booking["id"],"offer":str(uuid.uuid4()),
+                  "snapshot":snap,"link":linkrow,"path":str(uuid.uuid4()),
+                  "event":"f"*64,"payload":"a"*64,"signature":"b"*64})
+    with store.trusted() as c:
+        c.execute(text("""
+           update public.bookings set status='cancelled',updated_at=now()+interval '1 minute'
+           where id=cast(:booking as uuid)
+        """),{"booking":booking["id"]})
+    no=client.get(ready,headers=hdr)
+    assert no.status_code==200 and no.json()["readiness"]=="BOOKING_NOT_ACTIVE"
+    assert no.json()["fixture_event_count"]==0

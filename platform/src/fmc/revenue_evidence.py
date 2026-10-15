@@ -21,6 +21,7 @@ from .revenue_finance import dispute_policy
 from .offline_evidence import EvidenceRejected, build_shadow_offer_link
 from .reconciliation_maturity import reconcile_shadow, shadow_reconciliation_key
 from .offer_proof_shadow import assess_offer_evidence, assessment_event_key
+from .core_pathway_fixture import pathway_readiness
 
 FINANCE = {"owner", "admin", "manager", "analyst"}
 MANAGER = {"owner", "admin", "manager"}
@@ -608,6 +609,39 @@ def register_shadow_evidence(app, db, who, role, audit, settings):
                     "delta_minor":0,"fee_minor":0,"billable":False,
                     "refunds_executed":0,"mode":"shadow"}
 
+
+
+    @app.get("/api/fmc/{org}/bookings/{booking_id}/pathway-readiness")
+    def list_core_pathway_readiness(org: str, booking_id: uuid.UUID, request: Request):
+        """Read-only proof-readiness view. No booking, signing or webhook operation."""
+        actor=who(request)
+        with db.user(actor.id) as c:
+            role(c,org,actor,FINANCE)
+            booking=one(c.execute(text("""
+               select id::text,organization_id::text,source,status::text,updated_at
+               from public.bookings where organization_id=cast(:org as uuid)
+                 and id=cast(:booking as uuid)
+            """),{"org":org,"booking":str(booking_id)}))
+            if not booking:
+                raise DomainError("BOOKING_NOT_FOUND","Booking unavailable for organization.",404)
+            snapshot=core_snapshot_key(booking)
+            events=rows(c.execute(text("""
+               select id::text,path_id::text,offer_id::text,sequence,state,
+                      prior_event_key,event_key,occurred_at,observed_at
+               from public.crm_core_pathway_fixtures_shadow
+               where organization_id=cast(:org as uuid)
+                 and booking_id=cast(:booking as uuid)
+                 and core_snapshot_key=:snapshot
+               order by path_id,sequence,id limit 101
+            """),{"org":org,"booking":booking["id"],"snapshot":snapshot}))
+            if len(events)>100:
+                return {"booking_id":booking["id"],"readiness":"REVIEW_LIMIT",
+                        "causal_evidence_verified":False,
+                        "core_origin_verified":False,"primary_offer_id":None,
+                        "billable":False,"fee_minor":0,"mode":"shadow"}
+            result=pathway_readiness(booking["status"],booking["source"],events)
+            return {"booking_id":booking["id"],"fixture_event_count":len(events),
+                    **result}
 
     @app.post("/api/fmc/{org}/bookings/{booking_id}/offer-proof-evaluate-shadow")
     def evaluate_offer_proof_shadow(org: str, booking_id: uuid.UUID, request: Request):
