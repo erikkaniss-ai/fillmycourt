@@ -42,6 +42,8 @@ jobs:
         run: python -m compileall -q platform/src
       - name: Verify Fill UI JavaScript syntax
         run: node --check platform/public/fill/app.js
+      - name: GetAcourt Netlify boundary contracts (no network / no writes)
+        run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract
         run: |
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
