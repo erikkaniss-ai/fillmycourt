@@ -169,6 +169,32 @@ test("real Chromium: absent external Leaflet falls back from map to list",async(
   assert.match(await page.locator("#toast").innerText(),/Map is temporarily unavailable/);
  }finally{await context.close();}
 });
+test("real Chromium: list/map use identical venue coordinates (deterministic Leaflet stub)",async()=>{
+ const {context,page}=await pageFixture();
+ try{
+  await context.addInitScript(()=>{
+   window.qaMarkers=[];
+   const map={fitBounds(bounds){window.qaMapBounds=bounds;},invalidateSize(){}};
+   const layer={clearLayers(){window.qaMarkers=[];},addTo(){return layer;}};
+   window.L={
+    map:()=>map,
+    tileLayer:()=>({addTo:()=>{}}),
+    layerGroup:()=>layer,
+    marker:coords=>({addTo:()=>({bindPopup:html=>{window.qaMarkers.push({coords,html});}})})
+   };
+  });
+  await ready(page);
+  const venueName=await page.locator(".venue-card h3").first().innerText();
+  await page.locator("#mapViewButton").click();
+  await page.waitForFunction(()=>Array.isArray(window.qaMarkers)&&window.qaMarkers.length===1);
+  const points=await page.evaluate(()=>window.qaMarkers);
+  assert.equal(await page.locator("#resultsMap").evaluate(el=>el.hidden),false);
+  assert.deepEqual(points[0].coords,[38.696,-9.422]);
+  assert.match(points[0].html,/QA Fixture Court Club/);
+  assert.match(points[0].html,/17:00/);
+  assert.equal(venueName,"QA Fixture Court Club");
+ }finally{await context.close();}
+});
 test("real Chromium: explicit Near me consent forwards coordinates; typed city clears them",async()=>{
  const {context,page}=await pageFixture({grantLocation:true,mobile:true});
  try{
@@ -235,6 +261,7 @@ test("real Chromium: simulated Google callback → profile → signout, never Go
   assert.equal(authExchanges.length,before+1);
   assert.equal(authExchanges.at(-1).validVerifier,true);
   await page.locator("#authButton").click();
+  await page.locator("#profileDialog[open]").waitFor({timeout:10000});
   assert.equal(await page.locator("#profileDialog").evaluate(el=>el.open),true);
   await page.locator("#profileSignOutButton").click();
   await page.waitForFunction(()=>document.querySelector("#authButton").textContent==="Sign in");
