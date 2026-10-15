@@ -1511,3 +1511,130 @@ def test_f10_signed_core_shaped_pathway_fixture_db_contract(fill_today):
     no=client.get(ready,headers=hdr)
     assert no.status_code==200 and no.json()["readiness"]=="BOOKING_NOT_ACTIVE"
     assert no.json()["fixture_event_count"]==0
+
+
+def test_f11_offline_ed25519_core_attestation_registry_and_security(fill_today):
+    """Fictional DB authority + fixture keys. No real Core signing integration."""
+    import hashlib,json
+    from datetime import datetime,timedelta,timezone
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    from fmc.core_attestation_contract import DOMAIN,record_core_attestation_fixture
+    from fmc.offline_evidence import EvidenceRejected
+    from fmc.revenue_evidence import core_snapshot_key
+
+    url,store,owner,org,court=fill_today
+    settings=Settings(origin="https://fill.test",environment="test",database=url,
+                      supabase_url="https://example.supabase.co",
+                      supabase_publishable_key="sb_publishable_ci",data_contract="supabase-v1")
+    client=TestClient(create_v1_app(settings,"operations",auth_override=StaticAuth(owner)))
+    hdr={"Authorization":"Bearer ci-owner-token"}
+    with store.trusted() as c:
+        b=c.execute(text("""
+          select id::text,organization_id::text,status::text,source,updated_at
+          from public.bookings where organization_id=cast(:org as uuid)
+            and status='confirmed' limit 1
+        """),{"org":org}).mappings().one()
+    endpoint=f"/api/fmc/{org}/bookings/{b['id']}/core-attestation-readiness"
+    assert client.get(endpoint,headers=hdr).json()["readiness"]=="NO_ATTESTATION_EVIDENCE"
+    assert client.get(f"/api/fmc/{uuid.uuid4()}/bookings/{b['id']}/core-attestation-readiness",
+                      headers=hdr).status_code in (403,404)
+    key=Ed25519PrivateKey.generate()
+    pub=key.public_key().public_bytes(encoding=serialization.Encoding.Raw,
+                                      format=serialization.PublicFormat.Raw)
+    key_id=hashlib.sha256(pub).hexdigest()
+    issuer=str(uuid.uuid4())
+    now=datetime.now(timezone.utc).replace(microsecond=0)
+    with store.trusted() as c:
+        c.execute(text("""
+           insert into public.crm_core_attestation_fixture_keys
+             (organization_id,issuer_instance_id,key_id,public_key_hex,
+              registered_by,valid_from,valid_until)
+           values(cast(:org as uuid),cast(:issuer as uuid),:key_id,:pub,
+                  cast(:actor as uuid),:start,:end)
+        """),{"org":org,"issuer":issuer,"key_id":key_id,"pub":pub.hex(),
+              "actor":owner,"start":now-timedelta(minutes=5),
+              "end":now+timedelta(minutes=5)})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+                insert into public.crm_core_attestation_fixture_keys
+                (organization_id,issuer_instance_id,key_id,public_key_hex,
+                 registered_by,valid_from,valid_until)
+                values(cast(:org as uuid),cast(:issuer as uuid),:key_id,:pub,
+                       cast(:actor as uuid),:start,:end)
+            """),{"org":org,"issuer":str(uuid.uuid4()),"key_id":"f"*64,
+                  "pub":pub.hex(),"actor":owner,"start":now,
+                  "end":now+timedelta(minutes=5)})
+    def envelope(event_id=None,status="confirmed",source="getacourt"):
+        record=dict(schema_version=1,issuer="fmc-core-fixture",
+               issuer_instance_id=issuer,key_id=key_id,organization_id=org,
+               booking_id=b["id"],event_id=event_id or str(uuid.uuid4()),
+               booking_source=source,booking_status=status,
+               booking_updated_at=b["updated_at"].isoformat(),
+               core_snapshot_key=core_snapshot_key(b),
+               occurred_at=now.isoformat(),
+               expires_at=(now+timedelta(minutes=2)).isoformat())
+        raw=json.dumps(record).encode()
+        return raw,key.sign(DOMAIN+raw)
+    payload,signature=envelope()
+    def write(raw,sig,organization=org):
+        with store.trusted() as c:
+            return record_core_attestation_fixture(c,
+                organization_id=organization,booking_id=b["id"],
+                issuer_instance_id=issuer,key_id=key_id,
+                payload=raw,signature=sig,now=now)
+    with pytest.raises(EvidenceRejected,match="UNREGISTERED_FIXTURE_KEY"):
+        with store.trusted() as c:
+            record_core_attestation_fixture(c,organization_id=org,
+                booking_id=b["id"],issuer_instance_id=issuer,key_id="0"*64,
+                payload=payload,signature=signature,now=now)
+    assert client.post(f"/api/fmc/{org}/attributions/evaluate-shadow",
+        json={"booking_id":b["id"]},headers=hdr).status_code==200
+    first=write(payload,signature)
+    assert first["new_evidence"] and first["cryptographic_fixture_valid"]
+    assert not first["core_origin_verified"] and first["fee_minor"]==0
+    replay=write(payload,signature)
+    assert replay["new_evidence"] is False and replay["attestation_id"]==first["attestation_id"]
+    with pytest.raises(EvidenceRejected,match="INVALID_SIGNATURE"):
+        write(payload+b" ",signature)
+    with pytest.raises(EvidenceRejected,match="CORE_AUTHORITY_NOT_CONFIRMED"):
+        write(payload,signature,organization=str(uuid.uuid4()))
+    read=client.get(endpoint,headers=hdr)
+    assert read.status_code==200,read.text
+    assert read.json()["readiness"]=="CRYPTOGRAPHIC_FIXTURE_VALID_CORE_ORIGIN_UNTRUSTED"
+    assert read.json()["fixture_count"]==1
+    assert read.json()["core_origin_verified"] is False
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+               update public.crm_core_attestation_checks_shadow
+               set core_origin_verified=true where id=cast(:id as uuid)
+            """),{"id":first["attestation_id"]})
+    with pytest.raises(Exception):
+        with store.trusted() as c:
+            c.execute(text("""
+               insert into public.crm_core_attestation_checks_shadow
+                 (organization_id,booking_id,fixture_key_id,issuer_instance_id,event_id,
+                  event_key,core_snapshot_key,booking_status,booking_source,
+                  booking_updated_at,occurred_at,expires_at,payload_sha256,signature_sha256)
+               select cast(:org as uuid),b.id,k.id,k.issuer_instance_id,
+                      cast(:event as uuid),:event_key,:snapshot,'confirmed',b.source,
+                      b.updated_at,:now,:expires,:payload,:signature
+               from public.bookings b
+               cross join public.crm_core_attestation_fixture_keys k
+               where b.id=cast(:booking as uuid)
+                 and k.organization_id=cast(:org as uuid) limit 1
+            """),{"org":org,"booking":b["id"],"event":str(uuid.uuid4()),
+                  "event_key":"b"*64,"snapshot":"f"*64,"now":now,
+                  "expires":now+timedelta(minutes=2),
+                  "payload":"a"*64,"signature":"a"*64})
+    with store.trusted() as c:
+        c.execute(text("""
+           update public.bookings set status='cancelled',updated_at=now()+interval '2 minutes'
+           where id=cast(:booking as uuid)
+        """),{"booking":b["id"]})
+    cancelled=client.get(endpoint,headers=hdr)
+    assert cancelled.status_code==200 and cancelled.json()["readiness"]=="BOOKING_NOT_ACTIVE"
+    assert cancelled.json()["fixture_count"]==0
+    assert cancelled.json()["billable"] is False
