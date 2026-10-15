@@ -287,9 +287,13 @@
       <button class="dialog-close" id="closeAuthButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER ACCOUNT</p>
       <h2>Sign in to GetACourt</h2>
-      <p class="payment-note" id="authStatus">Email sign-in is available only when staging mail delivery is explicitly enabled.</p>
-      <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
-      <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
+      <p class="payment-note" id="authStatus" role="status">Choose a secure sign-in method.</p>
+      <button class="confirm-button" id="googleSignInButton" type="button" hidden>Continue with Google</button>
+      <div id="emailSignInFields">
+        <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+        <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
+      </div>
+      <p class="payment-note">Your GetACourt account is separate from your Playtomic and other provider accounts.</p>
     </form>
   </dialog>
 
@@ -324,6 +328,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="assets/auth-pkce.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>

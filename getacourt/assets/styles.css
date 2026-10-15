@@ -475,3 +475,6 @@ main { overflow: hidden; }
 .install-button{border:0;border-radius:999px;padding:12px 18px;background:var(--ink);color:#fff;font-weight:750;cursor:pointer}
 .install-button:hover{background:var(--ink-soft)}
 @media(max-width:620px){.install-card{align-items:stretch}.install-button{width:100%}}
+
+#googleSignInButton[hidden],#emailSignInFields[hidden]{display:none}
+#googleSignInButton{margin:12px 0}

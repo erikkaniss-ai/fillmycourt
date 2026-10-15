@@ -4,7 +4,7 @@
   const state = {
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
-    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, onlinePayments:false },
+    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, googleSignInEnabled:false,onlinePayments:false },
     session:null, profile:null, geo:null, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
   };
 
@@ -18,7 +18,8 @@
     bookingsList:q("#bookingsList"), myBookings:q("#myBookingsButton"),
     closeBookings:q("#closeBookingsButton"), toast:q("#toast"),
     authButton:q("#authButton"), authDialog:q("#authDialog"), authForm:q("#authForm"),
-    authEmail:q("#authEmail"), authStatus:q("#authStatus"), authSubmit:q("#authSubmitButton"), closeAuth:q("#closeAuthButton"),
+    authEmail:q("#authEmail"), authStatus:q("#authStatus"), authSubmit:q("#authSubmitButton"),
+    googleSignIn:q("#googleSignInButton"),emailSignInFields:q("#emailSignInFields"),closeAuth:q("#closeAuthButton"),
     profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
     profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
@@ -43,6 +44,10 @@
   el.email.value=localStorage.getItem("gac.email")||"";
   state.session=loadSession();
   consumeAuthHash();
+  // Capture the OAuth code immediately and remove it from the address bar
+  // before loading network data, to avoid referer/history leakage.
+  const googleCallback=window.GACAuth?.captureCallback(location.href)||null;
+  if(googleCallback)history.replaceState(null,"",googleCallback.cleanUrl);
 
   function esc(v){return String(v==null?"":v).replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
   function money(v,currency){return new Intl.NumberFormat("en-GB",{style:"currency",currency:currency||"EUR",maximumFractionDigits:0}).format(v);}
@@ -82,6 +87,43 @@
       setTimeout(()=>{toast("Signed in to GetACourt.");loadProfile(true);},100);
     }
   }
+  async function completeGoogleSignIn(){
+    if(!googleCallback)return;
+    const pending=window.GACAuth?.takePending(sessionStorage);
+    if(!pending||pending.redirectUrl!==googleCallback.originPath||!state.platform.googleSignInEnabled){
+      toast("Google sign-in expired or was not initiated here. Please sign in again.");
+      return;
+    }
+    if(googleCallback.error){toast("Google sign-in was not completed.");return;}
+    if(!googleCallback.code){toast("Google sign-in could not be completed.");return;}
+    try{
+      const session=await api("/api/gac/auth/google/exchange",{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({authCode:googleCallback.code,codeVerifier:pending.codeVerifier})
+      });
+      saveSession(session);
+      toast("Signed in with Google.");
+      await loadProfile(true);
+    }catch{toast("Google sign-in failed. Please try again.");}
+  }
+  async function startGoogleSignIn(){
+    if(!state.platform.googleSignInEnabled||!state.platform.supabaseAuthUrl)return;
+    if(!window.crypto?.subtle||!window.GACAuth){
+      el.authStatus.textContent="Your browser does not support secure Google sign-in.";return;
+    }
+    el.googleSignIn.disabled=true;
+    try{
+      const verifier=window.GACAuth.verifier(window.crypto);
+      const challenge=await window.GACAuth.challenge(window.crypto,verifier);
+      const redirectUrl=location.origin+location.pathname;
+      window.GACAuth.savePending(sessionStorage,verifier,redirectUrl);
+      const url=window.GACAuth.authorizeUrl(state.platform.supabaseAuthUrl,redirectUrl,challenge);
+      location.assign(url);
+    }catch{
+      el.googleSignIn.disabled=false;
+      el.authStatus.textContent="Could not initiate Google sign-in.";
+    }
+  }
   async function accessToken(){
     if(!state.session?.accessToken) return null;
     if((state.session.expiresAt||0)-Date.now()>60000) return state.session.accessToken;
@@ -115,12 +157,12 @@
       return;
     }
     el.bookingIdentityLabel.textContent="Not signed in";
-    if(state.platform.emailSignInEnabled){
+    if(state.platform.emailSignInEnabled||state.platform.googleSignInEnabled){
       el.bookingIdentityNote.textContent="Sign in before a live court hold can be created.";
       el.bookingIdentityAction.textContent="Sign in";
       el.bookingIdentityAction.disabled=false;
     }else{
-      el.bookingIdentityNote.textContent="Email sign-in delivery is not enabled in this staging environment.";
+      el.bookingIdentityNote.textContent="Player sign-in is not enabled in this environment.";
       el.bookingIdentityAction.textContent="Sign-in pending";
       el.bookingIdentityAction.disabled=true;
     }
@@ -145,9 +187,9 @@
 
   async function loadPlatform(){
     try{state.platform=await api("/api/gac/platform-config");}
-    catch{state.platform={bookingEnabled:false,authConfigured:false,emailSignInEnabled:false,onlinePayments:false};}
+    catch{state.platform={bookingEnabled:false,authConfigured:false,emailSignInEnabled:false,googleSignInEnabled:false,onlinePayments:false};}
     const strip=q("#previewStrip");
-    if(strip) strip.textContent="Staging environment · "+(state.platform.bookingEnabled?"native booking enabled":"bookings disabled")+(state.platform.emailSignInEnabled?"":" · email sign-in pending");
+    if(strip) strip.textContent="Staging environment · "+(state.platform.bookingEnabled?"native booking enabled":"bookings disabled")+((state.platform.googleSignInEnabled||state.platform.emailSignInEnabled)?"":" · player sign-in pending");
     if(el.bookingPaymentStatus) el.bookingPaymentStatus.textContent=state.platform.onlinePayments?"Online payment enabled":"Online payments disabled in staging";
     renderBookingIdentity();
   }
@@ -614,22 +656,30 @@
       setTimeout(()=>el.profileDialog.close(),450);
     }catch(err){el.profileStatus.textContent=err.message||"Could not save profile.";}
   }
-  function signOut(){
+  async function signOut(){
+    const token=state.session?.accessToken;
+    // Revoke the current Supabase session server-side, then clear local state.
+    try{
+      if(token)await api("/api/gac/auth/sign-out",{method:"POST",headers:{authorization:"Bearer "+token}});
+    }catch{toast("Signed out locally; server session revocation could not be confirmed.");}
     saveSession(null);
-    if(el.profileDialog.open) el.profileDialog.close();
-    toast("Signed out.");
+    if(el.profileDialog.open)el.profileDialog.close();
+    toast("Signed out of GetACourt.");
   }
 
   function openAuth(message=""){
-    const enabled=state.platform.emailSignInEnabled===true;
-    if(el.authSubmit) el.authSubmit.disabled=!enabled;
-    el.authEmail.disabled=!enabled;
-    if(!enabled){
-      el.authStatus.textContent="Email sign-in delivery is not enabled in this staging environment.";
+    const emailEnabled=state.platform.emailSignInEnabled===true;
+    const googleEnabled=state.platform.googleSignInEnabled===true;
+    if(el.authSubmit)el.authSubmit.disabled=!emailEnabled;
+    if(el.authEmail)el.authEmail.disabled=!emailEnabled;
+    if(el.googleSignIn){el.googleSignIn.hidden=!googleEnabled;el.googleSignIn.disabled=!googleEnabled;}
+    if(el.emailSignInFields)el.emailSignInFields.hidden=!emailEnabled;
+    if(!emailEnabled&&!googleEnabled){
+      el.authStatus.textContent="Player sign-in is not enabled in this environment.";
     }else if(message){
       el.authStatus.textContent=message;
     }else{
-      el.authStatus.textContent="Use a secure email link to sign in to GetACourt.";
+      el.authStatus.textContent="Choose Google or email to sign in securely to GetACourt.";
     }
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
     if(payload.email) el.authEmail.value=payload.email;
@@ -680,6 +730,7 @@
   el.authButton.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth(""));
   el.bookingIdentityAction?.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth("Sign in before live booking."));
   el.authForm.addEventListener("submit",sendMagicLink);
+  el.googleSignIn?.addEventListener("click",startGoogleSignIn);
   el.closeAuth.addEventListener("click",()=>el.authDialog.close());
   el.profileForm.addEventListener("submit",saveProfile);
   el.closeProfile.addEventListener("click",()=>el.profileDialog.close());
@@ -713,5 +764,9 @@
     }
   });
   updateAuthUI();
-  loadPlatform().then(async()=>{if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}search();});
+  loadPlatform().then(async()=>{
+    await completeGoogleSignIn();
+    if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}
+    search();
+  });
 })();

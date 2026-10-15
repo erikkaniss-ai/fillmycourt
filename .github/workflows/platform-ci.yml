@@ -50,6 +50,10 @@ jobs:
         run: node --test platform/tests/getacourt_date_contract.test.mjs
       - name: GetAcourt PWA installability contract tests
         run: node --test platform/tests/getacourt_install_contract.test.mjs
+      - name: GetAcourt Google login PKCE + session contract tests
+        run: node --test platform/tests/getacourt_google_auth_contract.test.mjs
+      - name: GetAcourt auth gateway security contracts
+        run: node --experimental-strip-types --test platform/tests/getacourt_auth_facade_contract.test.mjs
       - name: GetAcourt Netlify facade contract tests (no network / no writes)
         run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract
