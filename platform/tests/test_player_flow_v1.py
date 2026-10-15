@@ -190,6 +190,19 @@ def test_enabled_hold_links_global_profile_into_club_person(player_flow):
     })
     assert held.status_code == 201, held.text
 
+    # Contract: an actual fixture-only native confirmation returns its venue-local
+    # timezone, so the Get bookings facade can format DST correctly.
+    confirmed=client.post(
+        "/api/holds/" + held.json()["id"] + "/confirm",
+        headers={**headers(),"Idempotency-Key":"ci-booking-timezone-confirm-0001"},
+        json={"participants":1,"accept_policy":True},
+    )
+    assert confirmed.status_code == 201,confirmed.text
+    history=client.get("/api/bookings",headers=headers())
+    assert history.status_code == 200,history.text
+    record=next(item for item in history.json()["items"] if item["id"]==confirmed.json()["id"])
+    assert record["venue_timezone"] == "Europe/Lisbon"
+
     with f["store"].trusted() as c:
         person = c.execute(text("""
             select full_name,email,marketing_consent,source

@@ -3208,7 +3208,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
             with db.trusted() as c:
                 return {"items": rows(c.execute(text("""
                     select b.id::text,b.status::text,b.starts_at,b.ends_at,b.currency::text,b.gross_amount_minor,
-                           b.source,b.metadata,c.name court_name,v.name venue_name
+                           b.source,b.metadata,c.name court_name,v.name venue_name,v.timezone venue_timezone
                     from public.bookings b
                     join public.people p on p.id=b.player_id
                     join public.courts c on c.id=b.court_id

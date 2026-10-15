@@ -11,6 +11,7 @@ import evaluateHandler from "../../netlify/functions/getacourt-play-routine-eval
 import profileHandler from "../../netlify/functions/getacourt-player-profile.mts";
 import notificationsHandler from "../../netlify/functions/getacourt-demand-notifications.mts";
 import configHandler from "../../netlify/functions/getacourt-platform-config.mts";
+import bookingsHandler from "../../netlify/functions/getacourt-bookings.mts";
 
 const ORIGIN = "https://getacourt.test";
 const CORE = "https://core.fixture.test";
@@ -179,4 +180,25 @@ test("Get public config truthfully mirrors Core booking OFF / payments OFF", asy
   assert.equal(r.body.onlinePayments,false);
   assert.equal(r.body.emailSignInEnabled,false);
   assert.equal(r.cacheControl,"no-store");
+});
+
+test("Get booking history uses venue timezone in both summer and winter (DST)", async () => {
+  for (const [instant,expected] of [
+    ["2026-10-19T17:00:00Z","18:00"], // Portugal summer UTC+1
+    ["2026-12-19T17:00:00Z","17:00"], // Portugal winter UTC+0
+  ]) {
+    const result=await harness(bookingsHandler,(url,init)=>{
+      assert.equal(url.pathname,"/api/bookings");
+      assert.equal(init.headers.get("authorization"),"Bearer player.fixture");
+      return {body:{items:[{
+        id:"booking-1",starts_at:instant,ends_at:new Date(Date.parse(instant)+90*60000).toISOString(),
+        status:"confirmed",venue_name:"Cascais CI",venue_timezone:"Europe/Lisbon",
+        currency:"EUR",gross_amount_minor:3200,source:"getacourt",
+      }]}};
+    },path("/api/gac/bookings","GET",undefined,"Bearer player.fixture"));
+    assert.equal(result.status,200);
+    assert.equal(result.body.bookings[0].slot.time,expected);
+    assert.equal(result.body.bookings[0].slot.duration,90);
+    assert.equal(result.body.bookings[0].venue.timezone,"Europe/Lisbon");
+  }
 });
