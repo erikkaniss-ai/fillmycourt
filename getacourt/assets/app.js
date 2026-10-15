@@ -5,11 +5,11 @@
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
     platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, onlinePayments:false },
-    session:null, profile:null, geo:null, searchMeta:{}, hasSearched:false, routines:[], watchNotifications:[]
+    session:null, profile:null, geo:null, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
   };
 
   const el = {
-    form:q("#searchForm"), location:q("#locationInput"), date:q("#dateInput"),
+    form:q("#searchForm"), location:q("#locationInput"), date:q("#dateInput"), dateStatus:q("#dateStatus"),
     from:q("#fromInput"), to:q("#toInput"), grid:q("#resultsGrid"),
     count:q("#resultCount"), title:q("#resultsTitle"), refresh:q("#refreshButton"),
     dialog:q("#bookingDialog"), bookingForm:q("#bookingForm"), summary:q("#bookingSummary"),
@@ -47,6 +47,7 @@
   function esc(v){return String(v==null?"":v).replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
   function money(v,currency){return new Intl.NumberFormat("en-GB",{style:"currency",currency:currency||"EUR",maximumFractionDigits:0}).format(v);}
   function prettyDate(v){return new Intl.DateTimeFormat("en-GB",{weekday:"short",day:"numeric",month:"short"}).format(new Date(v+"T12:00:00"));}
+  function validSearchDate(dateValue,minDate){return /^\\d{4}-\\d{2}-\\d{2}$/.test(dateValue)&&dateValue>=minDate;}
   function toast(message){el.toast.textContent=message;el.toast.classList.add("show");setTimeout(()=>el.toast.classList.remove("show"),2600);}
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(16).slice(2);}
   function weekdayIndex(dateValue){const d=new Date(dateValue+"T12:00:00");return (d.getDay()+6)%7;}
@@ -152,12 +153,21 @@
   }
 
   function loading(){el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
-  async function search(){
+  async function search(options={}){
+    const revision=++state.searchRevision;
     const p={sport:state.sport,location:el.location.value.trim()||"Cascais",date:el.date.value,from:el.from.value,to:el.to.value};
+    if(!validSearchDate(p.date,el.date.min)){
+      if(el.dateStatus)el.dateStatus.textContent="Choose a valid date (today or later).";
+      toast("Choose a valid future date.");
+      return;
+    }
     if(state.geo){p.lat=String(state.geo.lat);p.lon=String(state.geo.lon);}
+    if(el.dateStatus)el.dateStatus.textContent="Searching "+prettyDate(p.date)+"…";
     loading();
     try{
       const data=await api("/api/gac/search?"+new URLSearchParams(p).toString());
+      if(revision!==state.searchRevision)return; // stale request cannot overwrite newest date
+      if(el.dateStatus)el.dateStatus.textContent="Showing "+prettyDate(p.date);
       state.venues=data.venues||[];
       state.searchMeta=data.search||{};
       state.hasSearched=true;
@@ -168,6 +178,8 @@
           : "";
       }
     }catch(err){
+      if(revision!==state.searchRevision)return;
+      if(el.dateStatus)el.dateStatus.textContent="Could not load "+prettyDate(p.date);
       state.venues=[];
       state.searchMeta={};
       state.hasSearched=true;
@@ -177,7 +189,7 @@
     el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
     renderWatchPrompt();
-    q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
+    if(options.scroll!==false)q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
   }
 
   function useCurrentLocation(){
@@ -640,6 +652,12 @@
   qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{qa(".sport-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.sport=b.dataset.sport;}));
   qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{qa(".filter-pill").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.filter=b.dataset.filter;render();}));
   el.form.addEventListener("submit",e=>{e.preventDefault();search();});
+  // Native date inputs commit a calendar choice via change; re-query without
+  // requiring a second click on Find, and do not steal scroll position.
+  el.date.addEventListener("change",()=>{
+    if(validSearchDate(el.date.value,el.date.min))search({scroll:false});
+    else if(el.dateStatus)el.dateStatus.textContent="Choose a valid date (today or later).";
+  });
   el.refresh.addEventListener("click",search);
   el.sortSelect?.addEventListener("change",()=>{state.sort=el.sortSelect.value;render();});
   el.listView?.addEventListener("click",()=>{state.view="list";updateView();});
