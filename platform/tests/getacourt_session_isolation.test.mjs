@@ -84,3 +84,29 @@ test("Same-user refresh rotation preserves epoch and private read contexts",()=>
  c.ctx.syncExternalSession();
  assert.equal(c.state.authEpoch,epoch);
 });
+
+test("Sign out clears client session before any awaited revoke network request",()=>{
+ const begin=js.indexOf("  async function signOut(){");
+ const end=js.indexOf("  function openAuth(",begin);
+ assert.ok(begin>=0&&end>begin,"Signout implementation found");
+ const body=js.slice(begin,end);
+ assert.ok(body.indexOf("saveSession(null);")>=0);
+ assert.ok(body.indexOf("saveSession(null);")<body.indexOf('await api("/api/gac/auth/sign-out"'),"Local data purged before revocation");
+ assert.match(body,/remote session revocation is unconfirmed/);
+});
+test("Profile, routine, booking mutations drop stale responses after sign-out",()=>{
+ const scopes=[
+  ["saveProfile","async function saveProfile(e){","async function signOut(){"],
+  ["saveWatch","async function saveWatch(e){","function renderWatches(){"],
+  ["setRoutineStatus","async function setRoutineStatus(","async function loadWatches("],
+  ["cancelBooking","async function cancelBooking(id){","async function loadProfile("],
+  ["openProfile","async function openProfile(){","async function saveProfile("]
+ ];
+ for(const [name,start,end] of scopes){
+  const a=js.indexOf(start),b=js.indexOf(end,a);
+  assert.ok(a>=0&&b>a,name);
+  const code=js.slice(a,b);
+  assert.match(code,/const epoch=state\.authEpoch;/,name);
+  assert.match(code,/epoch!==state\.authEpoch \|\| !state\.session/,name);
+ }
+});

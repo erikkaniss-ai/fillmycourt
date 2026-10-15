@@ -456,6 +456,7 @@
     e.preventDefault();
     const token=await accessToken();
     if(!token){el.watchDialog.close();openAuth("Sign in to save a Play Routine.");return;}
+    const epoch=state.authEpoch;
     const maxPrice=el.watchMaxPrice.value.trim();
     const payload={
       sport:state.sport,
@@ -475,15 +476,17 @@
     };
     try{
       const created=await api("/api/gac/play-routines",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)},true);
+      if(epoch!==state.authEpoch || !state.session)return;
       const routine=created.routine;
       let evaluated=null;
       try{
         evaluated=await api("/api/gac/play-routine-evaluate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routineId:routine.id})},true);
       }catch{}
+      if(epoch!==state.authEpoch || !state.session)return;
       el.watchDialog.close();
       toast(evaluated?.matches?.length?"Play Routine saved · matching courts found.":"Play Routine saved · I’ll keep looking.");
       await loadWatches(false);
-    }catch(err){toast(err.message||"Could not save this Play Routine.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not save this Play Routine.");}
   }
 
   function renderWatches(){
@@ -513,11 +516,13 @@
   }
 
   async function setRoutineStatus(routineId,status){
+    const epoch=state.authEpoch;
     try{
       await api("/api/gac/play-routines",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({routineId,status})},true);
+      if(epoch!==state.authEpoch || !state.session)return;
       toast(status==="paused"?"Play Routine paused.":"Play Routine resumed.");
       await loadWatches(false);
-    }catch(err){toast(err.message||"Could not update Play Routine.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not update Play Routine.");}
   }
 
   async function loadWatches(openDialog=true){
@@ -649,13 +654,19 @@
     qa(".cancel-button",el.bookingsList).forEach(b=>b.addEventListener("click",()=>cancelBooking(b.closest(".booking-item").dataset.id)));
   }
   async function cancelBooking(id){
+    const epoch=state.authEpoch;
     const item=el.bookingsList.querySelector('[data-id="'+CSS.escape(id)+'"]'),button=item&&item.querySelector(".cancel-button");
     if(button){button.disabled=true;button.textContent="Cancelling…";}
     try{
       await api("/api/gac/cancel",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookingId:id})},true);
+      if(epoch!==state.authEpoch || !state.session)return;
       if(item){const status=item.querySelector(".booking-status");if(status)status.textContent="cancelled";if(button)button.remove();}
       toast("Booking cancelled.");
-    }catch(err){if(button){button.disabled=false;button.textContent="Cancel booking";}toast(err.message||"Could not cancel booking.");}
+    }catch(err){
+      if(epoch!==state.authEpoch)return;
+      if(button){button.disabled=false;button.textContent="Cancel booking";}
+      toast(err.message||"Could not cancel booking.");
+    }
   }
 
   async function loadProfile(promptIfMissing=false){
@@ -682,7 +693,9 @@
   }
   async function openProfile(){
     if(!(await requireSignedIn())) return;
+    const epoch=state.authEpoch;
     const profile=await loadProfile(false);
+    if(epoch!==state.authEpoch || !state.session)return;
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
     if(!profile){
       el.profileName.value="";
@@ -701,6 +714,7 @@
     const fullName=el.profileName.value.trim();
     if(fullName.length<2){el.profileStatus.textContent="Please enter your name.";return;}
     const preferredSports=qa('input[name="preferredSport"]:checked',el.profileForm).map(x=>x.value);
+    const epoch=state.authEpoch;
     el.profileStatus.textContent="Saving…";
     try{
       const data=await api("/api/gac/player-profile",{
@@ -714,24 +728,30 @@
           marketingConsent:el.profileMarketing.checked
         })
       },true);
+      if(epoch!==state.authEpoch || !state.session)return;
       state.profile=data.profile||null;
       if(state.profile?.home_area) el.location.value=state.profile.home_area;
       updateAuthUI();
       el.profileStatus.textContent="Profile saved.";
       toast("Player profile saved.");
-      setTimeout(()=>el.profileDialog.close(),450);
-    }catch(err){el.profileStatus.textContent=err.message||"Could not save profile.";}
+      setTimeout(()=>{
+        if(epoch===state.authEpoch && el.profileDialog.open)el.profileDialog.close();
+      },450);
+    }catch(err){
+      if(epoch===state.authEpoch)el.profileStatus.textContent=err.message||"Could not save profile.";
+    }
   }
   async function signOut(){
     const token=state.session?.accessToken;
+    // Privacy-first: invalidate the UI and all local tokens before network
+    // revocation. Never leave old account data visible while logout waits.
+    saveSession(null);
     let serverRevoked=true;
     try{
       if(token)await api("/api/gac/auth/sign-out",{
         method:"POST",headers:{authorization:"Bearer "+token}
       });
     }catch{serverRevoked=false;}
-    saveSession(null);
-    if(el.profileDialog.open)el.profileDialog.close();
     toast(serverRevoked?"Signed out of GetACourt.":"Signed out on this device; remote session revocation is unconfirmed.");
   }
 
