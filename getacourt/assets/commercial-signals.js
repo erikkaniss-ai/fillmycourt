@@ -8,7 +8,8 @@
   const SPORTS=new Set(["padel","tennis","squash","badminton","pickleball"]);
   const PROVIDERS=new Set(["fillmycourt","native","playtomic","tiesports","racket_id","smashpro"]);
   const SOURCES=new Set(["hotel","tourism","municipality","federation","club","social","partner"]);
-  const goodId=value=>typeof value==="string"&&/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(value)?value:null;
+  // Core normalizes a slot key as courtId|startISO|duration, not a bare UUID.
+  const goodId=value=>typeof value==="string"&&/^[a-zA-Z0-9][a-zA-Z0-9_|:.+-]{0,159}$/.test(value)?value:null;
   const finiteCount=value=>Number.isSafeInteger(value)&&value>=0?Math.min(value,100000):0;
 
   function sourceFromSearch(search){

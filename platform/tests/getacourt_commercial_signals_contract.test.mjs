@@ -65,6 +65,10 @@ test("Provider spoofing and unknown venue/slot cannot create a trusted event",()
  c.record("slot_selected",{venueId:"venue",slotId:"slot",provider:"invented-provider"});
  assert.equal(c.snapshot()[0].provider,"unknown");
  assert.equal(c.snapshot()[0].sequence,1);
+ const coreKey="12345678-1234-1234-1234-123456789abc|2026-10-17T17:00:00.000+01:00|90";
+ c.record("slot_selected",{venueId:"venue",slotId:coreKey,provider:"fillmycourt"});
+ assert.equal(c.snapshot()[1].slot_id,coreKey);
+ assert.equal(c.snapshot()[1].provider,"fillmycourt");
 });
 test("Ephemeral ring buffer bounded at 64 events, snapshot is defensive copy",()=>{
  const c=factory.create();
