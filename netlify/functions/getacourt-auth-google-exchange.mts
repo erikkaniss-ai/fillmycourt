@@ -6,6 +6,8 @@ const validVerifier = value => typeof value === "string" && /^[A-Za-z0-9._~-]{43
 export default async (req) => {
   if(req.method !== "POST")return response({error:"Method not allowed"},405);
   try {
+    const origin=req.headers.get("origin");
+    if(origin&&origin!==new URL(req.url).origin)return response({error:"INVALID_ORIGIN"},403);
     if(String(globalThis.Netlify?.env?.get("GETACOURT_GOOGLE_SIGNIN_ENABLED")||"").toLowerCase()!=="true")
       return response({error:"GOOGLE_SIGNIN_DISABLED"},503);
     const input=await body(req);

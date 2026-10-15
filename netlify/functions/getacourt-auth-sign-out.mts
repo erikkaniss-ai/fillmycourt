@@ -3,6 +3,8 @@ import { env, errorResponse, requireAuth, response } from "../lib/platform.mts";
 export default async req => {
   if(req.method!=="POST")return response({error:"Method not allowed"},405);
   try{
+    const origin=req.headers.get("origin");
+    if(origin&&origin!==new URL(req.url).origin)return response({error:"INVALID_ORIGIN"},403);
     const authorization=requireAuth(req);
     const base=env("GETACOURT_SUPABASE_URL").replace(/\/$/,"");
     const upstream=await fetch(base+"/auth/v1/logout",{

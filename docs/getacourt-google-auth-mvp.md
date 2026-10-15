@@ -12,3 +12,11 @@ Settings required (NOT YET VERIFIED OR ENABLED):
 5. Obtain owner GO for any change to published getacourt-staging branch or public website. No redirect changes, provider secrets, Google credentials or expenses modified by this source batch.
 
 Security: S256 verifier in sessionStorage with 5-minute expiry/one-time consumption, browser URL code sanitized, tokens never copied to provider, access validated server-side by Supabase. Existing localStorage session strategy is retained and must be separately reviewed for production hardening, XSS/CSP and auth event revocation; auth cookies with HttpOnly can be a later scoped security improvement. Signing out calls Supabase /auth/v1/logout and clears local Get session. Not a guarantee that already-issued access JWTs immediately expire.
+
+## Auth hardening QA-02 — 2026-10-15 (source-only)
+A. Referrer-Policy no-referrer meta placed before Get player page styles/scripts, reducing OAuth query-code exposure in follow-up asset requests. This does not remove code from the initial callback HTTP request or its web-server logs.
+B. Single-flight refresh across concurrent Get profile/bookings requests; refuses to restore a session that was signed out while refresh was in flight.
+C. Get browser OAuth exchange and logout facades reject nonmatching Origin on cross-site requests; missing Origin still accepted by nonbrowser clients and tests.
+D. Sign out UI does not claim server revocation succeeded if remote sign out failed.
+E. Regression coverage includes real refresh routine in a Node VM harness, origin denial, HTML no-referrer meta and existing PKCE tests.
+No public or staging deployment, settings change, Google provider enablement or booking changes.

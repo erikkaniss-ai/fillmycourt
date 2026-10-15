@@ -124,14 +124,30 @@
       el.authStatus.textContent="Could not initiate Google sign-in.";
     }
   }
+  // Deduplicate concurrent refresh calls and prevent sign-out/old refresh races.
+  let refreshInFlight=null;
   async function accessToken(){
     if(!state.session?.accessToken) return null;
     if((state.session.expiresAt||0)-Date.now()>60000) return state.session.accessToken;
     if(!state.session.refreshToken){saveSession(null);return null;}
-    try{
-      const data=await api("/api/gac/auth/refresh",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({refreshToken:state.session.refreshToken})},false);
-      saveSession(data); return state.session.accessToken;
-    }catch{saveSession(null);return null;}
+    if(refreshInFlight)return refreshInFlight;
+    const currentRefreshToken=state.session.refreshToken;
+    refreshInFlight=(async()=>{
+      try{
+        const data=await api("/api/gac/auth/refresh",{
+          method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({refreshToken:currentRefreshToken})
+        },false);
+        if(state.session?.refreshToken!==currentRefreshToken)return null;
+        saveSession(data);
+        return state.session?.accessToken||null;
+      }catch{
+        if(state.session?.refreshToken===currentRefreshToken)saveSession(null);
+        return null;
+      }
+    })();
+    try{return await refreshInFlight;}
+    finally{refreshInFlight=null;}
   }
   function updateAuthUI(){
     if(!el.authButton) return;
@@ -658,13 +674,15 @@
   }
   async function signOut(){
     const token=state.session?.accessToken;
-    // Revoke the current Supabase session server-side, then clear local state.
+    let serverRevoked=true;
     try{
-      if(token)await api("/api/gac/auth/sign-out",{method:"POST",headers:{authorization:"Bearer "+token}});
-    }catch{toast("Signed out locally; server session revocation could not be confirmed.");}
+      if(token)await api("/api/gac/auth/sign-out",{
+        method:"POST",headers:{authorization:"Bearer "+token}
+      });
+    }catch{serverRevoked=false;}
     saveSession(null);
     if(el.profileDialog.open)el.profileDialog.close();
-    toast("Signed out of GetACourt.");
+    toast(serverRevoked?"Signed out of GetACourt.":"Signed out on this device; remote session revocation is unconfirmed.");
   }
 
   function openAuth(message=""){

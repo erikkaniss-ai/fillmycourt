@@ -51,3 +51,11 @@ test("Get interface and entrypoint keep Google sign-in gated",()=>{
  assert.match(js,/completeGoogleSignIn/);
  assert.match(js,/history\.replaceState\(null,"",googleCallback\.cleanUrl\)/);
 });
+
+test("OAuth callback page forbids Referer propagation before loading any assets",()=>{
+ const html=require("node:fs").readFileSync("getacourt/index.html","utf8");
+ const meta=html.indexOf('<meta name="referrer" content="no-referrer"');
+ const css=html.indexOf('<link rel="stylesheet"');
+ const script=html.indexOf('<script');
+ assert.ok(meta>=0&&css>meta&&script>meta);
+});

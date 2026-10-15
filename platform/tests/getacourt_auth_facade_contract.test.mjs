@@ -62,3 +62,13 @@ test("Sign-out requires bearer before upstream call",async()=>{
  assert.equal(authed.status,200);
  assert.equal(authed.calls[0].init.headers.authorization,"Bearer user.jwt");
 });
+
+test("Auth exchange and sign-out reject cross-origin browser posts before upstream",async()=>{
+ const code={authCode:"12345678-1234-1234-1234-123456789abc",codeVerifier:"A".repeat(43)};
+ const r=await run(exchange,req("/api/gac/auth/google/exchange","POST",code,{origin:"https://attacker.test"}),"true");
+ assert.equal(r.status,403);assert.equal(r.data.error,"INVALID_ORIGIN");assert.equal(r.calls.length,0);
+ const o=await run(signOut,req("/api/gac/auth/sign-out","POST",null,{
+   origin:"https://attacker.test",authorization:"Bearer fake.jwt"
+ }),"true");
+ assert.equal(o.status,403);assert.equal(o.calls.length,0);
+});
