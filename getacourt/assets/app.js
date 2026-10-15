@@ -5,7 +5,7 @@
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
     platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, googleSignInEnabled:false,onlinePayments:false },
-    session:null, profile:null, geo:null, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
+    session:null, profile:null, authEpoch:0, geo:null, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
   };
 
   const el = {
@@ -62,14 +62,49 @@
   function loadSession(){
     try{return JSON.parse(localStorage.getItem("gac.session")||"null");}catch{return null;}
   }
+  function clearPrivateViews(){
+    state.profile=null;
+    state.routines=[];
+    state.watchNotifications=[];
+    if(el.bookingsList)el.bookingsList.replaceChildren();
+    if(el.watchesList)el.watchesList.replaceChildren();
+    if(el.watchAlerts)el.watchAlerts.replaceChildren();
+    if(el.bookingsDialog?.open)el.bookingsDialog.close();
+    if(el.watchesDialog?.open)el.watchesDialog.close();
+    if(el.profileDialog?.open)el.profileDialog.close();
+    if(el.watchDialog?.open)el.watchDialog.close();
+  }
   function saveSession(data){
-    if(!data){localStorage.removeItem("gac.session");state.session=null;state.profile=null;updateAuthUI();return;}
-    state.session={
+    const previousUser=jwtPayload(state.session?.accessToken||"").sub||null;
+    if(!data){
+      state.authEpoch++;
+      localStorage.removeItem("gac.session");
+      state.session=null;
+      clearPrivateViews();
+      updateAuthUI();
+      return;
+    }
+    const nextSession={
       accessToken:data.access_token||data.accessToken,
       refreshToken:data.refresh_token||data.refreshToken,
       expiresAt:Date.now()+Number(data.expires_in||3600)*1000
     };
+    const nextUser=jwtPayload(nextSession.accessToken||"").sub||null;
+    state.authEpoch++;
+    if(previousUser && (!nextUser || previousUser!==nextUser))clearPrivateViews();
+    state.session=nextSession;
     localStorage.setItem("gac.session",JSON.stringify(state.session));
+    updateAuthUI();
+  }
+  // storage events run in OTHER tabs; clear identity-bound UI immediately
+  // when sign-out or an account switch occurred in a sibling tab.
+  function syncExternalSession(){
+    const previous=jwtPayload(state.session?.accessToken||"").sub||null;
+    const persisted=loadSession();
+    const next=jwtPayload(persisted?.accessToken||"").sub||null;
+    state.authEpoch++;
+    state.session=persisted;
+    if(!persisted || !next || previous!==next)clearPrivateViews();
     updateAuthUI();
   }
   function jwtPayload(token){
@@ -186,12 +221,16 @@
 
   async function api(path,options={},auth=false){
     const opts={...options,headers:new Headers(options.headers||{})};
+    let requestToken=null;
     if(auth){
-      const token=await accessToken();
-      if(!token) throw Object.assign(new Error("Sign in is required."),{code:"AUTH_REQUIRED"});
-      opts.headers.set("authorization","Bearer "+token);
+      requestToken=await accessToken();
+      if(!requestToken) throw Object.assign(new Error("Sign in is required."),{code:"AUTH_REQUIRED"});
+      opts.headers.set("authorization","Bearer "+requestToken);
     }
     const res=await fetch(path,opts);
+    if(auth && res.status===401 && state.session?.accessToken===requestToken){
+      saveSession(null);
+    }
     let detail={};
     if(!res.ok){
       try{detail=await res.json();}catch{}
@@ -480,6 +519,7 @@
   async function loadWatches(openDialog=true){
     const token=await accessToken();
     if(!token){if(openDialog)openAuth("Sign in to manage your Play Routines.");return;}
+    const epoch=state.authEpoch;
     try{
       let routines=(await api("/api/gac/play-routines",{},true)).items||[];
       const due=routines.filter(r=>r.status==="active"&&(!r.next_check_at||new Date(r.next_check_at)<=new Date())).slice(0,4);
@@ -487,11 +527,13 @@
         await Promise.all(due.map(r=>api("/api/gac/play-routine-evaluate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routineId:r.id})},true).catch(()=>null)));
         routines=(await api("/api/gac/play-routines",{},true)).items||[];
       }
+      const notifications=(await api("/api/gac/demand-notifications?limit=20",{},true)).items||[];
+      if(epoch!==state.authEpoch || !state.session)return;
       state.routines=routines;
-      state.watchNotifications=(await api("/api/gac/demand-notifications?limit=20",{},true)).items||[];
+      state.watchNotifications=notifications;
       renderWatches();
       if(openDialog) el.watchesDialog.showModal();
-    }catch(err){toast(err.message||"Could not load Play Routines.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not load Play Routines.");}
   }
 
   function openVenue(venueId){
@@ -590,10 +632,12 @@
   function reset(){state.selected=null;state.hold=null;el.progress.style.width="18%";setBookingStep("court");setCheckoutEnabled(true);const button=q("#confirmBookingButton");button.disabled=false;button.type="submit";button.textContent="Confirm booking";button.onclick=null;}
   async function loadBookings(){
     if(!(await requireSignedIn())) return;
+    const epoch=state.authEpoch;
     try{
       const bookings=(await api("/api/gac/bookings",{},true)).bookings||[];
+      if(epoch!==state.authEpoch || !state.session)return;
       renderBookings(bookings);el.bookingsDialog.showModal();
-    }catch(err){toast(err.message||"Could not load bookings.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not load bookings.");}
   }
   function renderBookings(bookings){
     if(!bookings.length){el.bookingsList.innerHTML='<div class="empty-state"><h3>No bookings yet</h3><p>Your GetACourt bookings will appear here.</p></div>';return;}
@@ -612,8 +656,10 @@
 
   async function loadProfile(promptIfMissing=false){
     if(!state.session?.accessToken) return null;
+    const epoch=state.authEpoch;
     try{
       const data=await api("/api/gac/player-profile",{},true);
+      if(epoch!==state.authEpoch || !state.session)return null;
       state.profile=data.profile||null;
       if(state.profile){
         el.profileName.value=state.profile.full_name||"";
@@ -626,7 +672,7 @@
       if(promptIfMissing&&!state.profile) openProfile();
       return state.profile;
     }catch(err){
-      if(err.code==="AUTH_REQUIRED"||err.status===401) saveSession(null);
+      if(epoch===state.authEpoch && (err.code==="AUTH_REQUIRED"||err.status===401))saveSession(null);
       return null;
     }
   }
@@ -753,6 +799,12 @@
   el.profileForm.addEventListener("submit",saveProfile);
   el.closeProfile.addEventListener("click",()=>el.profileDialog.close());
   el.profileSignOut.addEventListener("click",signOut);
+  window.addEventListener("storage",event=>{
+    if(event.key==="gac.session" && event.storageArea===localStorage)syncExternalSession();
+  });
+  window.addEventListener("pageshow",event=>{
+    if(event.persisted)syncExternalSession();
+  });
   el.closeVenue?.addEventListener("click",()=>el.venueDialog.close());
 
   // Installation never activates live booking, payments, messages or caching.

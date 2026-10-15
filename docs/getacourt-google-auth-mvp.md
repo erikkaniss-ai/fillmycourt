@@ -20,3 +20,7 @@ C. Get browser OAuth exchange and logout facades reject nonmatching Origin on cr
 D. Sign out UI does not claim server revocation succeeded if remote sign out failed.
 E. Regression coverage includes real refresh routine in a Node VM harness, origin denial, HTML no-referrer meta and existing PKCE tests.
 No public or staging deployment, settings change, Google provider enablement or booking changes.
+
+## Session isolation QA-03 — source-only
+Private Get player profile/booking/Play Routine views clear immediately on local sign-out and cross-tab storage sign-out. Returning to PWA from browser back/forward cache re-checks persisted session. Auth responses are guarded by session epoch before rendering any private data; protected API HTTP 401 invalidates only the matching stale client token, not a newer refreshed session. Distinct users sharing a device do not retain previous account views. Tests run in Node VM with no real player data or live provider calls.
+Google OAuth still requires Google Cloud OAuth client, enabled Supabase Google provider/redirect allowlist and site env feature flag in an isolated staging release; these are NOT changed by this source-only batch.
