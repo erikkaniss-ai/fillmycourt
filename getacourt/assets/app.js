@@ -5,7 +5,7 @@
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
     platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, googleSignInEnabled:false,onlinePayments:false },
-    session:null, profile:null, authEpoch:0, geo:null, geoRequestEpoch:0, searchMeta:{ searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
+    session:null, profile:null, authEpoch:0, geo:null, geoRequestEpoch:0, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
   };
 
   const el = {
