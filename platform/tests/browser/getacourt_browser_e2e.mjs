@@ -11,7 +11,7 @@ import {chromium} from "playwright-core";
 const root=resolve(process.cwd(),"getacourt");
 const approvedFiles=new Set([
  "index.html","manifest.webmanifest","assets/app.js","assets/auth-pkce.js",
- "assets/styles.css","assets/icon-192.png","assets/icon-512.png"
+ "assets/styles.css","assets/commercial-signals.js","assets/icon-192.png","assets/icon-512.png"
 ]);
 const forbiddenPaths=new Set([
  "/api/gac/hold","/api/gac/book","/api/gac/cancel","/api/gac/auth/magic-link",
@@ -157,6 +157,29 @@ test("real Chromium: fixture search → venue → preview; no hold/book calls",a
   assert.match(await page.locator("#bookingHeading").innerText(),/Booking preview/);
   assert.equal(await page.locator("#confirmBookingButton").isDisabled(),true);
   assert.match(await page.locator("#bookingSummary").innerText(),/no hold/i);
+ }finally{await context.close();}
+});
+test("Decision 104 shadow: browser funnel remains local and labels preview non-conversion",async()=>{
+ const {context,page}=await pageFixture({mobile:true});
+ try{
+  await page.goto(origin+"/?utm_source=hotel&utm_campaign=qa-private%40example.invalid",{waitUntil:"domcontentloaded"});
+  await page.locator(".venue-card").first().waitFor({timeout:15000});
+  await page.locator(".venue-card .slot").first().click();
+  const records=await page.evaluate(()=>window.GACSignals.snapshot());
+  assert.deepEqual(records.map(x=>x.stage),
+   ["search_requested","availability_result","slot_selected","booking_preview"]);
+  assert.equal(records[0].acquisition_source,"hotel");
+  assert.equal(records[1].source_class,"fixture_or_unknown");
+  assert.equal(records[1].venues,1);
+  assert.equal(records[1].available_slots,1);
+  assert.equal(records[2].provider,"unknown"); // no trusted provider declared by fixture
+  assert.equal(records[3].transaction_state,"preview_only");
+  assert.ok(!records.some(x=>/confirm|handoff|booking_started/.test(x.stage)));
+  const body=JSON.stringify(records);
+  for(const forbidden of ["qa-private@example.invalid","latitude","longitude","email","home_country","accessToken"]){
+   assert.equal(body.includes(forbidden),false,forbidden);
+  }
+  assert.equal(await page.evaluate(()=>localStorage.getItem("gac.commercial.events")),null);
  }finally{await context.close();}
 });
 test("real Chromium: absent external Leaflet falls back from map to list",async()=>{

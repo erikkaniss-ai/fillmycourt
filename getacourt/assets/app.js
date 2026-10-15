@@ -53,6 +53,10 @@
   function money(v,currency){return new Intl.NumberFormat("en-GB",{style:"currency",currency:currency||"EUR",maximumFractionDigits:0}).format(v);}
   function prettyDate(v){return new Intl.DateTimeFormat("en-GB",{weekday:"short",day:"numeric",month:"short"}).format(new Date(v+"T12:00:00"));}
   function validSearchDate(dateValue,minDate){return /^\d{4}-\d{2}-\d{2}$/.test(dateValue)&&dateValue>=minDate;}
+  // Shadow-only, bounded in-memory event schema. No remote submission or PII.
+  function shadowSignal(stage,detail={}){
+    try{window.GACSignals?.record(stage,{...detail,sport:state.sport,locationMode:state.geo?"near_me":"typed_area"});}catch{}
+  }
   function toast(message){el.toast.textContent=message;el.toast.classList.add("show");setTimeout(()=>el.toast.classList.remove("show"),2600);}
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(16).slice(2);}
   function weekdayIndex(dateValue){const d=new Date(dateValue+"T12:00:00");return (d.getDay()+6)%7;}
@@ -263,6 +267,7 @@
       return;
     }
     if(state.geo){p.lat=String(state.geo.lat);p.lon=String(state.geo.lon);}
+    shadowSignal("search_requested");
     if(el.dateStatus)el.dateStatus.textContent="Searching "+prettyDate(p.date)+"…";
     loading();
     try{
@@ -272,6 +277,11 @@
       state.venues=data.venues||[];
       state.searchMeta=data.search||{};
       state.hasSearched=true;
+      shadowSignal("availability_result",{
+        venueCount:state.venues.length,
+        slotCount:state.venues.reduce((n,v)=>n+(v.slots||[]).filter(s=>s.status==="available").length,0),
+        sourceClass:data.mode==="platform"?"core_reported":"fixture_or_unknown"
+      });
       if(el.radiusNote){
         const s=data.search||{};
         el.radiusNote.textContent=s.radiusUsedKm
@@ -608,13 +618,15 @@
   async function selectSlot(venueId,slotId){
     const venue=state.venues.find(v=>v.id===venueId);
     const slot=venue&&venue.slots.find(s=>s.id===slotId);
-    if(!venue||!slot) return;
+    if(!venue||!slot||slot.status!=="available") return;
+    shadowSignal("slot_selected",{venueId:venue.id,slotId:slot.id,provider:slot.provider});
     state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="18%";setBookingStep("court");
     const button=q("#confirmBookingButton");
     button.onclick=null;
     el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
     renderBookingIdentity();
     if(!state.platform.bookingEnabled){
+      shadowSignal("booking_preview",{venueId:venue.id,slotId:slot.id,provider:slot.provider});
       q("#bookingHeading").textContent="Booking preview";
       el.summary.innerHTML+="<span>Preview only · no hold, club CRM record or payment will be created.</span>";
       button.textContent="Booking disabled in staging";
@@ -765,6 +777,7 @@
     // Privacy-first: invalidate the UI and all local tokens before network
     // revocation. Never leave old account data visible while logout waits.
     saveSession(null);
+    window.GACSignals?.clear();
     let serverRevoked=true;
     try{
       if(token)await api("/api/gac/auth/sign-out",{
