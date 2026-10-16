@@ -252,14 +252,27 @@ test("real Chromium: explicit Near me consent forwards coordinates; typed city c
  try{
   await ready(page);
   const before=searchCalls.length;
+  // Wait for actual HTTP completion, not just the synchronously written
+  // geolocation input, which can race with the async fetch in CI.
+  const nearResponse=page.waitForResponse(r=>{
+   const u=new URL(r.url());
+   return u.pathname==="/api/gac/search" && u.searchParams.get("lat")==="38.697";
+  });
   await page.locator("#nearMeButton").click();
+  await nearResponse;
   await page.waitForFunction(()=>document.querySelector("#locationInput").value==="Current location");
   assert.ok(searchCalls.length>before);
   const near=searchCalls.at(-1);
   assert.equal(Number(near.lat),38.697);
   assert.equal(Number(near.lon),-9.421);
+  const manualResponse=page.waitForResponse(r=>{
+   const u=new URL(r.url());
+   return u.pathname==="/api/gac/search" &&
+      u.searchParams.get("location")==="Lisbon" && !u.searchParams.has("lat");
+  });
   await page.locator("#locationInput").fill("Lisbon");
   await page.locator("#searchForm button[type=submit]").click();
+  await manualResponse;
   await page.waitForFunction(()=>document.querySelector("#resultsTitle").textContent.includes("Lisbon"));
   const manual=searchCalls.at(-1);
   assert.equal(manual.location,"Lisbon");
