@@ -1,7 +1,13 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false };
+  // Synthetic demo is opt-in and restricted to the separate private-preview host
+  // and loopback dev. This NEVER activates on public fillmycourt.com.
+  const previewHost = /^(?:fillmycourt-preview|deploy-preview-[1-9][0-9]*--fillmycourt-preview)\.netlify\.app$/.test(location.hostname || "");
+  const loopbackHost = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+  const canExploreDemo = previewHost || loopbackHost;
+  state.demo = canExploreDemo && new URLSearchParams(location.search).get("demo") === "1";
   const el = {
     auth: q("#authGate"), workspace: q("#workspace"), org: q("#orgSelect"),
     identity: q("#identity"), signOut: q("#signOut"), date: q("#dateInput"),
@@ -10,9 +16,12 @@
     kpis: q("#kpis"), util: q("#courtUtilisation"), utilBadge: q("#utilisationBadge"),
     empty: q("#emptyCapacity"), timeline: q("#calendarTimeline"), revenueKpis: q("#revenueKpis"),
     opportunityQueue: q("#opportunityQueue"), courtComparison: q("#courtComparison"),
+    demoNotice: q("#demoNotice"), demoLink: q("#demoPreviewLink"),
   };
 
   el.date.value = new Date().toISOString().slice(0, 10);
+  if (el.demoLink) el.demoLink.hidden = !canExploreDemo;
+  if (el.demoNotice) el.demoNotice.hidden = !state.demo;
 
   function esc(value) {
     return String(value ?? "").replace(/[&<>'"]/g, (char) => ({
@@ -59,6 +68,11 @@
   }
 
   async function api(path) {
+    // Demo calls never touch a backend or persist/forward any token.
+    if (state.demo) {
+      if (!window.FillDemo?.get) throw Error("Synthetic demo dataset unavailable.");
+      return window.FillDemo.get(path);
+    }
     if (!state.token) throw Error("AUTH_REQUIRED");
     const response = await fetch(path, { headers: { Authorization: `Bearer ${state.token}` } });
     let body = {};
@@ -275,11 +289,12 @@
   }
 
   async function init() {
-    state.token = session();
-    if (!state.token) return showAuth();
+    state.token = state.demo ? null : session();
+    if (!state.demo && !state.token) return showAuth();
     try {
       const me = await api("/api/me");
-      el.identity.textContent = me.user?.email || "Signed in";
+      el.identity.textContent = state.demo ? "SYNTHETIC DEMO — no account" : (me.user?.email || "Signed in");
+      if (state.demo) el.signOut.textContent = "Exit demo";
       const organizations = await api("/api/fmc/organizations");
       state.orgs = organizations.items || [];
       el.org.innerHTML = state.orgs.map((org) => (
@@ -312,6 +327,10 @@
   el.date.addEventListener("change", load);
   el.refresh.addEventListener("click", load);
   el.signOut.addEventListener("click", () => {
+    if (state.demo) {
+      location.assign("/fill/");
+      return;
+    }
     localStorage.removeItem("fill.access");
     state.token = null;
     showAuth();

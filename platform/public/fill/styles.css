@@ -96,3 +96,14 @@
 .dispute-review-form textarea{min-height:72px;resize:vertical}
 .dispute-review-form button{justify-self:start}
 .dispute-submit-result{font-size:11px;color:var(--muted)}
+
+
+/* Visible and permanent source qualification, including mobile screens. */
+.demo-entry{display:inline-block;text-decoration:none;margin:13px 0 6px}
+.demo-entry[hidden],.demo-notice[hidden]{display:none!important}
+.demo-disclaimer{font-size:11px;max-width:460px}
+.demo-notice{display:grid;gap:4px;margin:-6px 0 20px;padding:14px 17px;
+  border:2px solid #cc8421;background:#fff0cf;border-radius:10px;color:#6e4100}
+.demo-notice strong{font-size:13px;letter-spacing:1px}
+.demo-notice span{font-size:12px}
+@media(max-width:720px){.demo-notice{margin:0 0 16px;padding:12px}}
