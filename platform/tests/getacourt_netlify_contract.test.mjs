@@ -22,12 +22,13 @@ const path = (uri, method="GET", data=undefined, auth=null) =>
     ...(data === undefined ? {} : { body: JSON.stringify(data) }),
   });
 
-async function harness(handler, fakeCore, req) {
+async function harness(handler, fakeCore, req, opts={}) {
   const previousFetch = globalThis.fetch;
   const previousNetlify = globalThis.Netlify;
   const calls = [];
   globalThis.Netlify = {env: {get: key => ({
     GETACOURT_CORE_API_BASE: CORE,
+    GETACOURT_APPROVED_VENUE_IDS: opts.approvedVenueIds ?? "venue-0,venue-1,venue-2,venue-3,venue-4,venue-5,venue-6,venue-7,ci-geovenue",
     GETACOURT_EMAIL_SIGNIN_ENABLED: "false",
     GETACOURT_SUPABASE_URL: "https://fixture.supabase.co",
     GETACOURT_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_fixture",
@@ -73,6 +74,44 @@ test("Get discovery preserves Core slot identity, price, timezone and no-store",
   assert.equal(slot.currency,"EUR");
   assert.equal(slot.price,32);
   assert.equal(slot.provider,"fillmycourt");
+});
+
+test("Unapproved Get discovery fails closed with zero Core requests", async()=>{
+  const r=await harness(searchHandler,()=>{throw Error("Core must not be queried without venue approval")},
+    path("/api/gac/search?sport=padel&location=Cascais&date=2026-10-19&from=17:00&to=21:00"),
+    {approvedVenueIds:""});
+  assert.equal(r.status,200);
+  assert.equal(r.cacheControl,"no-store");
+  assert.deepEqual(r.body.venues,[]);
+  assert.deepEqual(r.body.search.attemptedRadii,[]);
+  assert.equal(r.calls.length,0);
+});
+
+test("Allowlisting cannot expose the known live staging test fixture as a real club", async()=>{
+  const stagingId="d6dbceca-3cca-4053-bcb7-5491a9225cb0";
+  for(const variant of [
+    {...SLOT,venue_id:stagingId,venue_name:"Not a test name",address:{city:"Cascais"}},
+    {...SLOT,venue_id:"venue-1",venue_name:"GetACourt Cascais Test Venue",address:{city:"Cascais"}},
+    {...SLOT,venue_id:"venue-1",venue_name:"Some name",address:{city:"Cascais",label:"Cascais staging inventory"}}
+  ]){
+    const r=await harness(searchHandler,()=>({body:{slots:[variant]}}),
+      path("/api/gac/search?sport=padel&location=Cascais&date=2026-10-19&from=17:00&to=21:00"),
+      {approvedVenueIds:"venue-1,"+stagingId});
+    assert.equal(r.status,200);
+    assert.deepEqual(r.body.venues,[]);
+    assert.equal(r.calls.length,2);
+  }
+});
+
+test("Approval is venue-specific and does not license an adjacent venue", async()=>{
+  const r=await harness(searchHandler,()=>({body:{slots:[
+    SLOT,{...SLOT,venue_id:"venue-unauthorized",venue_name:"Non-approved",id:"non-approved-court"}
+  ]}}),
+    path("/api/gac/search?sport=padel&location=Cascais&date=2026-10-19&from=17:00&to=21:00"),
+    {approvedVenueIds:"venue-1"});
+  assert.equal(r.status,200);
+  assert.deepEqual(r.body.venues.map(x=>x.id),["venue-1"]);
+  assert.equal(r.body.venues[0].slots[0].provider,"fillmycourt");
 });
 
 test("Get geosearch expands radius adaptively and stops once enough slots", async () => {

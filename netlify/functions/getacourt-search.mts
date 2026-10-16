@@ -21,11 +21,29 @@ async function fetchInventory({ sport, location, date, from, to, lat, lon, radiu
   }));
 }
 
-function normalize(payloads) {
+// Approved venue IDs are a public-catalog release gate, NOT booking authorization.
+// An absent or invalid allowlist fails closed: no fixture or unapproved real
+// club may appear as verified availability in GetACourt.
+const CASCAIS_STAGING_FIXTURE_ID = "d6dbceca-3cca-4053-bcb7-5491a9225cb0";
+function approvedVenueIds() {
+  const raw = String(globalThis.Netlify?.env?.get("GETACOURT_APPROVED_VENUE_IDS") || "");
+  return new Set(raw.split(",").map(s => s.trim().toLowerCase())
+    .filter(s => /^[a-z0-9-]{1,80}$/.test(s)).slice(0, 200));
+}
+function isKnownStagingFixture(slot) {
+  const address = slot.address;
+  return String(slot.venue_id || "").toLowerCase() === CASCAIS_STAGING_FIXTURE_ID ||
+    slot.venue_name === "GetACourt Cascais Test Venue" ||
+    (address && typeof address === "object" && address.label === "Cascais staging inventory");
+}
+
+function normalize(payloads, approved) {
   const byVenue = new Map();
   const seen = new Set();
   for (const payload of payloads) {
     for (const slot of payload.slots || []) {
+      if (!approved.has(String(slot.venue_id || "").toLowerCase()) ||
+          isKnownStagingFixture(slot)) continue;
       const key = [slot.id, slot.starts_at, slot.duration_minutes].join("|");
       if (seen.has(key)) continue;
       seen.add(key);
@@ -114,6 +132,15 @@ export default async (req) => {
   }
 
   try {
+    const approved = approvedVenueIds();
+    // No vetted venue => no Core query, no inferred live inventory and no
+    // discovery fallback to staging fixtures.
+    if (!approved.size) return response({
+      mode: "platform",
+      query: { sport, location, date, from, to, lat: hasCoords ? lat : null, lon: hasCoords ? lon : null },
+      search: { radiusUsedKm: null, attemptedRadii: [], expanded: false },
+      venues: []
+    });
     let venues = [];
     let radiusUsedKm = null;
     const attemptedRadii = [];
@@ -121,13 +148,13 @@ export default async (req) => {
       const radii = [5, 10, 25, 50];
       for (const radiusKm of radii) {
         attemptedRadii.push(radiusKm);
-        venues = normalize(await fetchInventory({ sport,location,date,from,to,lat,lon,radiusKm }));
+        venues = normalize(await fetchInventory({ sport,location,date,from,to,lat,lon,radiusKm }), approved);
         const availableSlots = venues.reduce((n,v) => n + (v.slots || []).length, 0);
         radiusUsedKm = radiusKm;
         if (venues.length >= 3 || availableSlots >= 8) break;
       }
     } else {
-      venues = normalize(await fetchInventory({ sport,location,date,from,to,lat:null,lon:null,radiusKm:25 }));
+      venues = normalize(await fetchInventory({ sport,location,date,from,to,lat:null,lon:null,radiusKm:25 }), approved);
     }
 
     return response({
