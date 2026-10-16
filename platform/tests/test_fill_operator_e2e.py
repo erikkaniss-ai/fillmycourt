@@ -6,6 +6,7 @@ Today, recovery capacity and Calendar without a partner connection or write.
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +31,8 @@ def _json(route, value):
 
 
 def test_fill_operator_readonly_browser_flow(tmp_path):
+    screenshot_dir = Path(os.environ.get("FILL_QA_ARTIFACT_DIR") or tmp_path)
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
     today = {
         "date": "2026-10-16", "day_start": "2026-10-16T00:00:00+01:00",
         "day_end": "2026-10-17T00:00:00+01:00", "timezone": "Europe/Lisbon",
@@ -106,16 +109,22 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
             expect(page.get_by_text("Staging · read-only.")).to_be_visible()
             expect(page.get_by_text("Needs rate coverage")).to_be_visible()
             expect(page.get_by_text("Fixture Court — not a partner").first).to_be_visible()
+            page.screenshot(path=str(screenshot_dir / "01-today-FIXTURE-ONLY.png"), full_page=True)
 
             page.get_by_role("button", name="Revenue & Capacity").click()
             expect(page.get_by_role("heading", name="Recovery candidates")).to_be_visible()
             expect(page.get_by_text("Capacity candidate only")).to_be_visible()
             expect(page.get_by_text("not a forecast")).to_be_visible()
+            page.screenshot(path=str(screenshot_dir / "02-revenue-capacity-FIXTURE-ONLY.png"), full_page=True)
 
             page.get_by_role("button", name="Calendar").click()
             expect(page.locator(".lane-cell.booked").first).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
-            page.screenshot(path=str(tmp_path / "fill-operator-fixture.png"), full_page=True)
+            page.screenshot(path=str(screenshot_dir / "03-calendar-FIXTURE-ONLY.png"), full_page=True)
+            page.set_viewport_size({"width": 390, "height": 844})
+            expect(page.locator(".lane-cell.booked").first).to_be_visible()
+            assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+            page.screenshot(path=str(screenshot_dir / "04-calendar-mobile-FIXTURE-ONLY.png"), full_page=True)
             browser.close()
     finally:
         server.shutdown()
