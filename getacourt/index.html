@@ -2,12 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <!-- OAuth callback must not leak the short-lived code through asset referrers. -->
+  <meta name="referrer" content="no-referrer" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0d1726" />
   <meta name="description" content="GetACourt helps racket-sport players find available courts across clubs and booking systems, then book in a few taps." />
   <title>GetACourt — Find a court. Play now.</title>
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="apple-touch-icon" href="assets/icon-192.png" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body data-mode="preview">
@@ -39,6 +42,10 @@
           <span><b>Live slots</b> when connected</span>
           <span><b>Fast checkout</b> in one flow</span>
         </div>
+        <div class="install-card" id="installCard">
+          <div><strong>GetACourt on your phone</strong><small id="installStatus" aria-live="polite">Install to your home screen. Court availability requires internet.</small></div>
+          <button class="install-button" id="installAppButton" type="button">Install app</button>
+        </div>
       </div>
 
       <form class="search-panel" id="searchForm">
@@ -61,7 +68,8 @@
           </label>
           <label class="field">
             <span>Date</span>
-            <input id="dateInput" name="date" type="date" />
+            <input id="dateInput" name="date" type="date" required />
+            <small id="dateStatus" class="radius-note" aria-live="polite">Choose another date to refresh availability.</small>
           </label>
           <label class="field">
             <span>From</span>
@@ -281,9 +289,13 @@
       <button class="dialog-close" id="closeAuthButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER ACCOUNT</p>
       <h2>Sign in to GetACourt</h2>
-      <p class="payment-note" id="authStatus">Email sign-in is available only when staging mail delivery is explicitly enabled.</p>
-      <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
-      <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
+      <p class="payment-note" id="authStatus" role="status">Choose a secure sign-in method.</p>
+      <button class="confirm-button" id="googleSignInButton" type="button" hidden>Continue with Google</button>
+      <div id="emailSignInFields">
+        <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
+        <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
+      </div>
+      <p class="payment-note">Your GetACourt account is separate from your Playtomic and other provider accounts.</p>
     </form>
   </dialog>
 
@@ -317,7 +329,9 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous" defer></script>
+  <script src="assets/auth-pkce.js" defer></script>
+  <script src="assets/commercial-signals.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>
