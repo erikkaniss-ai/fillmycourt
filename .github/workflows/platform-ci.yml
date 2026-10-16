@@ -69,6 +69,8 @@ jobs:
           done
       - name: Install Chromium for Fill visual acceptance
         run: python -m playwright install --with-deps chromium
+      - name: Build self-contained OFFLINE Fill demo (synthetic only)
+        run: python platform/scripts/build_fill_synthetic_demo.py --output platform/qa-artifacts/FillMyCourt-OFFLINE-SYNTHETIC-DEMO.html
       - name: Test
         env:
           FILL_QA_ARTIFACT_DIR: platform/qa-artifacts
@@ -78,6 +80,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fill-operator-mvp-fixture-only
-          path: platform/qa-artifacts/*-FIXTURE-ONLY.png
+          path: |
+            platform/qa-artifacts/*-FIXTURE-ONLY.png
+            platform/qa-artifacts/FillMyCourt-OFFLINE-SYNTHETIC-DEMO.html
           if-no-files-found: warn
           retention-days: 7
