@@ -1,19 +1,11 @@
-# GAC-MVP-GEO-01 — Actual near-me radius on existing Core API
+# GetACourt GEO-01 — verified runtime correction (16 October 2026)
 
-Date: 2026-10-16 (source/CI only). Decisions #1-#104 and Get discovery UX unchanged.
+**SUPERSEDES the earlier inference in this same document, not the accepted Product Decisions.**
 
-## Defect
-Get Netlify search forwards lat/lon/radius_km to Core /api/availability. Previously the Core endpoint ignored all three optional query parameters, and the search `location=Current location` was wrongly treated as a city filter. GPS searches could be empty, the 5/10/25/50 km expansion was synthetic, and Core omitted geo coordinates/distance from slot responses. Prior browser QA used local synthetic venue coordinates, so it did not prove real Core behavior.
+Independent readback of the actual Railway staging service and its source invalidated the earlier assertion that the deployed Core had no GPS support. The Get RC branch was based on an older, divergent Core module. Railway `fmc-core-api` actually deploys commit `0134f603445ea7f282ef0cb866d0f3591518cbb9` from `core/hotfix-booking-confirm-staging`, not the Get RC branch. That Core already supports optional `lat`, `lon` and `radius_km` (via `Query`), real PostgreSQL Haversine geo filtering in V1Store, canonical venue_lat/venue_lon/distance_km, and a native-only booking authority gate.
 
-## Minimal bounded fix
-- Add optional lat/lon/radius_km to the EXISTING read-only Core GET /api/availability, maintaining backwards compatible location-text behavior.
-- Validate all-or-none GPS coordinates with finite real ranges and positive radius <=50 km; return 422 instead of an unbounded fallback.
-- Venue coordinates are ALREADY in `venues.address` JSONB under lat/lon (verified staging fixture); no schema or migration is required. Invalid/missing venue GPS is excluded from GPS results without casting it in SQL.
-- GPS search does not apply the old free-text `location=Current location` filter. It calculates Haversine kilometers and strictly filters at each requested radius; adds venue_lat/venue_lon and distance_km to source-derived native slots.
-- Existing native-only SQL filters (inventory_mode='native' and native_write_enabled) and all hold/confirm/booking authorities remain exactly as before. No non-native provider data, provider API rights, new country, CRM, PII persistence, SMS, payments or external calls.
-- Existing 60/90-minute Get search, distance sorting and map can now consume the same canonical coordinates. No duplicate writer.
+Read-only live staging verification: GET `/api/health` returned `ok:true`, service `core`, version `0.5.0`, contract `supabase-v1`. GET `/api/availability` for the existing synthetic Cascais staging fixture with `lat=38.6979`, `lon=-9.4215`, `radius_km=5`, `location=Current location`, and a future date returned the `GetACourt Cascais Test Venue` fixture including `distance_km:0.0`. The provider source was not contacted, and no write occurred. This establishes real server geo operation for the staging fixture, NOT a public real-club booking.
 
-## Test and rollout
-New PostgreSQL16 migrations-from-zero DB-backed API test seeds three synthetic source venues: near, far and missing GPS. Verifies radius 5 km returns only near, 50 km returns near+far, `Current location` text is ignored only when GPS is explicit, missing/invalid coords are fail-closed, typed Lisbon legacy search and published coordinate fields still work. All fixtures are LOCAL CI DB, not Supabase staging or public sites.
+The prior source-only GEO-01 implementation on Get RC was redundant and had diverged from the actual deployed Core implementation. It has been reverted on the Get RC branch to the previously accepted baseline and its redundant standalone PG fixture tests removed; retained the archived CI #256 historical result and this transparent correction. No Core staging deployment/cherry-pick/branch promotion is needed for GPS. A fresh Get Netlify/Core contract test instead verifies that exact location/radius parameters and canonical coordinates are correctly passed through.
 
-IMPORTANT: source acceptance on Get RC does NOT deploy the Core route to Railway. Actual integration will remain blocked until an authorized coordinated staging Core deploy with release gate, then a non-public E2E. At scale, SQL/PostGIS geo indexes may be required; do not silently add migrations or unbounded provider ingestion. Public getacourt.com and provider connections remain untouched.
+Remaining P0 gates: Get RC still not published/privately deployed; Netlify publicly hosts `getacourt.com` so protecting the whole site is unacceptable. Need non-production-only access control and protected branch preview, real device GPS/Google OAuth, authorized club catalog and one authoritative booking pilot; any public release, provider writes, production changes, paid resources and architecture changes remain owner-gated. No real club/provider rights were granted by the live test.

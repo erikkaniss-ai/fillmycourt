@@ -93,6 +93,33 @@ test("Get geosearch expands radius adaptively and stops once enough slots", asyn
   assert.ok(r.body.venues.length>=3);
 });
 
+test("Existing Railway Core geo contract: Get forwards GPS and reads geo fields without changing booking authority", async () => {
+  const observed=[];
+  const r=await harness(searchHandler,(url) => {
+    observed.push({
+      location:url.searchParams.get("location"),
+      lat:url.searchParams.get("lat"),lon:url.searchParams.get("lon"),
+      radius:url.searchParams.get("radius_km"),
+    });
+    return {body:{slots:Array.from({length:8},(_,i)=>({
+      ...SLOT,id:"ci-geocourt-"+i,venue_id:"ci-geovenue",
+      venue_lat:38.6979,venue_lon:-9.4215,distance_km:0
+    }))}};
+  },path("/api/gac/search?sport=padel&location=Current%20location&date=2026-10-19&from=17:00&to=21:00&lat=38.6979&lon=-9.4215"));
+  assert.equal(r.status,200);
+  assert.equal(r.calls.length,2);
+  assert.deepEqual(observed,[
+    {location:"Current location",lat:"38.6979",lon:"-9.4215",radius:"5"},
+    {location:"Current location",lat:"38.6979",lon:"-9.4215",radius:"5"}
+  ]);
+  assert.equal(r.body.search.radiusUsedKm,5);
+  assert.equal(r.body.venues.length,1);
+  assert.equal(r.body.venues[0].lat,38.6979);
+  assert.equal(r.body.venues[0].lon,-9.4215);
+  assert.equal(r.body.venues[0].distanceKm,0);
+  assert.ok(r.body.venues[0].slots.every(s=>s.provider==="fillmycourt"));
+});
+
 test("Get coordinates reject partial/blank/nonfinite/out-of-range without contacting Core", async () => {
   const invalid=[
     "?lat=&lon=","?lat=38.7","?lon=-9.42","?lat=38.7&lon=",
