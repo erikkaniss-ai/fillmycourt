@@ -93,3 +93,9 @@ jobs:
           done
       - name: Test
         run: pytest -q platform/tests
+      - name: QA-PREVIEW-02 anonymous Netlify perimeter (no auth, GET-only)
+        if: github.event_name == 'pull_request' && github.base_ref == 'getacourt-staging'
+        env:
+          GAC_PREVIEW_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node platform/tests/getacourt_preview_perimeter_smoke.mjs
+
