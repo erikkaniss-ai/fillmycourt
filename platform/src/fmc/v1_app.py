@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import hashlib
 import io
 import json
+import math
 import re
 import uuid
 from zoneinfo import ZoneInfo
@@ -142,6 +143,29 @@ class HoldIn(BaseModel):
 class ConfirmIn(BaseModel):
     participants: int = Field(default=1, ge=1, le=20)
     accept_policy: bool = False
+
+
+def _venue_coordinates(address):
+    """Read the existing venue-address geo fields; fail closed on malformed coordinates."""
+    if not isinstance(address, dict):
+        return None
+    a, b = address.get("lat"), address.get("lon")
+    if type(a) not in (int, float, str) or type(b) not in (int, float, str):
+        return None
+    try:
+        lat, lon = float(a), float(b)
+    except (ValueError, OverflowError):
+        return None
+    if not all(map(math.isfinite, (lat, lon))) or abs(lat) > 90 or abs(lon) > 180:
+        return None
+    return lat, lon
+
+
+def _distance_km(lat1, lon1, lat2, lon2):
+    """Haversine distance, keeping near-me ranking independent of SQL/provider writers."""
+    a1, a2 = math.radians(lat1), math.radians(lat2)
+    h = math.sin((a2 - a1) / 2) ** 2 + math.cos(a1) * math.cos(a2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 12742.0176 * math.asin(min(1.0, math.sqrt(max(0.0, h))))
 
 
 def create_v1_app(settings, service: str = "all"):
@@ -858,7 +882,8 @@ def create_v1_app(settings, service: str = "all"):
     if service in ("core", "all"):
         @app.get("/api/availability")
         def availability(date: str, time: str, sport: str = "padel", duration: int = 90,
-                         end_time: str = "23:00", location: str = "", indoor: str = "all"):
+                         end_time: str = "23:00", location: str = "", indoor: str = "all",
+                         lat: float | None = None, lon: float | None = None, radius_km: float = 25.0):
             if sport not in SPORTS:
                 raise DomainError("SPORT", "Unsupported sport.", 422)
             if duration not in (30, 60, 90, 120, 150, 180, 240):
@@ -869,6 +894,12 @@ def create_v1_app(settings, service: str = "all"):
                 eh, em = map(int, end_time.split(":"))
             except Exception:
                 raise DomainError("DATE_TIME", "Use YYYY-MM-DD and HH:MM.", 422)
+            # Read-only radius contract. GPS is a search location, never a club/CRM identity.
+            geo = lat is not None or lon is not None
+            if geo and (lat is None or lon is None or not all(map(math.isfinite, (lat, lon)))
+                        or abs(lat) > 90 or abs(lon) > 180
+                        or not math.isfinite(radius_km) or not 0 < radius_km <= 50):
+                raise DomainError("LOCATION_COORDS", "Valid latitude, longitude and radius are required.", 422)
             candidates = []
             with db.trusted() as c:
                 courts = rows(c.execute(text("""
@@ -877,12 +908,21 @@ def create_v1_app(settings, service: str = "all"):
                     from public.courts c join public.venues v on v.id=c.venue_id
                     where c.active and v.active and c.sport=:sport
                       and c.inventory_mode='native' and c.native_write_enabled
-                      and (:location='' or lower(v.name) like :loc or lower(v.address::text) like :loc)
+                      and (:geo or :location='' or lower(v.name) like :loc or lower(v.address::text) like :loc)
                       and (:indoor='all' or (:indoor='true' and c.indoor is true) or (:indoor='false' and c.indoor is false))
                     order by v.name,c.name
                 """), {"sport": sport, "location": location.strip().lower(), "loc": f"%{location.strip().lower()}%",
-                       "indoor": indoor.lower()}))
+                       "indoor": indoor.lower(), "geo": geo}))
                 for court in courts:
+                    coords = _venue_coordinates(court["address"])
+                    if geo and not coords:
+                        continue
+                    distance = _distance_km(lat, lon, *coords) if geo else None
+                    if geo and distance > radius_km:
+                        continue
+                    venue_geo = {"venue_lat": coords[0], "venue_lon": coords[1]} if coords else {}
+                    if geo:
+                        venue_geo["distance_km"] = round(distance, 3)
                     tz = ZoneInfo(court["timezone"])
                     cursor = datetime(day.year, day.month, day.day, sh, sm, tzinfo=tz)
                     stop = datetime(day.year, day.month, day.day, eh, em, tzinfo=tz)
@@ -894,7 +934,7 @@ def create_v1_app(settings, service: str = "all"):
                             cursor += timedelta(minutes=30)
                             continue
                         if not db.active_conflict(c, court["id"], cursor, end):
-                            candidates.append({**court, "starts_at": cursor.isoformat(), "ends_at": end.isoformat(), **quote})
+                            candidates.append({**court, **venue_geo, "starts_at": cursor.isoformat(), "ends_at": end.isoformat(), **quote})
                         cursor += timedelta(minutes=30)
             return {"slots": candidates[:200], "count": min(len(candidates), 200)}
 
