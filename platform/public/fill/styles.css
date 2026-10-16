@@ -45,6 +45,7 @@
 .opportunity-quotes{margin-top:2px}
 @media(max-width:720px){.comparison-panel{margin-top:12px}}
 .validation-note{margin:-4px 0 16px;max-width:860px}
+.read-only-notice{margin:0 0 18px;padding:12px 14px;border:1px solid #b9d4f2;border-radius:11px;background:#f3f8ff;color:#315572;font-size:12px;max-width:980px}
 .coverage-gap{color:#9a5a00;font-size:11px;font-weight:700}
 .kpi-grid{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
 

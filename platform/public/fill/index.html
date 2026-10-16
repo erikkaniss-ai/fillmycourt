@@ -41,6 +41,7 @@
         <button id="refreshButton" class="button primary">Refresh</button>
       </div>
       <div id="error" class="error" hidden></div>
+      <p class="read-only-notice"><strong>Staging · read-only.</strong> This workspace shows the existing Core snapshot only. Until a club or provider source is explicitly authorised, displayed inventory is fixture-safe test data — not partner availability, a booking confirmation, or recoverable revenue.</p>
 
       <section id="todayView">
         <div id="kpis" class="kpi-grid"></div>
@@ -65,27 +66,19 @@
 
       <section id="revenueView" hidden>
         <div id="revenueKpis" class="kpi-grid"></div>
-        <p class="muted validation-note">Rate coverage is checked for the selected date. Active courts without a matching active rate remain visible below as <strong>No rate coverage</strong>; this workspace does not write rates, bookings, payments, or prices.</p>
+        <p class="muted validation-note">Rate coverage is checked for the selected date. Active courts without a matching active rate remain visible below as <strong>No rate coverage</strong>. A rate quote is a configured price for an open slot, not a demand forecast, a discounted offer, or realised recovery.</p>
         <section class="panel">
           <div class="panel-head">
-            <div><p class="eyebrow">EMPTY CAPACITY CONTROL ROOM</p><h2>Opportunity queue</h2></div>
-            <span class="badge">Recommendation only · no execution writes</span>
+            <div><p class="eyebrow">EMPTY CAPACITY CONTROL ROOM</p><h2>Recovery candidates</h2></div>
+            <span class="badge">Core snapshot · no execution writes</span>
           </div>
-          <p class="muted control-room-note">Opportunities are ranked by expected incremental contribution using demand fit, freshness, organic baseline, urgency and slot value. GetACourt demand is aggregated; player identity is never exposed to the club. No pricing, messaging, booking or provider writes are executed here.</p>
+          <p class="muted control-room-note">Candidates are the current sellable windows returned by Core, ordered by available duration. They do not use demand, CRM, provider, payment, or booking-write signals; no action is prepared or sent from this screen.</p>
           <div id="opportunityQueue" class="opportunity-queue"></div>
         </section>
         <section class="panel comparison-panel">
           <div class="panel-head">
-            <div><p class="eyebrow">FINANCIAL OPERATIONS · SHADOW</p><h2>Reconciliation & Disputes</h2></div>
-            <span class="badge">Shadow review · no billing</span>
-          </div>
-          <p id="financeSummary" class="muted" role="status">Finance ledger not loaded.</p>
-          <div id="disputesQueue" class="dispute-queue" aria-live="polite"></div>
-        </section>
-        <section class="panel comparison-panel">
-          <div class="panel-head">
             <div><p class="eyebrow">COURT ECONOMICS</p><h2>Daily comparison</h2></div>
-            <span class="badge">Rate coverage + realised revenue</span>
+            <span class="badge">Rate coverage + Core totals</span>
           </div>
           <div id="courtComparison" class="court-comparison"></div>
         </section>
