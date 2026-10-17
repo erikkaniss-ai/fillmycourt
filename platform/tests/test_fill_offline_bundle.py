@@ -28,6 +28,9 @@ def test_offline_fill_synthetic_html_all_views(tmp_path):
         page.get_by_role("button",name="Calendar").click()
         expect(page.locator(".lane-cell.booked").first).to_be_visible()
         expect(page.locator(".lane-cell.blocked").first).to_be_visible()
+        uncovered = page.locator(".court-lane").filter(has_text="DEMO Court C — needs price")
+        expect(uncovered.locator(".lane-cell.booked").first).to_be_visible()
+        assert page.locator(".court-lane").filter(has_text="DEMO Indoor Court A").locator(".lane-cell.booked").count() == 6
         assert page.evaluate("localStorage.getItem('fill.access') === null")
         assert network == []
         browser.close()

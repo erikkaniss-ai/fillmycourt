@@ -17,7 +17,7 @@
     if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day+"T12:00:00Z")))throw Error("Invalid demo date");
     return {date:day,day_start:stamp(day,"00:00"),day_end:stamp(next(day),"00:00"),timezone:"Europe/Lisbon",currency:"EUR",
       summary:{capacity_minutes:1080,booked_minutes:300,held_minutes:60,blocked_minutes:60,
-        empty_minutes:660,utilization_pct:27.8,bookings:2,cancellations:1,revenue_minor:9000,
+        empty_minutes:660,utilization_pct:27.8,bookings:3,cancellations:1,revenue_minor:9000,
         active_courts:3,courts_with_rate_coverage:2,courts_without_rate_coverage:1,
         bookable_60_starts:12,bookable_90_starts:8,highest_single_quote_minor:4800,
         highest_single_quote_duration_minutes:90},
@@ -51,7 +51,11 @@
     return {
       bookings:[
         {court_id:A,starts_at:stamp(day,"09:30"),ends_at:stamp(day,"12:30"),status:"confirmed",source:"SYNTHETIC DEMO"},
-        {court_id:B,starts_at:stamp(day,"10:00"),ends_at:stamp(day,"12:00"),status:"confirmed",source:"SYNTHETIC DEMO"}],
+        {court_id:B,starts_at:stamp(day,"10:00"),ends_at:stamp(day,"12:00"),status:"confirmed",source:"SYNTHETIC DEMO"},
+        // Occupied despite no rate: Core Calendar is not limited to sellable rates.
+        {court_id:C,starts_at:stamp(day,"07:00"),ends_at:stamp(day,"08:30"),status:"confirmed",source:"SYNTHETIC DEMO"},
+        // Historical cancellation: never occupy the current capacity grid.
+        {court_id:A,starts_at:stamp(day,"14:00"),ends_at:stamp(day,"14:30"),status:"cancelled",source:"SYNTHETIC DEMO"}],
       holds:[{court_id:A,starts_at:stamp(day,"12:30"),ends_at:stamp(day,"13:30")}],
       blocks:[{court_id:B,starts_at:stamp(day,"16:00"),ends_at:stamp(day,"17:00"),reason:"SYNTHETIC DEMO block"}]
     };

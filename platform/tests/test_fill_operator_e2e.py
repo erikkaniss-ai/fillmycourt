@@ -99,7 +99,11 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
                 elif path == "/api/fmc/org-fixture/today":
                     _json(route, today)
                 elif path == "/api/fmc/org-fixture/calendar":
-                    _json(route, {"bookings": [{"court_id": "court-fixture", "status": "confirmed", "starts_at": "2026-10-16T09:00:00+01:00", "ends_at": "2026-10-16T12:00:00+01:00", "source": "fixture"}], "holds": [], "blocks": []})
+                    _json(route, {"bookings": [
+                        {"court_id": "court-fixture", "status": "confirmed", "starts_at": "2026-10-16T09:00:00+01:00", "ends_at": "2026-10-16T12:00:00+01:00", "source": "fixture"},
+                        {"court_id": "court-unpriced", "status": "confirmed", "starts_at": "2026-10-15T23:30:00+01:00", "ends_at": "2026-10-16T08:30:00+01:00", "source": "fixture"},
+                        {"court_id": "court-fixture", "status": "cancelled", "starts_at": "2026-10-16T13:00:00+01:00", "ends_at": "2026-10-16T14:00:00+01:00", "source": "fixture"}
+                    ], "holds": [], "blocks": []})
                 else:
                     route.fulfill(status=404, content_type="application/json", body="{}")
 
@@ -119,6 +123,11 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
 
             page.get_by_role("button", name="Calendar").click()
             expect(page.locator(".lane-cell.booked").first).to_be_visible()
+            unpriced = page.locator(".court-lane").filter(has_text="Unpriced Court — fixture")
+            expect(unpriced.locator(".lane-cell.booked").first).to_be_visible()
+            expect(unpriced.locator("em")).to_have_text("No rate")
+            assert unpriced.locator(".lane-cell.booked").count() == 17  # prior-day event clipped to midnight
+            assert page.locator(".court-lane").filter(has_text="Fixture Court — not a partner").locator(".lane-cell.booked").count() == 6
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             page.screenshot(path=str(screenshot_dir / "03-calendar-FIXTURE-ONLY.png"), full_page=True)
             page.set_viewport_size({"width": 390, "height": 844})

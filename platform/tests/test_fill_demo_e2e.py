@@ -52,6 +52,17 @@ def test_demo_synthetic_today_revenue_calendar_mobile_no_network(tmp_path):
             expect(page.locator(".lane-cell.booked").first).to_be_visible()
             expect(page.locator(".lane-cell.held").first).to_be_visible()
             expect(page.locator(".lane-cell.blocked").first).to_be_visible()
+            # Authoritative Core Calendar can include a confirmed booking on an
+            # unpriced court: it MUST be visible instead of silently dropped.
+            uncovered = page.locator(".court-lane").filter(has_text="DEMO Court C — needs price")
+            expect(uncovered).to_be_visible()
+            expect(uncovered.locator(".lane-cell.booked").first).to_be_visible()
+            expect(uncovered.locator("em")).to_have_text("No rate")
+            # The fake cancelled booking on Court A at 14:00 must never
+            # contribute another booked half-hour cell.
+            indoor = page.locator(".court-lane").filter(has_text="DEMO Indoor Court A")
+            assert indoor.locator(".lane-cell.booked").count() == 6
+            expect(page.get_by_text("Cancelled or failed bookings do not occupy capacity", exact=False)).to_be_visible()
             page.screenshot(path=str(folder/"07-synthetic-demo-calendar-FIXTURE-ONLY.png"),full_page=True)
 
             page.locator("#dateInput").fill("2026-11-10")

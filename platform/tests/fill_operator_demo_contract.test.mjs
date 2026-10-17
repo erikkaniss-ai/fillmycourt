@@ -20,7 +20,9 @@ test("synthetic demo has three courts, clear revenue disclaimer, and zero networ
  assert.equal(d.summary.revenue_minor,9000);
  assert.equal(d.empty_windows.length,2);
  const calendar=get("/api/fmc/"+org+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00");
- assert.equal(calendar.bookings.length,2);
+ assert.equal(calendar.bookings.length,4);
+ assert.equal(calendar.bookings.filter(b=>b.status==="cancelled").length,1);
+ assert.ok(calendar.bookings.some(b=>b.court_id===d.courts[2].court_id && b.status==="confirmed"));
  assert.equal(calendar.holds.length,1);
  assert.equal(calendar.blocks.length,1);
  assert.throws(()=>get("/api/holds"));

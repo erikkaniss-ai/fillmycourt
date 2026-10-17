@@ -235,44 +235,86 @@
   }
 
   function renderCalendar() {
-    const rows = [
-      ...(state.calendar?.bookings || []).map((row) => ({ ...row, kind: "booking" })),
-      ...(state.calendar?.holds || []).map((row) => ({ ...row, status: "held", kind: "hold" })),
-      ...(state.calendar?.blocks || []).map((row) => ({ ...row, status: "blocked", kind: "block" })),
-    ].sort((left, right) => new Date(left.starts_at) - new Date(right.starts_at));
-    const configured = (state.today?.courts || []).filter(hasRateCoverage);
-    if (!configured.length) {
-      el.timeline.innerHTML = '<p class="muted">No sellable court hours configured for this day.</p>';
+    // Core Today.sellable_windows describe tariff-covered hours, not the
+    // complete timeline. Bookings, holds and blocks can also exist on courts
+    // with missing rates or outside the configured selling window.
+    const today = state.today || {};
+    const dayStart = Date.parse(today.day_start);
+    const dayEnd = Date.parse(today.day_end);
+    const timezone = today.timezone || "Europe/Lisbon";
+    if (!Number.isFinite(dayStart) || !Number.isFinite(dayEnd) || dayEnd <= dayStart) {
+      el.timeline.innerHTML = '<p class="muted">Authoritative day bounds are unavailable.</p>';
       return;
     }
-    const start = Math.min(...configured.map((court) => Number(court.open_start_minute)).filter(Number.isFinite));
-    const end = Math.max(...configured.map((court) => Number(court.open_end_minute)).filter(Number.isFinite));
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-      el.timeline.innerHTML = '<p class="muted">No sellable court hours configured for this day.</p>';
+    const events = [
+      ...(state.calendar?.blocks || []).map((row) => ({ ...row, kind: "block", status: "blocked" })),
+      ...(state.calendar?.bookings || [])
+        // Cancelled/failed records are history, never active occupancy.
+        .filter((row) => ["confirmed", "pending_payment"].includes(row.status))
+        .map((row) => ({ ...row, kind: "booking" })),
+      ...(state.calendar?.holds || []).map((row) => ({ ...row, kind: "hold", status: "held" })),
+    ].map((row) => {
+      const rawStart = Date.parse(row.starts_at);
+      const rawEnd = Date.parse(row.ends_at);
+      if (!Number.isFinite(rawStart) || !Number.isFinite(rawEnd)) return null;
+      const clippedStart = Math.max(rawStart, dayStart);
+      const clippedEnd = Math.min(rawEnd, dayEnd);
+      if (clippedEnd <= clippedStart) return null;
+      const startMin = clippedStart === dayStart ? 0
+        : minuteInZone(new Date(clippedStart).toISOString(), timezone);
+      const endMin = clippedEnd === dayEnd ? 1440
+        : minuteInZone(new Date(clippedEnd).toISOString(), timezone);
+      return { ...row, startMin, endMin };
+    }).filter((row) => row && row.endMin > row.startMin);
+
+    // Include every active court, even when rate coverage is absent. Otherwise
+    // existing off-rate or manual bookings silently disappear from Calendar.
+    const courts = today.courts || [];
+    if (!courts.length) {
+      el.timeline.innerHTML = '<p class="muted">No active courts returned for this day.</p>';
+      return;
+    }
+    const windows = courts.flatMap((court) => (court.sellable_windows || [])
+      .flatMap((window) => [Number(window.start_minute), Number(window.end_minute)]));
+    const bounds = [...windows, ...events.flatMap((row) => [row.startMin, row.endMin])]
+      .filter((value) => Number.isFinite(value) && value >= 0 && value <= 1440);
+    if (!bounds.length) {
+      el.timeline.innerHTML = '<p class="muted">No rate-covered hours or booking events for this day.</p>';
+      return;
+    }
+    const start = Math.max(0, Math.floor(Math.min(...bounds) / 30) * 30);
+    const end = Math.min(1440, Math.ceil(Math.max(...bounds) / 30) * 30);
+    if (end <= start) {
+      el.timeline.innerHTML = '<p class="muted">No calendar intervals for this day.</p>';
       return;
     }
     const steps = [];
     for (let minute = start; minute < end; minute += 30) steps.push(minute);
-    const labels = steps.map((minute, index) => index % 2 === 0 ? `<span>${hhmm(minute)}</span>` : "<span></span>").join("");
-    const lanes = configured.map((court) => {
-      const events = rows.filter((row) => row.court_id === court.court_id).map((row) => ({
-        ...row, startMin: minuteInZone(row.starts_at, state.today.timezone), endMin: minuteInZone(row.ends_at, state.today.timezone),
-      }));
+    const labels = steps.map((minute, index) => index % 2 === 0
+      ? `<span>${hhmm(minute)}</span>` : "<span></span>").join("");
+    const lanes = courts.map((court) => {
+      const courtEvents = events.filter((row) => row.court_id === court.court_id);
       const cells = steps.map((minute) => {
-        const open = (court.sellable_windows || []).some((window) => Number(window.start_minute) <= minute && Number(window.end_minute) > minute);
-        if (!open) return `<div class="lane-cell closed" title="${hhmm(minute)} not sellable"></div>`;
-        const event = events.find((row) => row.startMin < minute + 30 && row.endMin > minute);
-        if (!event) return `<div class="lane-cell open" title="${hhmm(minute)} available"></div>`;
-        const kind = event.kind === "block" ? "blocked" : event.kind === "hold" ? "held" : "booked";
-        const label = event.startMin >= minute && event.startMin < minute + 30
-          ? event.kind === "block" ? "Block" : event.kind === "hold" ? "Hold" : event.status
-          : "";
-        const source = event.kind === "block" ? (event.reason || "Blocked") : event.kind === "hold" ? "Active booking hold" : event.source || event.status;
-        return `<div class="lane-cell ${kind}" title="${esc(`${hhmm(event.startMin)}–${hhmm(event.endMin)} · ${source}`)}"><span>${esc(label)}</span></div>`;
+        // Event precedence MUST come before rate-window state. A confirmed
+        // booking stays visible even if the court has no configured tariff.
+        const event = courtEvents.find((row) => row.startMin < minute + 30 && row.endMin > minute);
+        if (event) {
+          const kind = event.kind === "block" ? "blocked" : event.kind === "hold" ? "held" : "booked";
+          const label = event.startMin >= minute && event.startMin < minute + 30
+            ? (event.kind === "block" ? "Block" : event.kind === "hold" ? "Hold" : event.status)
+            : "";
+          const source = event.kind === "block" ? (event.reason || "Blocked")
+            : event.kind === "hold" ? "Active booking hold" : event.source || event.status;
+          return `<div class="lane-cell ${kind}" title="${esc(`${hhmm(event.startMin)}–${hhmm(event.endMin)} · ${source}`)}"><span>${esc(label)}</span></div>`;
+        }
+        const priced = (court.sellable_windows || []).some((window) =>
+          Number(window.start_minute) <= minute && Number(window.end_minute) >= minute + 30);
+        if (!priced) return `<div class="lane-cell closed" title="${hhmm(minute)} — no configured rate coverage"></div>`;
+        return `<div class="lane-cell open" title="${hhmm(minute)} — rate-covered, no active Core occupancy recorded"></div>`;
       }).join("");
-      return `<div class="court-lane"><strong>${esc(court.court_name)}</strong><div class="lane-track" style="grid-template-columns:repeat(${steps.length},minmax(22px,1fr))">${cells}</div><em>${esc(court.utilization_pct)}%</em></div>`;
+      return `<div class="court-lane"><strong>${esc(court.court_name)}</strong><div class="lane-track" style="grid-template-columns:repeat(${steps.length},minmax(22px,1fr))">${cells}</div><em>${hasRateCoverage(court) ? `${esc(court.utilization_pct)}%` : "No rate"}</em></div>`;
     }).join("");
-    el.timeline.innerHTML = `<div class="court-grid"><div class="court-axis"><span>COURT</span><div class="time-axis" style="grid-template-columns:repeat(${steps.length},minmax(22px,1fr))">${labels}</div><span>UTIL.</span></div>${lanes}</div><div class="timeline-legend"><span><i class="legend-open"></i>Available</span><span><i class="legend-booked"></i>Booked</span><span><i class="legend-held"></i>Held</span><span><i class="legend-blocked"></i>Blocked</span><span><i class="legend-closed"></i>Not sellable</span></div>`;
+    el.timeline.innerHTML = `<div class="court-grid"><div class="court-axis"><span>COURT</span><div class="time-axis" style="grid-template-columns:repeat(${steps.length},minmax(22px,1fr))">${labels}</div><span>UTIL.</span></div>${lanes}</div><div class="timeline-legend"><span><i class="legend-open"></i>Rate-covered / unoccupied</span><span><i class="legend-booked"></i>Booked</span><span><i class="legend-held"></i>Held</span><span><i class="legend-blocked"></i>Blocked</span><span><i class="legend-closed"></i>No rate coverage</span></div><p class="muted calendar-footnote">Cancelled or failed bookings do not occupy capacity. Rate coverage does not itself confirm a new booking can be completed.</p>`;
   }
 
   async function load() {
