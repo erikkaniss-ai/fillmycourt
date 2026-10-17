@@ -25,6 +25,17 @@ test("synthetic demo has three courts, clear revenue disclaimer, and zero networ
  assert.ok(calendar.bookings.some(b=>b.court_id===d.courts[2].court_id && b.status==="confirmed"));
  assert.equal(calendar.holds.length,1);
  assert.equal(calendar.blocks.length,1);
+ // Portugal DST: synthetic Core-shaped day_start/end must represent
+ // actual 25h/23h UTC elapsed time, rather than a hard-coded 24h day.
+ for (const [day, expectedHours] of [["2026-10-25",25],["2026-03-29",23]]) {
+   const scene=get("/api/fmc/"+org+"/today?date="+day);
+   assert.equal((Date.parse(scene.day_end)-Date.parse(scene.day_start))/3600000,
+     expectedHours,day);
+   const events=get("/api/fmc/"+org+"/calendar?start="+encodeURIComponent(scene.day_start)+
+     "&end="+encodeURIComponent(scene.day_end));
+   assert.equal(events.bookings.filter(r=>r.status==="confirmed").length,3);
+ }
+ assert.throws(()=>get("/api/fmc/"+org+"/today?date=2026-02-30"));
  assert.throws(()=>get("/api/holds"));
  assert.throws(()=>get("/api/fmc/organizations?edit=true"));
 });

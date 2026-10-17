@@ -6,15 +6,32 @@
   const B="33333333-3333-4333-8333-333333333333";
   const C="44444444-4444-4444-8444-444444444444";
   const next=day=>{const d=new Date(day+"T12:00:00Z");d.setUTCDate(d.getUTCDate()+1);return d.toISOString().slice(0,10)};
-  function offset(day) {
-    const p=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Lisbon",timeZoneName:"shortOffset"}).formatToParts(new Date(day+"T12:00:00Z"));
-    const t=p.find(x=>x.type==="timeZoneName")?.value||"GMT";
-    const m=/GMT([+-])(\d{1,2})(?::(\d{2}))?/.exec(t);
-    return m?m[1]+m[2].padStart(2,"0")+":"+(m[3]||"00"):"+00:00";
+  function offset(day, time) {
+    // Pick the correct offset for the LOCAL clock instant. At Portugal's DST
+    // switch, midnight and midday use different offsets; selecting midday for
+    // both made synthetic day bounds 24h instead of the actual 23h/25h.
+    const utcWall = Date.parse(day + "T" + time + ":00Z");
+    if (!Number.isFinite(utcWall)) throw Error("Invalid synthetic local date");
+    const format = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Lisbon", year: "numeric", month: "2-digit",
+      day: "2-digit", hour: "2-digit", minute: "2-digit",
+      hourCycle: "h23",
+    });
+    // UTC+1 first: repeated autumn hour deliberately resolves to the first
+    // occurrence for a fixture, never used for authoritative booking writes.
+    for (const offsetMinutes of [60, 0]) {
+      const fields = format.formatToParts(new Date(utcWall - offsetMinutes * 60000));
+      const part = (name) => fields.find((field) => field.type === name)?.value || "";
+      const candidate = part("year") + "-" + part("month") + "-" + part("day");
+      const clock = part("hour") + ":" + part("minute");
+      if (candidate === day && clock === time)
+        return offsetMinutes === 60 ? "+01:00" : "+00:00";
+    }
+    throw Error("Nonexistent synthetic local time");
   }
-  const stamp=(day,time)=>day+"T"+time+":00"+offset(day);
+  const stamp = (day, time) => day + "T" + time + ":00" + offset(day, time);
   function today(day){
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day+"T12:00:00Z")))throw Error("Invalid demo date");
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day+"T12:00:00Z"))||new Date(day+"T12:00:00Z").toISOString().slice(0,10)!==day)throw Error("Invalid demo date");
     return {date:day,day_start:stamp(day,"00:00"),day_end:stamp(next(day),"00:00"),timezone:"Europe/Lisbon",currency:"EUR",
       summary:{capacity_minutes:1080,booked_minutes:300,held_minutes:60,blocked_minutes:60,
         empty_minutes:660,utilization_pct:27.8,bookings:3,cancellations:1,revenue_minor:9000,
