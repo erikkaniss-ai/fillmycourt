@@ -1,0 +1,104 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import proxy, {config} from "../netlify/functions/fill-operator-readonly.mts";
+import {readFileSync} from "node:fs";
+const APP = "https://fillmycourt-preview.netlify.app";
+const OPS = "https://fmc-operations-api-staging.up.railway.app";
+const ID = "11111111-1111-4111-8111-111111111111";
+const paths = ["/api/me", "/api/fmc/organizations",
+  "/api/fmc/"+ID+"/today?date=2026-10-16",
+  "/api/fmc/"+ID+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00"];
+const request = (path, options={}) => new Request(APP+path,{method:options.method||"GET",
+  headers: options.headers||{"authorization":"Bearer fixture-staging-user"}});
+async function harness(req, env=OPS, upstreamStatus=200) {
+  const previousNetlify=globalThis.Netlify, previousFetch=globalThis.fetch;
+  const calls=[];
+  globalThis.Netlify={env:{get:name=>name==="FILL_OPERATIONS_API_BASE"?env:null}};
+  globalThis.fetch=async(url,init)=>{
+    calls.push({url:String(url),method:init.method,redirect:init.redirect,
+      authorization:init.headers.authorization,headers:init.headers});
+    return Response.json(upstreamStatus===200?{items:[]}:{error:"PERMISSION_DENIED"},
+      {status:upstreamStatus,headers:{"content-type":"application/json"}});
+  };
+  try {const r=await proxy(req);return {status:r.status,body:await r.json(),
+    headers:r.headers,calls};}
+  finally{globalThis.Netlify=previousNetlify;globalThis.fetch=previousFetch;}
+}
+test("Private Fill gateway registers only the four existing Operations GET routes",()=>{
+  assert.deepEqual(config.path,["/api/me","/api/fmc/organizations",
+    "/api/fmc/:org/today","/api/fmc/:org/calendar"]);
+  const conf=readFileSync("platform/netlify.toml","utf8");
+  assert.match(conf,/publish = "public"/);
+  assert.match(conf,/directory = "netlify\/functions"/);
+  assert.match(conf,/X-Robots-Tag = "noindex, nofollow, noarchive"/);
+  assert.doesNotMatch(conf,/GETACOURT_|provider|payment/i);
+});
+test("Without bearer, no Railway request is sent",async()=>{
+  for(const path of paths){
+    const result=await harness(request(path,{headers:{}}));
+    assert.equal(result.status,401,path);
+    assert.equal(result.calls.length,0,path);
+  }
+});
+test("All POST and unsupported operations are rejected without upstream calls",async()=>{
+  for(const path of paths){
+    const r=await harness(request(path,{method:"POST"}));
+    assert.equal(r.status,405);
+    assert.equal(r.calls.length,0);
+  }
+  for(const path of ["/api/holds","/api/fmc/"+ID+"/people",
+    "/api/fmc/"+ID+"/opportunities","/api/fmc/"+ID+"/crm-actions",
+    "/api/fmc/"+ID+"/reconciliation/runs"]){
+    const r=await harness(request(path));
+    assert.equal(r.status,404,path);
+    assert.equal(r.calls.length,0);
+  }
+});
+test("Only exact UUID, date and timezone-range query shape accepted",async()=>{
+  for(const path of ["/api/fmc/not-a-uuid/today?date=2026-10-16",
+    "/api/fmc/"+ID+"/today?date=2026-02-30",
+    "/api/fmc/"+ID+"/today?date=2026-10-16&x=1",
+    "/api/fmc/"+ID+"/today?date=2026-10-16&date=2026-10-17",
+    "/api/fmc/"+ID+"/calendar?start=x&end=y",
+    "/api/fmc/"+ID+"/calendar?start=2026-10-16T10:00:00Z&end=2026-10-15T10:00:00Z",
+    "/api/fmc/"+ID+"/calendar?start=2026-10-16T10:00:00Z&end=2026-12-16T10:00:00Z",
+    "/api/me?token=secret","/api/fmc/organizations?x=1"]){
+    const r=await harness(request(path));
+    assert.equal(r.status,422,path);
+    assert.equal(r.calls.length,0,path);
+  }
+});
+test("No cross-origin browser requests; no external/misconfigured upstream hosts",async()=>{
+  const origin=await harness(request("/api/me", {headers:{
+    authorization:"Bearer fixture-staging-user",origin:"https://example.test"}}));
+  assert.equal(origin.status,403);
+  assert.equal(origin.calls.length,0);
+  for(const bad of [null,"http://"+OPS.slice(8),
+    "https://example.test","https://fmc-core-api-staging.up.railway.app",
+    "https://fmc-operations-api-staging.up.railway.app.evil.test",
+    "https://fmc-operations-api-staging.up.railway.app/other"]){
+    const r=await harness(request("/api/me"),bad);
+    assert.equal(r.status,503,String(bad));
+    assert.equal(r.calls.length,0);
+  }
+});
+test("Permitted GETs forward bearer ONLY to Operations with no redirects/cache",async()=>{
+  for(const path of paths){
+    const r=await harness(request(path));
+    assert.equal(r.status,200,path);
+    assert.equal(r.calls.length,1,path);
+    assert.equal(r.calls[0].method,"GET");
+    assert.equal(r.calls[0].authorization,"Bearer fixture-staging-user");
+    assert.equal(r.calls[0].redirect,"manual");
+    assert.ok(r.calls[0].url.startsWith(OPS+"/api/"));
+    assert.equal(r.headers.get("cache-control"),"no-store, private");
+    assert.equal(r.headers.get("access-control-allow-origin"),null);
+  }
+});
+test("Operations rejects expired or unauthorized bearer without inventing session",async()=>{
+  const r=await harness(request("/api/me"),OPS,401);
+  assert.equal(r.status,401);
+  assert.equal(r.calls.length,1);
+  assert.equal(r.body.error,"PERMISSION_DENIED");
+  assert.equal(r.headers.get("cache-control"),"no-store, private");
+});

@@ -42,6 +42,12 @@ jobs:
         run: python -m compileall -q platform/src
       - name: Verify Fill UI JavaScript syntax
         run: node --check platform/public/fill/app.js
+      - name: Verify Fill read-only Core contract
+        run: node --test platform/tests/fill_operator_readonly_contract.test.mjs
+      - name: Verify Fill private preview Operations-only gateway contracts
+        run: node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs
+      - name: Verify opt-in synthetic Fill demo safety contract
+        run: node --test platform/tests/fill_operator_demo_contract.test.mjs
       - name: GetAcourt Netlify boundary contracts (no network / no writes)
         run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract
@@ -61,5 +67,21 @@ jobs:
             echo "Applying $f"
             psql "$PSQL_URL" -v ON_ERROR_STOP=1 -f "$f"
           done
+      - name: Install Chromium for Fill visual acceptance
+        run: python -m playwright install --with-deps chromium
+      - name: Build self-contained OFFLINE Fill demo (synthetic only)
+        run: python platform/scripts/build_fill_synthetic_demo.py --output platform/qa-artifacts/FillMyCourt-OFFLINE-SYNTHETIC-DEMO.html
       - name: Test
+        env:
+          FILL_QA_ARTIFACT_DIR: platform/qa-artifacts
         run: pytest -q platform/tests
+      - name: Publish clearly marked synthetic Fill operator browser screenshots
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fill-operator-mvp-fixture-only
+          path: |
+            platform/qa-artifacts/*-FIXTURE-ONLY.png
+            platform/qa-artifacts/FillMyCourt-OFFLINE-SYNTHETIC-DEMO.html
+          if-no-files-found: warn
+          retention-days: 7
