@@ -107,3 +107,9 @@
 .demo-notice strong{font-size:13px;letter-spacing:1px}
 .demo-notice span{font-size:12px}
 @media(max-width:720px){.demo-notice{margin:0 0 16px;padding:12px}}
+
+
+/* Critical: no unauthorized auth gate visible above an active workspace. */
+[hidden] { display: none !important; }
+.workspace-label { min-width: 0; }
+.workspace-label select { box-sizing: border-box; display: block; width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; overflow: hidden; }
