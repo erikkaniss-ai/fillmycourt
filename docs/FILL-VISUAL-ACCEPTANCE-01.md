@@ -13,3 +13,6 @@ Set explicit author-level `[hidden] { display:none !important }`; ensure `.works
 Updated authenticated-Core-shaped fixture test and both hosted-local and offline-file fixture walkthroughs assert `#authGate` is actually hidden, `#workspace` is visible and the organization selector stays inside sidebar bounds, on top of existing Today/Revenue/Calendar and no-network checks.
 
 The owner still must connect and deploy the separate protected Fill Netlify site to a CI-accepted SHA and provision an authorized staging operator before claiming real hosted operator acceptance. No public production, Get PR, provider/CRM/payment write, database schema, or club outreach changes.
+
+## Mobile readability follow-up
+Today empty-capacity items now display court title and time on distinct lines, preventing a misleading concatenation. The day Calendar mobile view explicitly prompts horizontal swiping; legend chips wrap instead of clipping the final availability category. Browser acceptance covers 390px viewport and bounded document width. These are UI-only changes, no backend/auth/booking behavior.

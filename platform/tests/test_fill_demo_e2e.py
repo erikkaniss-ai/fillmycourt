@@ -71,6 +71,7 @@ def test_demo_synthetic_today_revenue_calendar_mobile_no_network(tmp_path):
             page.locator("#dateInput").fill("2026-11-10")
             expect(page.locator(".lane-cell.booked").first).to_be_visible()
             page.set_viewport_size({"width":390,"height":844})
+            expect(page.locator(".calendar-swipe-hint")).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             page.screenshot(path=str(folder/"08-synthetic-demo-mobile-FIXTURE-ONLY.png"),full_page=True)
             assert api_calls == []

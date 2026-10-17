@@ -34,6 +34,9 @@ def test_offline_fill_synthetic_html_all_views(tmp_path):
         uncovered = page.locator(".court-lane").filter(has_text="DEMO Court C — needs price")
         expect(uncovered.locator(".lane-cell.booked").first).to_be_visible()
         assert page.locator(".court-lane").filter(has_text="DEMO Indoor Court A").locator(".lane-cell.booked").count() == 6
+        page.set_viewport_size({"width":390,"height":844})
+        expect(page.locator(".calendar-swipe-hint")).to_be_visible()
+        assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
         assert page.evaluate("localStorage.getItem('fill.access') === null")
         assert network == []
         browser.close()
