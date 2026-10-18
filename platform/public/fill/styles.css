@@ -125,3 +125,11 @@
 @media(max-width:720px) {
   .calendar-swipe-hint { display:block; margin:0 0 10px; font-size:12px; color:var(--muted); }
 }
+
+/* Staging-only user-provisioned operator login, separate from Team Login. */
+.operator-login{display:grid;gap:14px;margin:20px 0 14px}
+.operator-login label{display:grid;gap:5px;font-size:12px;font-weight:600}
+.operator-login input{display:block;width:100%;min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink);font:inherit}
+.operator-login button{justify-self:start}
+.operator-login button:disabled{opacity:.6;cursor:wait}
+.login-feedback{color:#9c2b3b;background:#fff0f2;border-radius:8px;padding:10px 12px}

@@ -46,6 +46,8 @@ jobs:
         run: node --test platform/tests/fill_operator_readonly_contract.test.mjs
       - name: Verify Fill private preview Operations-only gateway contracts
         run: node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs
+      - name: Verify staging-only operator password-login contracts
+        run: node --experimental-strip-types --test platform/tests/fill_operator_password_login_contract.test.mjs
       - name: Verify fail-closed Fill private draft deployment workflow
         run: node --test platform/tests/fill_private_deploy_workflow_contract.test.mjs
       - name: Verify opt-in synthetic Fill demo safety contract

@@ -31,7 +31,13 @@
         <p class="eyebrow">SECURE OPERATOR ACCESS</p>
         <h2>Sign in required</h2>
         <p>This staging interface only reads operator data with a valid Supabase bearer session. No club data is exposed anonymously.</p>
-        <p class="muted">Real operator access requires a verified Supabase account and organization role. No real staging operator account is configured yet.</p>
+        <p class="muted">Use an administrator-provisioned Supabase staging operator account with an assigned club role. No self-registration or password reset is available.</p>
+        <form id="operatorSignIn" class="operator-login">
+          <label>Email<input id="operatorEmail" type="email" autocomplete="username" inputmode="email" required maxlength="254"></label>
+          <label>Password<input id="operatorPassword" type="password" autocomplete="current-password" required></label>
+          <button id="operatorLoginButton" class="button primary" type="submit">Sign in to operator workspace</button>
+          <p id="operatorLoginError" class="login-feedback" role="alert" hidden></p>
+        </form>
         <a id="demoPreviewLink" href="/fill/?demo=1" class="button primary demo-entry" hidden>Explore synthetic demo</a>
         <p class="muted demo-disclaimer">Fabricated courts, bookings, rates and revenue; never actual partner data or confirmed availability.</p>
       </div>

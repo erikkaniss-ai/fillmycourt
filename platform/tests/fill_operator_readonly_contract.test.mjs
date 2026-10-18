@@ -23,15 +23,16 @@ function makeElement(dataset = {}) {
   return { dataset, hidden: false, disabled: false, value: "", textContent: "", innerHTML: "", classList: { toggle() {} }, addEventListener(type, handler) { listeners.set(type, handler); }, listener(type) { return listeners.get(type); } };
 }
 
-test("Fill read-only operator shell only uses deployed Core GET contracts", async () => {
+test("Fill operator data use only Core GET contracts; password auth is separate", async () => {
   assert.match(htmlSource, /Staging · read-only/);
   assert.match(htmlSource, /not partner availability/i);
   assert.match(appSource, /\/api\/fmc\/\$\{encodeURIComponent\(state\.org\)\}\/today/);
   assert.match(appSource, /\/api\/fmc\/\$\{encodeURIComponent\(state\.org\)\}\/calendar/);
-  assert.doesNotMatch(appSource, /\bPOST\b/);
+  assert.match(appSource, /method: "POST"/);
+  assert.match(appSource, /"\/api\/fmc-auth\/login"/);
   assert.doesNotMatch(appSource, /\/opportunities|\/crm-actions|\/attributions|\/disputes/);
 
-  const elements = Object.fromEntries(["#authGate", "#workspace", "#orgSelect", "#identity", "#signOut", "#dateInput", "#refreshButton", "#error", "#pageTitle", "#todayView", "#calendarView", "#revenueView", "#kpis", "#courtUtilisation", "#utilisationBadge", "#emptyCapacity", "#calendarTimeline", "#revenueKpis", "#opportunityQueue", "#courtComparison"].map((id) => [id, makeElement()]));
+  const elements = Object.fromEntries(["#authGate", "#workspace", "#orgSelect", "#identity", "#signOut", "#dateInput", "#refreshButton", "#error", "#pageTitle", "#todayView", "#calendarView", "#revenueView", "#kpis", "#courtUtilisation", "#utilisationBadge", "#emptyCapacity", "#calendarTimeline", "#revenueKpis", "#opportunityQueue", "#courtComparison", "#operatorSignIn", "#operatorEmail", "#operatorPassword", "#operatorLoginButton", "#operatorLoginError"].map((id) => [id, makeElement()]));
   const navigation = [makeElement({ view: "today" }), makeElement({ view: "calendar" }), makeElement({ view: "revenue" })];
   const calls = [];
   const local = new Map([["fill.access", "fixture-session"]]);

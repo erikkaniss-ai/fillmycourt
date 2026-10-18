@@ -19,6 +19,9 @@
     empty: q("#emptyCapacity"), timeline: q("#calendarTimeline"), revenueKpis: q("#revenueKpis"),
     opportunityQueue: q("#opportunityQueue"), courtComparison: q("#courtComparison"),
     demoNotice: q("#demoNotice"), demoLink: q("#demoPreviewLink"),
+    loginForm: q("#operatorSignIn"), loginEmail: q("#operatorEmail"),
+    loginPassword: q("#operatorPassword"), loginButton: q("#operatorLoginButton"),
+    loginError: q("#operatorLoginError"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -72,7 +75,8 @@
       history.replaceState(null, "", location.pathname + location.search);
       return token;
     }
-    return localStorage.getItem("fill.access");
+    const liveToken = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("fill.access") : null;
+    return liveToken || localStorage.getItem("fill.access");
   }
 
   async function api(path) {
@@ -87,6 +91,7 @@
     try { body = await response.json(); } catch {}
     if (!response.ok) {
       if (response.status === 401) {
+        if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("fill.access");
         localStorage.removeItem("fill.access");
         state.token = null;
         showAuth();
@@ -376,6 +381,7 @@
       state.org = state.orgs[0]?.id || null;
       showWorkspace();
       if (state.org) await load();
+      else if (!state.demo) fail(Error("No operator club role assigned. Ask the administrator."));
     } catch (error) {
       fail(error);
     }
@@ -393,6 +399,37 @@
     }
   }));
 
+  el.loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (state.demo) return;
+    if (el.loginButton.disabled) return;
+    el.loginError.hidden = true;
+    el.loginError.textContent = "";
+    el.loginButton.disabled = true;
+    const password = el.loginPassword.value;
+    try {
+      const result = await fetch("/api/fmc-auth/login", {
+        method: "POST", cache: "no-store", credentials: "same-origin",
+        headers: {"content-type":"application/json"},
+        body: JSON.stringify({email:el.loginEmail.value.trim(),password})
+      });
+      if (!result.ok) throw Error("Login failed. Check your operator credentials.");
+      const data = await result.json();
+      if (typeof data.access_token !== "string") throw Error("Login unavailable.");
+      // Browser-session only, no token in the URL or persistent localStorage.
+      if (typeof sessionStorage !== "undefined") sessionStorage.setItem("fill.access", data.access_token);
+      localStorage.removeItem("fill.access");
+      el.loginPassword.value = "";
+      await init();
+    } catch {
+      el.loginPassword.value = "";
+      el.loginError.textContent = "Unable to sign in. Check your credentials or contact the administrator.";
+      el.loginError.hidden = false;
+    } finally {
+      el.loginButton.disabled = false;
+    }
+  });
+
   el.org.addEventListener("change", () => {
     state.org = el.org.value;
     load();
@@ -404,6 +441,7 @@
       location.assign("/fill/");
       return;
     }
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("fill.access");
     localStorage.removeItem("fill.access");
     state.token = null;
     showAuth();
