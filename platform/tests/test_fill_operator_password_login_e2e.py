@@ -86,7 +86,7 @@ def test_operator_password_signin_then_get_only_workspace_and_logout():
             expect(page.locator("#authGate")).to_be_hidden()
             expect(page.locator("#workspace")).to_be_visible()
             expect(page.locator("#identity")).to_have_text("operator@example.invalid")
-            expect(page.get_by_text("FICTIONAL COURT",exact=False)).to_be_visible()
+            expect(page.locator("#courtUtilisation").get_by_text("FICTIONAL COURT")).to_be_visible()
             assert page.evaluate("sessionStorage.getItem('fill.access')") == TOKEN
             assert page.evaluate("localStorage.getItem('fill.access')") is None
             page.get_by_role("button",name="Calendar").click()

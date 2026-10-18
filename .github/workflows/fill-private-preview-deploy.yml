@@ -62,6 +62,26 @@ jobs:
         if: steps.eligibility.outputs.configured == 'true'
         run: npm install --no-save --no-audit --no-fund netlify-cli@27.12.1
 
+      - uses: actions/setup-python@v5
+        if: steps.eligibility.outputs.configured == 'true'
+        with:
+          python-version: '3.13'
+
+      - name: Install isolated browser acceptance dependencies
+        if: steps.eligibility.outputs.configured == 'true'
+        run: |
+          python -m pip install pytest playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Require operator/auth browser acceptance BEFORE private draft upload
+        if: steps.eligibility.outputs.configured == 'true'
+        shell: bash
+        run: |
+          node --check platform/public/fill/app.js
+          node --experimental-strip-types --test platform/tests/fill_operator_password_login_contract.test.mjs
+          node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs
+          python -m pytest -q             platform/tests/test_fill_operator_password_login_e2e.py             platform/tests/test_fill_operator_e2e.py             platform/tests/test_fill_demo_e2e.py             platform/tests/test_fill_offline_bundle.py             platform/tests/test_fill_calendar_dst_e2e.py
+
       - name: Stamp authorized review manifest
         if: steps.eligibility.outputs.configured == 'true'
         shell: bash
