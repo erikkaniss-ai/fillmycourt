@@ -32,7 +32,7 @@
         <h2>Sign in required</h2>
         <p>This staging interface only reads operator data with a valid Supabase bearer session. No club data is exposed anonymously.</p>
         <p class="muted">Use an administrator-provisioned Supabase staging operator account with an assigned club role. No self-registration or password reset is available.</p>
-        <form id="operatorSignIn" class="operator-login">
+        <form id="operatorSignIn" class="operator-login" method="post" action="/api/fmc-auth/login">
           <label>Email<input id="operatorEmail" type="email" autocomplete="username" inputmode="email" required maxlength="254"></label>
           <label>Password<input id="operatorPassword" type="password" autocomplete="current-password" required></label>
           <button id="operatorLoginButton" class="button primary" type="submit">Sign in to operator workspace</button>

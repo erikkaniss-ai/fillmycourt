@@ -81,6 +81,7 @@ test("App offers explicit non-signup login form and browser-session token, not t
  const html=readFileSync("platform/public/fill/index.html","utf8");
  const app=readFileSync("platform/public/fill/app.js","utf8");
  assert.match(html,/id="operatorSignIn"/);
+ assert.match(html,/<form[^>]*id="operatorSignIn"[^>]*method="post"[^>]*action="\/api\/fmc-auth\/login"/);
  assert.match(html,/id="operatorEmail"/);
  assert.match(html,/id="operatorPassword"/);
  assert.match(app,/"\/api\/fmc-auth\/login"/);
