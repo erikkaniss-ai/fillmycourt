@@ -22,10 +22,14 @@ jobs:
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.FILL_NETLIFY_AUTH_TOKEN || secrets.NETLIFY_AUTH_TOKEN }}
       NETLIFY_SITE_ID: d763b7a1-dccd-4638-8876-ac1670171698
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # GitHub pull_request GITHUB_SHA points to a merge ref, not the
+          # reviewed Fill branch commit. Always deploy the exact head SHA.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Check private preview credential
         id: eligibility
@@ -67,7 +71,7 @@ jobs:
             fs.writeFileSync("platform/public/fill/preview-build.json",
               JSON.stringify({
                 kind: "FILL_PRIVATE_DRAFT",
-                source_sha: process.env.GITHUB_SHA,
+                source_sha: process.env.SOURCE_SHA,
                 site_id: process.env.NETLIFY_SITE_ID,
                 source_pr: 8,
                 fixture_data_only: true
@@ -80,16 +84,17 @@ jobs:
         working-directory: platform
         run: |
           # NO --prod, NO --prod-if-unlocked, NO --create-site, NO DNS.
-          short_sha=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
+          short_sha=$(printf '%s' "$SOURCE_SHA" | cut -c1-7)
           ../node_modules/.bin/netlify deploy \
             --site "$NETLIFY_SITE_ID" \
             --dir public \
             --functions netlify/functions \
-            --context deploy-preview \
             --alias "fill-pr8-$short_sha" \
             --no-build \
             --json \
             > "$RUNNER_TEMP/fill-private-draft-result.json"
+          # A draft deploy MUST never overwrite the site production deploy.
+          test -s "$RUNNER_TEMP/fill-private-draft-result.json"
 
       - name: Validate draft URL and anonymous protection
         if: steps.eligibility.outputs.configured == 'true'
@@ -100,16 +105,16 @@ jobs:
           const d=JSON.parse(fs.readFileSync(
             process.env.RUNNER_TEMP + "/fill-private-draft-result.json", "utf8"));
           const u=new URL(d.deploy_url || d.deployUrl || d.url || "");
-          const expected="fill-pr8-"+process.env.GITHUB_SHA.slice(0,7)+
+          const expected="fill-pr8-"+process.env.SOURCE_SHA.slice(0,7)+
             "--fillmycourt-preview.netlify.app";
           if(u.protocol!=="https:" || u.hostname!==expected)
             throw Error("Netlify returned an unexpected draft deploy target");
           if(d.site_id && d.site_id!==process.env.NETLIFY_SITE_ID)
             throw Error("Netlify returned an unexpected site ID");
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-            "Private Fill draft uploaded at "+u.origin+" for SHA "+process.env.GITHUB_SHA+"\n");
+            "Private Fill draft uploaded at "+u.origin+" for SHA "+process.env.SOURCE_SHA+"\n");
           NODE
-          short_sha=$(printf '%s' "$GITHUB_SHA" | cut -c1-7)
+          short_sha=$(printf '%s' "$SOURCE_SHA" | cut -c1-7)
           url="https://fill-pr8-$short_sha--fillmycourt-preview.netlify.app/fill/?demo=1"
           safe=0
           for attempt in 1 2 3 4 5 6; do

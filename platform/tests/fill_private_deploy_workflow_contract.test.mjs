@@ -16,7 +16,10 @@ test("Deployment workflow targets ONLY same-repo Fill PR8 and existing team-only
   assert.match(y,/secrets\.NETLIFY_AUTH_TOKEN/);
   assert.match(y,/--alias "fill-pr8-\$short_sha"/);
   assert.match(y,/--functions netlify\/functions/);
-  assert.match(y,/--context deploy-preview/);
+  assert.doesNotMatch(y,/--context deploy-preview/);
+  assert.match(y,/ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(y,/SOURCE_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.doesNotMatch(y,/process\.env\.GITHUB_SHA/);
   assert.match(y,/--no-build/);
   assert.match(y,/FILL PRIVATE DEPLOY SKIPPED/);
   assert.match(y,/status.*= "401"/);
