@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      NETLIFY_AUTH_TOKEN: ${{ secrets.FILL_NETLIFY_AUTH_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.FILL_NETLIFY_AUTH_TOKEN || secrets.NETLIFY_AUTH_TOKEN }}
       NETLIFY_SITE_ID: d763b7a1-dccd-4638-8876-ac1670171698
     steps:
       - uses: actions/checkout@v4

@@ -13,6 +13,7 @@ test("Deployment workflow targets ONLY same-repo Fill PR8 and existing team-only
   assert.match(y,/permissions:\s*\n\s*contents: read/);
   assert.match(y,/NETLIFY_SITE_ID: d763b7a1-dccd-4638-8876-ac1670171698/);
   assert.match(y,/secrets\.FILL_NETLIFY_AUTH_TOKEN/);
+  assert.match(y,/secrets\.NETLIFY_AUTH_TOKEN/);
   assert.match(y,/--alias "fill-pr8-\$short_sha"/);
   assert.match(y,/--functions netlify\/functions/);
   assert.match(y,/--context deploy-preview/);
