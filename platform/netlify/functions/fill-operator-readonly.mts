@@ -1,7 +1,10 @@
 // FillMyCourt private-preview only: strictly GET-only gateway to Railway Operations.
 // Never route to transactional Core or a provider; no server-side privileged token.
 // The deployed staging Operations API verifies the forwarded player's Supabase JWT.
+// Fixed, independent staging site: no public Fill/MyCourt project is permitted.
+const FILL_PREVIEW_SITE_ID = "d763b7a1-dccd-4638-8876-ac1670171698";
 const OPERATIONS_HOST = "fmc-operations-api-staging.up.railway.app";
+const OPERATIONS_BASE = "https://" + OPERATIONS_HOST;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -52,9 +55,14 @@ function route(url) {
   return {path: "/api/fmc/" + org + "/calendar?start=" +
     encodeURIComponent(start) + "&end=" + encodeURIComponent(end)};
 }
-function configuredBase() {
-  const value = globalThis.Netlify?.env?.get("FILL_OPERATIONS_API_BASE");
-  if (!value) return null;
+function configuredBase(context) {
+  // Netlify's trusted runtime context binds the request to one staging-only
+  // project. A mistaken deployment on the public FillMyCourt site fails shut.
+  if (context?.site?.id !== FILL_PREVIEW_SITE_ID) return null;
+  // This is a PUBLIC address, not a secret. The optional site environment
+  // variable is backwards-compatible but no longer a deployment prerequisite.
+  // It may only point to the exact verified Railway Operations host.
+  const value = globalThis.Netlify?.env?.get("FILL_OPERATIONS_API_BASE") || OPERATIONS_BASE;
   let parsed;
   try { parsed = new URL(value); } catch { return null; }
   if (parsed.protocol !== "https:" || parsed.hostname !== OPERATIONS_HOST ||
@@ -63,7 +71,7 @@ function configuredBase() {
       parsed.search || parsed.hash) return null;
   return parsed.origin;
 }
-export default async function fillOperatorReadonly(request) {
+export default async function fillOperatorReadonly(request, context) {
   if (request.method !== "GET") return reply(405, "READ_ONLY");
   const url = new URL(request.url);
   const destination = route(url);
@@ -74,8 +82,8 @@ export default async function fillOperatorReadonly(request) {
   const authorization = request.headers.get("authorization");
   if (!authorization || !/^Bearer [^\s]{10,4096}$/.test(authorization))
     return reply(401, "AUTH_REQUIRED");
-  const base = configuredBase();
-  if (!base) return reply(503, "OPERATIONS_UNCONFIGURED");
+  const base = configuredBase(context);
+  if (!base) return reply(503, "UNAPPROVED_PREVIEW_SITE_OR_OPERATIONS");
   try {
     const upstream = await fetch(base + destination.path, {
       method: "GET", redirect: "manual", cache: "no-store",

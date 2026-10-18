@@ -4,13 +4,15 @@ import proxy, {config} from "../netlify/functions/fill-operator-readonly.mts";
 import {readFileSync} from "node:fs";
 const APP = "https://fillmycourt-preview.netlify.app";
 const OPS = "https://fmc-operations-api-staging.up.railway.app";
+const FILL_SITE_ID = "d763b7a1-dccd-4638-8876-ac1670171698";
+const OTHER_SITE_ID = "72eee365-bff0-48ec-bb8f-f08ff01341b7";
 const ID = "11111111-1111-4111-8111-111111111111";
 const paths = ["/api/me", "/api/fmc/organizations",
   "/api/fmc/"+ID+"/today?date=2026-10-16",
   "/api/fmc/"+ID+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00"];
 const request = (path, options={}) => new Request(APP+path,{method:options.method||"GET",
   headers: options.headers||{"authorization":"Bearer fixture-staging-user"}});
-async function harness(req, env=OPS, upstreamStatus=200) {
+async function harness(req, env=OPS, upstreamStatus=200, siteId=FILL_SITE_ID) {
   const previousNetlify=globalThis.Netlify, previousFetch=globalThis.fetch;
   const calls=[];
   globalThis.Netlify={env:{get:name=>name==="FILL_OPERATIONS_API_BASE"?env:null}};
@@ -20,7 +22,7 @@ async function harness(req, env=OPS, upstreamStatus=200) {
     return Response.json(upstreamStatus===200?{items:[]}:{error:"PERMISSION_DENIED"},
       {status:upstreamStatus,headers:{"content-type":"application/json"}});
   };
-  try {const r=await proxy(req);return {status:r.status,body:await r.json(),
+  try {const r=await proxy(req,{site:{id:siteId}});return {status:r.status,body:await r.json(),
     headers:r.headers,calls};}
   finally{globalThis.Netlify=previousNetlify;globalThis.fetch=previousFetch;}
 }
@@ -73,7 +75,7 @@ test("No cross-origin browser requests; no external/misconfigured upstream hosts
     authorization:"Bearer fixture-staging-user",origin:"https://example.test"}}));
   assert.equal(origin.status,403);
   assert.equal(origin.calls.length,0);
-  for(const bad of [null,"http://"+OPS.slice(8),
+  for(const bad of ["http://"+OPS.slice(8),
     "https://example.test","https://fmc-core-api-staging.up.railway.app",
     "https://fmc-operations-api-staging.up.railway.app.evil.test",
     "https://fmc-operations-api-staging.up.railway.app/other"]){
@@ -82,6 +84,18 @@ test("No cross-origin browser requests; no external/misconfigured upstream hosts
     assert.equal(r.calls.length,0);
   }
 });
+test("No env var required, but wrong Netlify project/invalid configured URL fails shut",async()=>{
+  const correct=await harness(request("/api/me"),null);
+  assert.equal(correct.status,200);
+  assert.equal(correct.calls.length,1);
+  assert.equal(correct.calls[0].url,OPS+"/api/me");
+  for(const invalidSite of [OTHER_SITE_ID,"",null]){
+    const r=await harness(request("/api/me"),null,200,invalidSite);
+    assert.equal(r.status,503);
+    assert.equal(r.calls.length,0);
+  }
+});
+
 test("Permitted GETs forward bearer ONLY to Operations with no redirects/cache",async()=>{
   for(const path of paths){
     const r=await harness(request(path));

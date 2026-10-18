@@ -4,7 +4,9 @@
   const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false };
   // Synthetic demo is opt-in and restricted to the separate private-preview host
   // and loopback dev. This NEVER activates on public fillmycourt.com.
-  const previewHost = /^(?:fillmycourt-preview|deploy-preview-[1-9][0-9]*--fillmycourt-preview)\.netlify\.app$/.test(location.hostname || "");
+  // Also accept the CI's non-production manual draft aliases and immutable
+  // Netlify deployment IDs, but never the independent public Fill project.
+  const previewHost = /^(?:fillmycourt-preview|(?:(?:deploy-preview-[1-9][0-9]*|fill-pr8-[a-f0-9]{7}|[a-f0-9]{12,})--fillmycourt-preview))\.netlify\.app$/.test(location.hostname || "");
   const loopbackHost = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
   const canExploreDemo = previewHost || loopbackHost;
   state.demo = canExploreDemo && new URLSearchParams(location.search).get("demo") === "1";
