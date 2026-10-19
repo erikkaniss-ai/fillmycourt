@@ -137,6 +137,25 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
             expect(page.locator(".lane-cell.booked").first).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             page.screenshot(path=str(screenshot_dir / "04-calendar-mobile-FIXTURE-ONLY.png"), full_page=True)
+
+            # Small-screen regression at 320px. This uses mocked GET-only
+            # responses; it is NOT authenticated hosted operator UAT.
+            page.set_viewport_size({"width": 320, "height": 700})
+            for view, selector, filename in (
+                ("Today", "#courtUtilisation", "05-today-320-FIXTURE-ONLY.png"),
+                ("Revenue & Capacity", "#opportunityQueue", "06-revenue-320-FIXTURE-ONLY.png"),
+                ("Calendar", "#calendarTimeline", "07-calendar-320-FIXTURE-ONLY.png"),
+            ):
+                page.get_by_role("button", name=view, exact=True).click()
+                expect(page.locator(selector)).to_be_visible()
+                assert page.evaluate(
+                    "document.documentElement.scrollWidth <= document.documentElement.clientWidth"
+                ), f"Horizontal page overflow at 320px: {view}"
+                assert page.evaluate(
+                    "document.querySelector('#orgSelect').getBoundingClientRect().right <= "
+                    "document.querySelector('.sidebar').getBoundingClientRect().right"
+                ), f"Workspace selector outside sidebar at 320px: {view}"
+                page.screenshot(path=str(screenshot_dir / filename), full_page=True)
             browser.close()
     finally:
         server.shutdown()
