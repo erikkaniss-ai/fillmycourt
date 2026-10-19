@@ -161,7 +161,10 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
         server.shutdown()
         server.server_close()
 
+    # Returning to Calendar from the 320px tabs intentionally refreshes
+    # the read-only calendar snapshot with one additional GET.
     assert requests == [
         ("GET", "/api/me"), ("GET", "/api/fmc/organizations"),
         ("GET", "/api/fmc/org-fixture/today"), ("GET", "/api/fmc/org-fixture/calendar"),
+        ("GET", "/api/fmc/org-fixture/calendar"),
     ]
