@@ -1,7 +1,7 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0 };
   // Synthetic demo is opt-in and restricted to the separate private-preview host
   // and loopback dev. This NEVER activates on public fillmycourt.com.
   // Also accept the CI's non-production manual draft aliases and immutable
@@ -86,26 +86,54 @@
       return window.FillDemo.get(path);
     }
     if (!state.token) throw Error("AUTH_REQUIRED");
-    const response = await fetch(path, { headers: { Authorization: `Bearer ${state.token}` } });
+    const token = state.token, epoch = state.authEpoch;
+    const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
     let body = {};
     try { body = await response.json(); } catch {}
+    // A response from a previous login must never clear or rehydrate a newer session.
+    if (epoch !== state.authEpoch || token !== state.token) throw Error("STALE_SESSION");
     if (!response.ok) {
-      if (response.status === 401) {
-        if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("fill.access");
-        localStorage.removeItem("fill.access");
-        state.token = null;
-        showAuth();
-      }
+      if (response.status === 401) invalidateSession();
       throw Error(body.message || body.error || `Request failed ${response.status}`);
     }
     return body;
   }
 
   function showAuth() {
+    // Hidden nodes are still part of the DOM: remove private data on logout.
+    state.today = null;
+    state.calendar = null;
+    state.org = null;
+    state.orgs = [];
+    state.view = "today";
+    for (const node of [el.kpis, el.util, el.empty, el.timeline,
+      el.revenueKpis, el.opportunityQueue, el.courtComparison]) {
+      node.innerHTML = "";
+    }
+    el.org.innerHTML = '<option value="">Choose organisation</option>';
+    el.org.value = "";
+    el.utilBadge.textContent = "—";
+    el.error.hidden = true;
+    el.error.textContent = "";
+    el.pageTitle.textContent = "Today";
+    el.today.hidden = false;
+    el.calendar.hidden = true;
+    el.revenue.hidden = true;
+    qa(".nav-item").forEach(button =>
+      button.classList.toggle("active", button.dataset.view === "today"));
     el.auth.hidden = false;
     el.workspace.hidden = true;
     el.signOut.hidden = true;
     el.identity.textContent = "Not signed in";
+  }
+
+  function invalidateSession() {
+    state.authEpoch++;
+    state.readEpoch++;
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("fill.access");
+    localStorage.removeItem("fill.access");
+    state.token = null;
+    showAuth();
   }
 
   function showWorkspace() {
@@ -243,7 +271,12 @@
     const start = state.today?.day_start;
     const end = state.today?.day_end;
     if (!start || !end) throw Error("Authoritative day bounds are unavailable.");
-    state.calendar = await api(`/api/fmc/${encodeURIComponent(state.org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+    const org = state.org, day = state.today, authEpoch = state.authEpoch;
+    const readEpoch = state.readEpoch;
+    const calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+    if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
+        state.org !== org || state.today !== day) return;
+    state.calendar = calendar;
     renderCalendar();
   }
 
@@ -355,25 +388,35 @@
 
   async function load() {
     if (!state.org) return;
+    const org = state.org, date = el.date.value;
+    const authEpoch = state.authEpoch, readEpoch = ++state.readEpoch;
     clearError();
     try {
-      state.today = await api(`/api/fmc/${encodeURIComponent(state.org)}/today?date=${encodeURIComponent(el.date.value)}`);
+      const today = await api(`/api/fmc/${encodeURIComponent(org)}/today?date=${encodeURIComponent(date)}`);
+      if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
+          state.org !== org || date !== el.date.value) return;
+      state.today = today;
       state.calendar = null;
       renderToday();
       if (state.view === "calendar") await loadCalendar();
     } catch (error) {
-      fail(error);
+      if (authEpoch === state.authEpoch && readEpoch === state.readEpoch) fail(error);
     }
   }
 
   async function init() {
+    // Each new login supersedes every outstanding request of the former operator.
+    const authEpoch = ++state.authEpoch;
+    state.readEpoch++;
     state.token = state.demo ? null : session();
     if (!state.demo && !state.token) return showAuth();
     try {
       const me = await api("/api/me");
+      if (authEpoch !== state.authEpoch) return;
       el.identity.textContent = state.demo ? "SYNTHETIC DEMO — no account" : (me.user?.email || "Signed in");
       if (state.demo) el.signOut.textContent = "Exit demo";
       const organizations = await api("/api/fmc/organizations");
+      if (authEpoch !== state.authEpoch) return;
       state.orgs = organizations.items || [];
       el.org.innerHTML = state.orgs.map((org) => (
         `<option value="${esc(org.id)}">${esc(org.name)} · ${esc(org.role)}</option>`
@@ -383,7 +426,7 @@
       if (state.org) await load();
       else if (!state.demo) fail(Error("No operator club role assigned. Ask the administrator."));
     } catch (error) {
-      fail(error);
+      if (authEpoch === state.authEpoch) fail(error);
     }
   }
 
@@ -441,10 +484,7 @@
       location.assign("/fill/");
       return;
     }
-    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem("fill.access");
-    localStorage.removeItem("fill.access");
-    state.token = null;
-    showAuth();
+    invalidateSession();
   });
 
   init();
