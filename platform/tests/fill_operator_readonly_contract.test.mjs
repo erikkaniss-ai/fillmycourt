@@ -26,8 +26,8 @@ function makeElement(dataset = {}) {
 test("Fill operator data use only Core GET contracts; password auth is separate", async () => {
   assert.match(htmlSource, /Staging · read-only/);
   assert.match(htmlSource, /not partner availability/i);
-  assert.match(appSource, /\/api\/fmc\/\$\{encodeURIComponent\(state\.org\)\}\/today/);
-  assert.match(appSource, /\/api\/fmc\/\$\{encodeURIComponent\(state\.org\)\}\/calendar/);
+  assert.match(appSource, /\/api\/fmc\/\$\{encodeURIComponent\(org\)\}\/today/);
+  assert.match(appSource, /\/api\/fmc\/\$\{encodeURIComponent\(org\)\}\/calendar/);
   assert.match(appSource, /method: "POST"/);
   assert.match(appSource, /"\/api\/fmc-auth\/login"/);
   assert.doesNotMatch(appSource, /\/opportunities|\/crm-actions|\/attributions|\/disputes/);
