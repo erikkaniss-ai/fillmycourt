@@ -377,3 +377,25 @@ test("real Chromium: 320px search, fixture slot and disabled booking preview sta
     assert.equal(forbiddenWrites.length,previousWrites);
   }finally{await context.close();}
 });
+
+test("real Chromium: URL fragment tokens cannot forge a player session while OAuth disabled",async()=>{
+  googleEnabled=false;
+  const {context,page}=await pageFixture({mobile:true});
+  try{
+    const beforeExchanges=authExchanges.length;
+    const beforeForbidden=forbiddenWrites.length;
+    await page.goto(origin+"/#access_token=forged.jwt&refresh_token=forged-refresh&expires_in=3600",
+      {waitUntil:"domcontentloaded"});
+    await page.locator(".venue-card").first().waitFor({timeout:15000});
+    assert.equal(new URL(page.url()).hash,"","Legacy OAuth URL fragment removed");
+    assert.equal(await page.evaluate(()=>localStorage.getItem("gac.session")),null,
+      "A URL cannot create a persistent player session");
+    assert.equal(await page.locator("#authButton").innerText(),"Sign in");
+    assert.equal(authExchanges.length,beforeExchanges,"No PKCE exchange without user initiation");
+    assert.equal(forbiddenWrites.length,beforeForbidden,"No booking or provider writes");
+
+    // Non-auth anchor navigation remains intact.
+    await page.goto(origin+"/#discover",{waitUntil:"domcontentloaded"});
+    assert.equal(new URL(page.url()).hash,"#discover");
+  }finally{await context.close();}
+});
