@@ -101,3 +101,47 @@ def test_operator_password_signin_then_get_only_workspace_and_logout():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_rejects_legacy_token_from_url_and_local_storage():
+    """Neither a hash token nor persistent storage may authenticate Fill."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Static)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    attempted_api = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page(viewport={"width": 320, "height": 700})
+            page.add_init_script(
+                "localStorage.setItem('fill.access','legacy-fixture-secret')"
+            )
+
+            def reject_api(route):
+                attempted_api.append(route.request.url)
+                route.fulfill(
+                    status=500,
+                    content_type="application/json",
+                    body='{"error":"unexpected request"}'
+                )
+
+            page.route("**/api/**", reject_api)
+            page.goto(
+                f"http://127.0.0.1:{server.server_port}/fill/"
+                "#access_token=url-fixture-secret&refresh_token=forbidden",
+                wait_until="networkidle",
+            )
+            expect(page.locator("#authGate")).to_be_visible()
+            expect(page.locator("#workspace")).to_be_hidden()
+            assert page.evaluate("location.hash") == ""
+            assert page.evaluate("sessionStorage.getItem('fill.access')") is None
+            assert page.evaluate("localStorage.getItem('fill.access')") is None
+            assert attempted_api == []
+            assert page.evaluate(
+                "document.documentElement.scrollWidth <= "
+                "document.documentElement.clientWidth"
+            )
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
