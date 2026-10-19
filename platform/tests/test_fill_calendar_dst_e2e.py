@@ -56,7 +56,7 @@ def test_operator_calendar_portugal_dst_repeated_and_missing_hours():
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 1440, "height": 900})
-            page.add_init_script("localStorage.setItem('fill.access', 'fixture-session')")
+            page.add_init_script("sessionStorage.setItem('fill.access', 'fixture-session')")
 
             def respond(route):
                 request = route.request
