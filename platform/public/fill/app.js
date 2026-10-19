@@ -68,15 +68,15 @@
   }
 
   function session() {
-    const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
-    const token = hash.get("access_token");
-    if (token) {
-      localStorage.setItem("fill.access", token);
+    // Password login is the ONLY supported staging authentication flow.
+    // A URL fragment or legacy localStorage bearer must never create a session.
+    // Strip inherited token fragments promptly to avoid accidental leakage.
+    const fragment = new URLSearchParams(location.hash.replace(/^#/, ""));
+    if (fragment.has("access_token") || fragment.has("refresh_token")) {
       history.replaceState(null, "", location.pathname + location.search);
-      return token;
     }
-    const liveToken = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("fill.access") : null;
-    return liveToken || localStorage.getItem("fill.access");
+    localStorage.removeItem("fill.access");
+    return typeof sessionStorage !== "undefined" ? sessionStorage.getItem("fill.access") : null;
   }
 
   async function api(path) {
