@@ -86,12 +86,14 @@
       return window.FillDemo.get(path);
     }
     if (!state.token) throw Error("AUTH_REQUIRED");
-    const token = state.token, epoch = state.authEpoch;
+    const token = state.token, epoch = state.authEpoch, readEpoch = state.readEpoch;
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
     let body = {};
     try { body = await response.json(); } catch {}
     // A response from a previous login must never clear or rehydrate a newer session.
     if (epoch !== state.authEpoch || token !== state.token) throw Error("STALE_SESSION");
+    // An older tenant/date read must never revoke the session after navigation.
+    if (readEpoch !== state.readEpoch) throw Error("STALE_REQUEST");
     if (!response.ok) {
       if (response.status === 401) invalidateSession();
       throw Error(body.message || body.error || `Request failed ${response.status}`);
@@ -148,6 +150,8 @@
   }
 
   function fail(error) {
+    if (["STALE_SESSION", "STALE_REQUEST"].includes(error?.message)) return;
+    if (!state.demo && !state.token) return;
     el.error.hidden = false;
     el.error.textContent = error.message || String(error);
   }
