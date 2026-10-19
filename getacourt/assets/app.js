@@ -43,7 +43,7 @@
   el.name.value=localStorage.getItem("gac.name")||"";
   el.email.value=localStorage.getItem("gac.email")||"";
   state.session=loadSession();
-  consumeAuthHash();
+  rejectImplicitAuthHash();
   // Capture the OAuth code immediately and remove it from the address bar
   // before loading network data, to avoid referer/history leakage.
   const googleCallback=window.GACAuth?.captureCallback(location.href)||null;
@@ -121,13 +121,13 @@
       return JSON.parse(decodeURIComponent(Array.from(atob(part)).map(c=>"%"+c.charCodeAt(0).toString(16).padStart(2,"0")).join("")));
     }catch{return {};}
   }
-  function consumeAuthHash(){
+  function rejectImplicitAuthHash(){
+    // GetACourt's approved Google flow is PKCE code exchange only.
+    // Arbitrary URL fragments must never mint a persistent player session,
+    // including when the Google and email sign-in flags are OFF.
     const hash=new URLSearchParams(location.hash.replace(/^#/,""));
-    const access=hash.get("access_token"), refresh=hash.get("refresh_token");
-    if(access&&refresh){
-      saveSession({access_token:access,refresh_token:refresh,expires_in:Number(hash.get("expires_in")||3600)});
+    if(hash.has("access_token")||hash.has("refresh_token")){
       history.replaceState(null,"",location.pathname+location.search);
-      setTimeout(()=>{toast("Signed in to GetACourt.");loadProfile(true);},100);
     }
   }
   async function completeGoogleSignIn(){
