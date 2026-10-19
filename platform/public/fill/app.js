@@ -281,7 +281,17 @@
     if (!start || !end) throw Error("Authoritative day bounds are unavailable.");
     const org = state.org, day = state.today, authEpoch = state.authEpoch;
     const readEpoch = state.readEpoch, calendarEpoch = ++state.calendarEpoch;
-    const calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, calendarEpoch);
+    let calendar;
+    try {
+      calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, calendarEpoch);
+    } catch (error) {
+      // Network failures, unlike HTTP responses, bypass api()'s epoch check.
+      // Never show an error from a club/date/session the operator has left.
+      if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
+          calendarEpoch !== state.calendarEpoch || state.view !== "calendar" ||
+          state.org !== org || state.today !== day) return;
+      throw error;
+    }
     if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
         calendarEpoch !== state.calendarEpoch || state.view !== "calendar" ||
         state.org !== org || state.today !== day) return;
