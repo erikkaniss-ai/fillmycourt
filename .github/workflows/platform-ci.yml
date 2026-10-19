@@ -15,7 +15,36 @@ on:
       - "netlify/functions/**"
       - ".github/workflows/platform-ci.yml"
 
+# Cancel only obsolete revisions of the same PR; push/staging runs remain.
+concurrency:
+  group: get-platform-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  fast-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fast Get JS syntax and authorization boundaries
+        run: |
+          node --check getacourt/assets/app.js
+          node --check getacourt/assets/auth-pkce.js
+          node --check getacourt/assets/commercial-signals.js
+          node --experimental-strip-types --test \
+            platform/tests/getacourt_booking_source_guard.test.mjs \
+            platform/tests/getacourt_date_contract.test.mjs \
+            platform/tests/getacourt_geolocation_contract.test.mjs \
+            platform/tests/getacourt_google_auth_contract.test.mjs \
+            platform/tests/getacourt_auth_facade_contract.test.mjs \
+            platform/tests/getacourt_session_contract.test.mjs \
+            platform/tests/getacourt_session_isolation.test.mjs \
+            platform/tests/getacourt_netlify_contract.test.mjs \
+            platform/tests/getacourt_map_csp_contract.test.mjs \
+            platform/tests/getacourt_install_contract.test.mjs \
+            platform/tests/getacourt_commercial_signals_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
     services:
