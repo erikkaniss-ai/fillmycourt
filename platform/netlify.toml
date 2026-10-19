@@ -22,6 +22,9 @@
   from = "/"
   to = "/fill/"
   status = 302
+  # The private deploy also contains platform/public/index.html (GetACourt).
+  # Force prevents the physical index from shadowing the operator-only root.
+  force = true
 
 [[redirects]]
   from = "/fill"
