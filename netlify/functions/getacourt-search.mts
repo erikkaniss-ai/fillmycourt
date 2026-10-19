@@ -123,7 +123,7 @@ function normalize(payloads, approved) {
     return {
       ...v,
       tags: [courtType, ...v.tags].slice(0,4),
-      slots: v.slots.sort((a,b) => a.startsAt.localeCompare(b.startsAt) || a.duration-b.duration),
+      slots: v.slots.sort((a,b) => Date.parse(a.startsAt)-Date.parse(b.startsAt) || a.duration-b.duration),
     };
   }).sort((a,b) => {
     if (a.distanceKm == null && b.distanceKm == null) return a.name.localeCompare(b.name);
