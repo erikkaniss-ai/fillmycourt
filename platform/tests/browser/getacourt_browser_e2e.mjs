@@ -23,7 +23,7 @@ const fakeJwt="fixture."+Buffer.from(JSON.stringify({
  sub:"qa-local-browser-only",email:"qa-browser@example.invalid"
 })).toString("base64url")+".not-a-real-signature";
 let server,browser,origin,googleEnabled=false;
-let fixtureBookingEnabled=false, fixtureSlotProvider=null;
+let fixtureBookingEnabled=false, fixtureSlotProvider=null, fixtureDstMode=false;
 let searchCalls=[],authExchanges=[],forbiddenWrites=[];
 const json=(res,code,obj)=>{
  res.writeHead(code,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});
@@ -36,7 +36,7 @@ async function readBody(req){
 }
 function fixture(date){
  const day=/^\d{4}-\d{2}-\d{2}$/.test(date||"")?date:"2030-01-01";
- return [{
+ const result=[{
   id:"qa-venue-1",name:"QA Fixture Court Club",area:"Cascais",sport:"padel",
   source:"LOCAL BROWSER QA FIXTURE — NOT LIVE",tags:["Outdoor"],lat:38.696,lon:-9.422,
   distanceKm:1.1,slots:[{
@@ -46,6 +46,17 @@ function fixture(date){
    ...(fixtureSlotProvider?{provider:fixtureSlotProvider}:{})
   }]
  }];
+ if(fixtureDstMode){
+   const standard=result[0].slots[0];
+   const alternate=(id,instant,label,price)=>({...standard,
+     id,date:"2026-10-25",time:"01:30",displayTime:label,
+     startsAt:instant,price,duration:60});
+   result[0].slots=[
+     alternate("qa-dst-early","2026-10-25T01:30:00+01:00","01:30 UTC+1",30),
+     alternate("qa-dst-late","2026-10-25T01:30:00+00:00","01:30 UTC+0",24)
+   ];
+ }
+ return result;
 }
 async function handler(req,res){
  try{
@@ -398,4 +409,33 @@ test("real Chromium: URL fragment tokens cannot forge a player session while OAu
     await page.goto(origin+"/#discover",{waitUntil:"domcontentloaded"});
     assert.equal(new URL(page.url()).hash,"#discover");
   }finally{await context.close();}
+});
+
+test("real Chromium: fallback 01:30 slots show offset on cards, venue detail and preview",async()=>{
+  // Synthetic endpoint, real player renderer; no Core, booking or payment writes.
+  fixtureDstMode=true;
+  fixtureBookingEnabled=false;
+  const {context,page}=await pageFixture({mobile:true});
+  try{
+    await ready(page);
+    const labels=await page.locator(".venue-card .slot strong").allTextContents();
+    assert.deepEqual(labels,["01:30 UTC+1","01:30 UTC+0"]);
+    const quick=await page.locator("#quickPicks").innerText();
+    assert.match(quick,/01:30 UTC\+1/);
+    assert.match(quick,/01:30 UTC\+0/);
+    await page.locator(".venue-detail-button").first().click();
+    const detail=await page.locator("#venueDialog").innerText();
+    assert.match(detail,/01:30 UTC\+1/);
+    assert.match(detail,/01:30 UTC\+0/);
+    await page.locator("#closeVenueButton").click();
+    const oldWrites=forbiddenWrites.length;
+    await page.locator(".venue-card .slot").last().click();
+    assert.equal(await page.locator("#bookingDialog").evaluate(e=>e.open),true);
+    assert.match(await page.locator("#bookingSummary").innerText(),/01:30 UTC\+0/);
+    assert.equal(await page.locator("#confirmBookingButton").isDisabled(),true);
+    assert.equal(forbiddenWrites.length,oldWrites);
+  }finally{
+    fixtureDstMode=false;fixtureBookingEnabled=false;
+    await context.close();
+  }
 });
