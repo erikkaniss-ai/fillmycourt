@@ -26,7 +26,7 @@ jobs:
       - name: Fast Fill syntax, authorization and preview gates
         run: |
           node --check platform/public/fill/app.js
-          node --test platform/tests/fill_operator_readonly_contract.test.mjs platform/tests/fill_operator_session_race_contract.test.mjs platform/tests/fill_operator_stale_unauthorized_contract.test.mjs
+          node --test platform/tests/fill_operator_readonly_contract.test.mjs platform/tests/fill_operator_session_race_contract.test.mjs platform/tests/fill_operator_stale_unauthorized_contract.test.mjs platform/tests/fill_operator_calendar_overlap_contract.test.mjs
           node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs platform/tests/fill_operator_password_login_contract.test.mjs
           node --test platform/tests/fill_private_deploy_workflow_contract.test.mjs platform/tests/fill_ci_gate_contract.test.mjs
           node --test platform/tests/fill_operator_demo_contract.test.mjs
@@ -62,7 +62,7 @@ jobs:
       - name: Verify Fill UI JavaScript syntax
         run: node --check platform/public/fill/app.js
       - name: Verify Fill read-only Core and session race contracts
-        run: node --test platform/tests/fill_operator_readonly_contract.test.mjs platform/tests/fill_operator_session_race_contract.test.mjs platform/tests/fill_operator_stale_unauthorized_contract.test.mjs
+        run: node --test platform/tests/fill_operator_readonly_contract.test.mjs platform/tests/fill_operator_session_race_contract.test.mjs platform/tests/fill_operator_stale_unauthorized_contract.test.mjs platform/tests/fill_operator_calendar_overlap_contract.test.mjs
       - name: Verify Fill private preview Operations-only gateway contracts
         run: node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs
       - name: Verify staging-only operator password-login contracts
