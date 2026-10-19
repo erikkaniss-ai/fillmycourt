@@ -363,7 +363,7 @@ main { overflow: hidden; }
   .profile-actions { grid-template-columns:1fr; }
 }
 
-.location-entry{display:flex;gap:8px;align-items:center}
+.location-entry{display:flex;gap:8px;align-items:center;min-width:0;width:100%}
 .location-entry input{flex:1;min-width:0}
 .near-me-button{border:1px solid rgba(7,30,51,.16);background:#fff;border-radius:10px;padding:10px 12px;font:inherit;font-weight:700;white-space:nowrap;cursor:pointer}
 .near-me-button:hover{border-color:rgba(18,103,229,.45)}
