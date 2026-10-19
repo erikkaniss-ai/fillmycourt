@@ -415,9 +415,9 @@
     const all=[];
     venues.forEach(v=>filteredSlots(v).forEach(s=>all.push({v,s})));
     if(!all.length){el.quickPicks.hidden=true;el.quickPicks.innerHTML="";return;}
-    const byEarliest=all.slice().sort((a,b)=>a.s.startsAt.localeCompare(b.s.startsAt))[0];
-    const byPrice=all.slice().sort((a,b)=>a.s.price-b.s.price||a.s.startsAt.localeCompare(b.s.startsAt))[0];
-    const byDistance=all.slice().sort((a,b)=>(a.v.distanceKm??9999)-(b.v.distanceKm??9999)||a.s.startsAt.localeCompare(b.s.startsAt))[0];
+    const byEarliest=all.slice().sort((a,b)=>Date.parse(a.s.startsAt)-Date.parse(b.s.startsAt))[0];
+    const byPrice=all.slice().sort((a,b)=>a.s.price-b.s.price||Date.parse(a.s.startsAt)-Date.parse(b.s.startsAt))[0];
+    const byDistance=all.slice().sort((a,b)=>(a.v.distanceKm??9999)-(b.v.distanceKm??9999)||Date.parse(a.s.startsAt)-Date.parse(b.s.startsAt))[0];
     const picks=[["Best match",byDistance],["Earliest",byEarliest],["Lowest price",byPrice]];
     const seen=new Set();
     el.quickPicks.innerHTML=picks.filter(([,x])=>x&& !seen.has(x.s.id) && seen.add(x.s.id)).map(([label,x])=>
@@ -585,7 +585,7 @@
     });
     const distance=v.distanceKm==null?"":'<span>'+Number(v.distanceKm).toFixed(1)+' km away</span>';
     const groups=[...byCourt.entries()].map(([court,items])=>{
-      const ordered=items.slice().sort((a,b)=>a.startsAt.localeCompare(b.startsAt)||a.duration-b.duration);
+      const ordered=items.slice().sort((a,b)=>Date.parse(a.startsAt)-Date.parse(b.startsAt)||a.duration-b.duration);
       return '<section class="venue-court-group"><div class="venue-court-head"><strong>'+esc(court)+'</strong><span>'+esc(ordered[0]?.indoor?"Indoor":"Outdoor")+'</span></div>'+
         '<div class="slot-list venue-slot-list">'+ordered.map(s=>'<button class="slot venue-dialog-slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'"><strong>'+esc(s.displayTime||s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>').join("")+'</div></section>';
     }).join("");
