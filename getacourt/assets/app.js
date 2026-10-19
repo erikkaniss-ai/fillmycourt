@@ -404,7 +404,7 @@
       const slots=filteredSlots(v).slice(0,3);
       const distance=v.distanceKm==null?"":(" · "+Number(v.distanceKm).toFixed(1)+" km");
       const popup='<div class="map-popup"><strong>'+esc(v.name)+'</strong><small>'+esc(v.area||"")+distance+'</small>'+
-        slots.map(s=>'<button type="button" class="map-slot" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'">'+esc(s.time)+' · '+esc(s.duration)+' min · '+money(s.price,s.currency)+'</button>').join("")+'</div>';
+        slots.map(s=>'<button type="button" class="map-slot" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'">'+esc(s.displayTime||s.time)+' · '+esc(s.duration)+' min · '+money(s.price,s.currency)+'</button>').join("")+'</div>';
       L.marker([v.lat,v.lon]).addTo(state.mapLayer).bindPopup(popup);
     });
     state.map.fitBounds(bounds,{padding:[28,28],maxZoom:14});
@@ -422,7 +422,7 @@
     const seen=new Set();
     el.quickPicks.innerHTML=picks.filter(([,x])=>x&& !seen.has(x.s.id) && seen.add(x.s.id)).map(([label,x])=>
       '<button class="quick-pick" type="button" data-v="'+esc(x.v.id)+'" data-s="'+esc(x.s.id)+'">'+
-      '<span>'+esc(label)+'</span><strong>'+esc(x.s.time)+' · '+money(x.s.price,x.s.currency)+'</strong><small>'+esc(x.v.name)+(x.v.distanceKm==null?"":" · "+Number(x.v.distanceKm).toFixed(1)+" km")+'</small></button>'
+      '<span>'+esc(label)+'</span><strong>'+esc(x.s.displayTime||x.s.time)+' · '+money(x.s.price,x.s.currency)+'</strong><small>'+esc(x.v.name)+(x.v.distanceKm==null?"":" · "+Number(x.v.distanceKm).toFixed(1)+" km")+'</small></button>'
     ).join("");
     el.quickPicks.hidden=!el.quickPicks.innerHTML;
     qa(".quick-pick",el.quickPicks).forEach(b=>b.addEventListener("click",()=>openVenue(b.dataset.v)));
@@ -454,7 +454,7 @@
       const tags=(v.tags||[]).map(t=>"<span>"+esc(t)+"</span>").join("");
       const slots=filteredSlots(v).map(s=>
         '<button class="slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'" '+(s.status!=="available"?"disabled":"")+'>'+
-        '<strong>'+esc(s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>'
+        '<strong>'+esc(s.displayTime||s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>'
       ).join("");
       const distance=v.distanceKm==null?"":'<span class="distance">'+Number(v.distanceKm).toFixed(1)+' km</span>';
       card.innerHTML='<div class="venue-top"><div><div class="venue-kicker">'+esc(v.area||"Connected venue")+' · '+esc(v.sport||state.sport)+'</div>'+
@@ -587,7 +587,7 @@
     const groups=[...byCourt.entries()].map(([court,items])=>{
       const ordered=items.slice().sort((a,b)=>a.startsAt.localeCompare(b.startsAt)||a.duration-b.duration);
       return '<section class="venue-court-group"><div class="venue-court-head"><strong>'+esc(court)+'</strong><span>'+esc(ordered[0]?.indoor?"Indoor":"Outdoor")+'</span></div>'+
-        '<div class="slot-list venue-slot-list">'+ordered.map(s=>'<button class="slot venue-dialog-slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'"><strong>'+esc(s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>').join("")+'</div></section>';
+        '<div class="slot-list venue-slot-list">'+ordered.map(s=>'<button class="slot venue-dialog-slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'"><strong>'+esc(s.displayTime||s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>').join("")+'</div></section>';
     }).join("");
     el.venueDialogContent.innerHTML='<p class="eyebrow">VENUE</p><div class="venue-detail-title"><div><h2>'+esc(v.name)+'</h2><p>'+esc(v.area||"")+'</p></div>'+distance+'</div>'+
       '<div class="venue-tags">'+(v.tags||[]).map(t=>'<span>'+esc(t)+'</span>').join("")+'</div>'+
@@ -630,7 +630,7 @@
     state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="18%";setBookingStep("court");
     const button=q("#confirmBookingButton");
     button.onclick=null;
-    el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
+    el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.displayTime||slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
     renderBookingIdentity();
     if(!state.platform.bookingEnabled){
       shadowSignal("booking_preview",{venueId:venue.id,slotId:slot.id,provider:slot.provider});
