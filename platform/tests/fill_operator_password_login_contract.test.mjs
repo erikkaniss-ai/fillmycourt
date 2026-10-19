@@ -89,3 +89,13 @@ test("App offers explicit non-signup login form and browser-session token, not t
  assert.match(app,/localStorage\.removeItem\("fill\.access"\)/);
  assert.doesNotMatch(html,/register|sign up|Sign up|create account/i);
 });
+
+test("Password-only operator never trusts URL fragment or persistent localStorage bearer",()=>{
+  const app=readFileSync("platform/public/fill/app.js","utf8");
+  assert.match(app,/sessionStorage\.getItem\("fill\.access"\)/);
+  assert.match(app,/history\.replaceState\(null, "", location\.pathname \+ location\.search\)/);
+  assert.match(app,/fragment\.has\("access_token"\)/);
+  assert.match(app,/fragment\.has\("refresh_token"\)/);
+  assert.doesNotMatch(app,/localStorage\.getItem\("fill\.access"\)/);
+  assert.doesNotMatch(app,/localStorage\.setItem\("fill\.access"\)/);
+});
