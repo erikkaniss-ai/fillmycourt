@@ -18,12 +18,12 @@
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
     Content-Security-Policy = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none'"
 
+# This PRIVATE draft also contains platform/public/index.html (GetACourt).
+# Force the operator root to prevent that physical file shadowing the redirect.
 [[redirects]]
   from = "/"
   to = "/fill/"
   status = 302
-  # The private deploy also contains platform/public/index.html (GetACourt).
-  # Force prevents the physical index from shadowing the operator-only root.
   force = true
 
 [[redirects]]
