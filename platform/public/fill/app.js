@@ -1,7 +1,7 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0 };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0 };
   // Synthetic demo is opt-in and restricted to the separate private-preview host
   // and loopback dev. This NEVER activates on public fillmycourt.com.
   // Also accept the CI's non-production manual draft aliases and immutable
@@ -79,7 +79,7 @@
     return typeof sessionStorage !== "undefined" ? sessionStorage.getItem("fill.access") : null;
   }
 
-  async function api(path) {
+  async function api(path, expectedCalendarEpoch = null) {
     // Demo calls never touch a backend or persist/forward any token.
     if (state.demo) {
       if (!window.FillDemo?.get) throw Error("Synthetic demo dataset unavailable.");
@@ -93,7 +93,10 @@
     // A response from a previous login must never clear or rehydrate a newer session.
     if (epoch !== state.authEpoch || token !== state.token) throw Error("STALE_SESSION");
     // An older tenant/date read must never revoke the session after navigation.
-    if (readEpoch !== state.readEpoch) throw Error("STALE_REQUEST");
+    if (readEpoch !== state.readEpoch ||
+        (expectedCalendarEpoch !== null &&
+          (expectedCalendarEpoch !== state.calendarEpoch || state.view !== "calendar")))
+      throw Error("STALE_REQUEST");
     if (!response.ok) {
       if (response.status === 401) invalidateSession();
       throw Error(body.message || body.error || `Request failed ${response.status}`);
@@ -102,6 +105,7 @@
   }
 
   function showAuth() {
+    state.calendarEpoch++;
     // Hidden nodes are still part of the DOM: remove private data on logout.
     state.today = null;
     state.calendar = null;
@@ -276,9 +280,10 @@
     const end = state.today?.day_end;
     if (!start || !end) throw Error("Authoritative day bounds are unavailable.");
     const org = state.org, day = state.today, authEpoch = state.authEpoch;
-    const readEpoch = state.readEpoch;
-    const calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`);
+    const readEpoch = state.readEpoch, calendarEpoch = ++state.calendarEpoch;
+    const calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, calendarEpoch);
     if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
+        calendarEpoch !== state.calendarEpoch || state.view !== "calendar" ||
         state.org !== org || state.today !== day) return;
     state.calendar = calendar;
     renderCalendar();
@@ -394,6 +399,7 @@
     if (!state.org) return;
     const org = state.org, date = el.date.value;
     const authEpoch = state.authEpoch, readEpoch = ++state.readEpoch;
+    state.calendarEpoch++;
     clearError();
     try {
       const today = await api(`/api/fmc/${encodeURIComponent(org)}/today?date=${encodeURIComponent(date)}`);
@@ -435,6 +441,7 @@
   }
 
   qa(".nav-item").forEach((button) => button.addEventListener("click", async () => {
+    if (button.dataset.view !== "calendar") state.calendarEpoch++;
     state.view = button.dataset.view;
     qa(".nav-item").forEach((item) => item.classList.toggle("active", item === button));
     el.pageTitle.textContent = state.view === "today" ? "Today" : state.view === "calendar" ? "Calendar" : "Revenue & Capacity";
