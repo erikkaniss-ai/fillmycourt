@@ -3,21 +3,25 @@ import assert from "node:assert/strict";
 import config from "../../netlify/functions/getacourt-platform-config.mts";
 import exchange from "../../netlify/functions/getacourt-auth-google-exchange.mts";
 import signOut from "../../netlify/functions/getacourt-auth-sign-out.mts";
+import magicLink from "../../netlify/functions/getacourt-auth-magic-link.mts";
 const previous={};
-async function run(handler,req,flag="false"){
+async function run(handler,req,flag="false",emailFlag="false"){
  const savedFetch=globalThis.fetch,savedEnv=globalThis.Netlify;
  const calls=[];
  globalThis.Netlify={env:{get:key=>({
  GETACOURT_CORE_API_BASE:"https://core.fixture.test",
  GETACOURT_SUPABASE_URL:"https://fixture.supabase.co",
  GETACOURT_SUPABASE_PUBLISHABLE_KEY:"sb_publishable_ci",
- GETACOURT_GOOGLE_SIGNIN_ENABLED:flag
+ GETACOURT_GOOGLE_SIGNIN_ENABLED:flag,
+ GETACOURT_EMAIL_SIGNIN_ENABLED:emailFlag,
+ GETACOURT_AUTH_REDIRECT_URL:"https://deploy-preview-5--getacourt-preview.netlify.app/"
  })[key]||null}};
  globalThis.fetch=async(url,init)=>{
    calls.push({url:String(url),init});
    if(String(url).includes("/api/config"))return Response.json({booking_enabled:false,online_payments:false,auth:"supabase"});
    if(String(url).includes("grant_type=pkce"))return Response.json({access_token:"user.jwt",refresh_token:"refresh.fake",expires_in:3600,provider_token:"DO_NOT_RETURN"});
    if(String(url).includes("/logout"))return Response.json({});
+   if(String(url).includes("/auth/v1/otp"))return Response.json({});
    throw Error("Unexpected network");
  };
  try{const out=await handler(req);return {status:out.status,data:await out.json(),calls};}
@@ -71,4 +75,40 @@ test("Auth exchange and sign-out reject cross-origin browser posts before upstre
    origin:"https://attacker.test",authorization:"Bearer fake.jwt"
  }),"true");
  assert.equal(o.status,403);assert.equal(o.calls.length,0);
+});
+
+test("P0 disabled magic-link API rejects unsolicited POST before Supabase delivery",async()=>{
+ const payload={email:"fixture-person@example.invalid"};
+ for(const enabled of ["false","","True ","off"]){
+  const r=await run(magicLink,req("/api/gac/auth/magic-link","POST",payload),"false",enabled);
+  assert.equal(r.status,503,enabled);
+  assert.equal(r.data.error,"EMAIL_SIGNIN_DISABLED",enabled);
+  assert.equal(r.calls.length,0,"No upstream OTP or sign-up network call on disabled email flow");
+ }
+});
+
+test("P0 enabled magic-link uses fixture Supabase OTP only behind explicit opt-in",async()=>{
+ const r=await run(magicLink,req("/api/gac/auth/magic-link","POST",
+  {email:"fixture-person@example.invalid"}),"false","true");
+ assert.equal(r.status,200);
+ assert.equal(r.data.ok,true);
+ assert.equal(r.calls.length,1);
+ const uri=new URL(r.calls[0].url);
+ assert.equal(uri.hostname,"fixture.supabase.co");
+ assert.equal(uri.pathname,"/auth/v1/otp");
+ assert.equal(uri.searchParams.get("redirect_to"),
+  "https://deploy-preview-5--getacourt-preview.netlify.app/");
+ assert.equal(r.calls[0].init.method,"POST");
+ assert.equal(r.calls[0].init.headers.apikey,"sb_publishable_ci");
+ const payload=JSON.parse(r.calls[0].init.body);
+ assert.equal(payload.email,"fixture-person@example.invalid");
+ assert.equal(payload.create_user,true);
+});
+
+test("P0 cross-origin magic-link request never sends email even with flag enabled",async()=>{
+ const r=await run(magicLink,req("/api/gac/auth/magic-link","POST",
+  {email:"fixture-person@example.invalid"},{origin:"https://attacker.invalid"}),"false","true");
+ assert.equal(r.status,403);
+ assert.equal(r.data.error,"INVALID_ORIGIN");
+ assert.equal(r.calls.length,0);
 });
