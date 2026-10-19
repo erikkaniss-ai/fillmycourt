@@ -2,7 +2,7 @@ name: Platform CI
 
 on:
   push:
-    branches: ["get/release-candidate-mvp-qa-04"]
+    branches: ["getacourt-staging"]
     paths:
       - "platform/**"
       - "getacourt/**"
@@ -15,7 +15,8 @@ on:
       - "netlify/functions/**"
       - ".github/workflows/platform-ci.yml"
 
-# Cancel only obsolete revisions of the same PR; push/staging runs remain.
+# RC receives required PR CI only; staging integration pushes retain full CI.
+# Cancel only obsolete revisions of the same PR; staging push runs remain.
 concurrency:
   group: get-platform-ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
