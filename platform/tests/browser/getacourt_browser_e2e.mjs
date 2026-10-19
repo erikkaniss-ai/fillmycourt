@@ -335,3 +335,45 @@ test("real Chromium: simulated Google callback → profile → signout, never Go
   assert.equal(await page.locator("#authButton").innerText(),"Sign in");
  }finally{await context.close();googleEnabled=false;}
 });
+
+test("real Chromium: 320px search, fixture slot and disabled booking preview stay on-screen",async()=>{
+  // Dedicated 320px pass complements the existing 390px mobile flows.
+  // Fixture HTTP stays localhost and booking/hold/provider writes are forbidden.
+  const {context,page}=await pageFixture({mobile:true});
+  try{
+    await page.setViewportSize({width:320,height:700});
+    await ready(page);
+    async function assertHorizontallyUsable(stage,selectors){
+      const metrics=await page.evaluate(list=>{
+        const width=document.documentElement.clientWidth;
+        const overflow=document.documentElement.scrollWidth;
+        return {width,overflow,boxes:list.map(selector=>{
+          const element=document.querySelector(selector);
+          if(!element)return {selector,missing:true};
+          const b=element.getBoundingClientRect();
+          return {selector,hidden:getComputedStyle(element).display==="none",
+            left:b.left,right:b.right,width:b.width};
+        })};
+      },selectors);
+      assert.ok(metrics.overflow<=metrics.width+1,
+        stage+": viewport overflow "+JSON.stringify(metrics));
+      for(const b of metrics.boxes){
+        assert.equal(b.missing,undefined,stage+": missing "+b.selector);
+        assert.equal(b.hidden,false,stage+": hidden "+b.selector);
+        assert.ok(b.width>0&&b.left>=-2&&b.right<=metrics.width+2,
+          stage+": clipped "+JSON.stringify(b));
+      }
+    }
+    await assertHorizontallyUsable("search",
+      ["#searchForm","#locationInput","#nearMeButton","#searchForm button[type=submit]"]);
+    assert.match(await page.locator("#resultCount").innerText(),/available slot/);
+    await assertHorizontallyUsable("results",["#resultsGrid",".venue-card",".venue-card .slot"]);
+    const previousWrites=forbiddenWrites.length;
+    await page.locator(".venue-card .slot").first().click();
+    assert.equal(await page.locator("#bookingDialog").evaluate(el=>el.open),true);
+    assert.match(await page.locator("#bookingHeading").innerText(),/Booking preview/);
+    assert.equal(await page.locator("#confirmBookingButton").isDisabled(),true);
+    await assertHorizontallyUsable("booking preview",["#bookingDialog","#bookingHeading"]);
+    assert.equal(forbiddenWrites.length,previousWrites);
+  }finally{await context.close();}
+});
