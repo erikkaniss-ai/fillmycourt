@@ -3,6 +3,13 @@ import { body, env, errorResponse, response } from "../lib/platform.mts";
 export default async (req) => {
   if (req.method !== "POST") return response({ error:"Method not allowed" }, 405);
   try {
+    // Explicitly disable email delivery at the server boundary, not only in UI.
+    // Never invoke Supabase OTP or create users when the preview feature is OFF.
+    const origin=req.headers.get("origin");
+    if(origin && origin!==new URL(req.url).origin)
+      return response({error:"INVALID_ORIGIN"},403);
+    if(String(globalThis.Netlify?.env?.get("GETACOURT_EMAIL_SIGNIN_ENABLED")||"").toLowerCase()!=="true")
+      return response({error:"EMAIL_SIGNIN_DISABLED"},503);
     const input = await body(req);
     const email = String(input.email || "").trim().toLowerCase();
     if (!email || !email.includes("@")) return response({ error:"EMAIL_REQUIRED", message:"Valid email is required." }, 400);
