@@ -283,6 +283,9 @@ test("Get rollback 01:30 slots remain distinct AND visibly distinguishable, even
     assert.equal(r.body.venues.length,1);
     const slots=r.body.venues[0].slots;
     assert.equal(slots.length,options.length);
+    if(options.length===2) assert.deepEqual(
+      slots.map(s=>s.startsAt),[early.starts_at,late.starts_at],
+      "Fallback slots must be ordered by actual elapsed time, not ISO offset text");
     const byInstant=new Map(slots.map(s=>[s.startsAt,s]));
     assert.equal(byInstant.size,options.length,"Keep authoritative ISO instants separate");
     for(const [source,offset] of [[early,"UTC+1"],[late,"UTC+0"]]){
