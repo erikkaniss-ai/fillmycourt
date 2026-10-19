@@ -8,6 +8,13 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
+
+# A new PR8 HEAD cancels only the preceding PR8 private draft, never GetACourt.
+concurrency:
+  group: fill-private-draft-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   private-draft:
@@ -62,25 +69,19 @@ jobs:
         if: steps.eligibility.outputs.configured == 'true'
         run: npm install --no-save --no-audit --no-fund netlify-cli@27.12.1
 
-      - uses: actions/setup-python@v5
+      # Full PostgreSQL-from-zero + Chromium E2E + all contracts still run
+      # in Platform CI. Never upload based on fixture-only checks or old SHA.
+      - name: Require full green Platform CI on exact PR8 HEAD before private upload
         if: steps.eligibility.outputs.configured == 'true'
-        with:
-          python-version: '3.13'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs
 
-      - name: Install isolated browser acceptance dependencies
+      - name: Independent fast auth and gateway preflight
         if: steps.eligibility.outputs.configured == 'true'
-        run: |
-          python -m pip install -r platform/requirements-dev.txt
-          python -m playwright install --with-deps chromium
-
-      - name: Require operator/auth browser acceptance BEFORE private draft upload
-        if: steps.eligibility.outputs.configured == 'true'
-        shell: bash
         run: |
           node --check platform/public/fill/app.js
-          node --experimental-strip-types --test platform/tests/fill_operator_password_login_contract.test.mjs
-          node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs
-          python -m pytest -q             platform/tests/test_fill_operator_password_login_e2e.py             platform/tests/test_fill_operator_e2e.py             platform/tests/test_fill_demo_e2e.py             platform/tests/test_fill_offline_bundle.py             platform/tests/test_fill_calendar_dst_e2e.py
+          node --experimental-strip-types --test platform/tests/fill_operator_password_login_contract.test.mjs platform/tests/fill_operator_preview_gateway_contract.test.mjs
 
       - name: Stamp authorized review manifest
         if: steps.eligibility.outputs.configured == 'true'
@@ -97,6 +98,12 @@ jobs:
                 fixture_data_only: true
               }, null, 2) + "\n");
           '
+
+      - name: Recheck active PR8 HEAD before any Netlify upload
+        if: steps.eligibility.outputs.configured == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs --check-head
 
       - name: Upload DRAFT only to existing private Fill site
         if: steps.eligibility.outputs.configured == 'true'
