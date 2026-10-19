@@ -317,7 +317,8 @@ main { overflow: hidden; }
 @media (max-width: 920px) {
   .site-header { grid-template-columns: 1fr auto; }
   .nav { display: none; }
-  .hero { grid-template-columns: 1fr; padding-top: 58px; }
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 58px; }
+  .hero-copy, .search-panel { min-width: 0; max-width: 100%; }
   .hero-copy { max-width: 760px; }
   .search-grid { grid-template-columns: 1fr 1fr; }
   .field-location { grid-column: 1/-1; }
@@ -337,7 +338,9 @@ main { overflow: hidden; }
   .hero h1 { font-size: 57px; }
   .trust-line { display: grid; }
   .search-panel { border-radius: 24px; padding: 16px; }
-  .search-grid { grid-template-columns: 1fr 1fr; }
+  .search-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .search-grid > .field { min-width: 0; }
+  .search-grid .field input { max-width: 100%; }
   .field-location, .search-grid .field:nth-child(2) { grid-column: 1/-1; }
   .results-shell { padding: 54px 16px 66px; }
   .results-head { display: grid; }
