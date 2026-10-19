@@ -85,7 +85,7 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 1440, "height": 1000})
-            page.add_init_script("localStorage.setItem('fill.access', 'fixture-session')")
+            page.add_init_script("sessionStorage.setItem('fill.access', 'fixture-session')")
 
             def fulfill(route):
                 request = route.request
