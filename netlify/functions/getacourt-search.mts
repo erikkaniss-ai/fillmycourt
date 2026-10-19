@@ -37,6 +37,28 @@ function isKnownStagingFixture(slot) {
     (address && typeof address === "object" && address.label === "Cascais staging inventory");
 }
 
+// A fallback clock-hour can occur twice with different UTC instants.
+// Show the offset even when the provider returns only ONE of the repeated
+// instants, so an ambiguous 01:30 never looks like the other 01:30.
+function slotDisplayTime(instant, timeZone, date, time) {
+  const wallClock = other =>
+    other.toLocaleDateString("en-CA", {timeZone}) === date &&
+    other.toLocaleTimeString("en-GB", {
+      hour:"2-digit",minute:"2-digit",hour12:false,timeZone
+    }) === time;
+  if(!wallClock(new Date(instant.getTime()-3600000)) &&
+     !wallClock(new Date(instant.getTime()+3600000))) return time;
+  const shortOffset = new Intl.DateTimeFormat("en-GB", {
+    timeZone,timeZoneName:"shortOffset"
+  }).formatToParts(instant).find(p=>p.type==="timeZoneName")?.value || "GMT";
+  // Intl returns GMT, GMT+1, GMT-5, and occasionally GMT+5:30.
+  const match = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(shortOffset);
+  if(!match) return time+" "+shortOffset.replace(/^GMT/,"UTC");
+  const offset = !match[1] ? "UTC+0" :
+    "UTC"+match[1]+Number(match[2])+(match[3] ? ":"+match[3] : "");
+  return time+" "+offset;
+}
+
 function normalize(payloads, approved) {
   const byVenue = new Map();
   const seen = new Set();
@@ -68,13 +90,18 @@ function normalize(payloads, approved) {
       const courtTag = slot.name || "Court";
       if (!venue.tags.includes(courtTag)) venue.tags.push(courtTag);
       const start = new Date(slot.starts_at);
+      const localDate = start.toLocaleDateString("en-CA", { timeZone: slot.timezone });
+      const localTime = start.toLocaleTimeString("en-GB", {
+        hour:"2-digit", minute:"2-digit", hour12:false, timeZone:slot.timezone
+      });
       venue.slots.push({
         id: key,
         courtId: slot.id,
         courtName: slot.name,
         venueId,
-        date: start.toLocaleDateString("en-CA", { timeZone: slot.timezone }),
-        time: start.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit", hour12:false, timeZone: slot.timezone }),
+        date: localDate,
+        time: localTime,
+        displayTime: slotDisplayTime(start, slot.timezone, localDate, localTime),
         startsAt: slot.starts_at,
         price: Number(slot.amount_minor || 0) / 100,
         duration: Number(slot.duration_minutes || 0),
