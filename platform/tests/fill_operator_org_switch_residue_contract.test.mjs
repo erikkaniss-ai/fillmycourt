@@ -26,6 +26,7 @@ test("org switch purges former tenant rendering before the new tenant read resol
     get textContent() { return "former tenant content"; },
     set textContent(value) { if (value === "") cleared.push(name); },
   });
+  const utilisationBadge = {textContent: "72% overall"}; // PRIVATE tenant A KPI
   const context = {
     state: {
       token: "session-for-current-operator",
@@ -39,6 +40,7 @@ test("org switch purges former tenant rendering before the new tenant read resol
     },
     el: {
       date: {value: "2026-10-19"},
+      utilBadge: utilisationBadge,
       kpis: node("kpis"), util: node("util"), empty: node("empty"),
       revenueKpis: node("revenueKpis"), opportunityQueue: node("opportunityQueue"),
       courtComparison: node("courtComparison"), timeline: node("timeline"),
@@ -58,6 +60,8 @@ test("org switch purges former tenant rendering before the new tenant read resol
 
   assert.equal(context.state.today, null, "former tenant Today data removed immediately");
   assert.equal(context.state.calendar, null, "former tenant Calendar data removed immediately");
+  assert.equal(utilisationBadge.textContent, "—",
+    "Former tenant utilisation badge must be cleared immediately");
   assert.deepEqual([...new Set(cleared)].sort(), [
     "courtComparison", "empty", "kpis", "opportunityQueue",
     "revenueKpis", "timeline", "util",
