@@ -44,7 +44,8 @@ jobs:
             platform/tests/getacourt_netlify_contract.test.mjs \
             platform/tests/getacourt_map_csp_contract.test.mjs \
             platform/tests/getacourt_install_contract.test.mjs \
-            platform/tests/getacourt_commercial_signals_contract.test.mjs
+            platform/tests/getacourt_commercial_signals_contract.test.mjs \
+            platform/tests/getacourt_ci_dispatch_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
     services:
@@ -73,6 +74,8 @@ jobs:
         run: pip install -r platform/requirements-dev.txt
       - name: Compile
         run: python -m compileall -q platform/src
+      - name: Verify GetAcourt CI dispatch and full-suite retention contracts
+        run: node --test platform/tests/getacourt_ci_dispatch_contract.test.mjs
       - name: Verify GetAcourt browser JS syntax
         run: node --check getacourt/assets/app.js && node --check getacourt/assets/commercial-signals.js
       - name: Decision 104 GetAcourt commercial observability shadow contracts
