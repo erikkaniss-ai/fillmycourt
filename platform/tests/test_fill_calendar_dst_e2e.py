@@ -36,6 +36,24 @@ DAYS = {
         "hours": 23,
         "cells": 46,
     },
+    "2027-03-28": {
+        "start": "2027-03-28T00:00:00+00:00",
+        "end": "2027-03-29T00:00:00+01:00",
+        # An elapsed 60-minute booking straddles the nonexistent 01:00 hour.
+        "event_start": "2027-03-28T00:30:00+00:00",
+        "event_end": "2027-03-28T02:30:00+01:00",
+        "hours": 23,
+        "cells": 46,
+    },
+    "2027-10-31": {
+        "start": "2027-10-31T00:00:00+01:00",
+        "end": "2027-11-01T00:00:00+00:00",
+        # The two 01:30 instants are separated by 60 elapsed minutes.
+        "event_start": "2027-10-31T01:30:00+01:00",
+        "event_end": "2027-10-31T01:30:00+00:00",
+        "hours": 25,
+        "cells": 50,
+    },
 }
 
 
@@ -123,8 +141,9 @@ def test_operator_calendar_portugal_dst_repeated_and_missing_hours():
                 expect(page.locator(".court-lane")).to_have_count(1)
                 expect(page.locator(".court-lane .lane-cell")).to_have_count(details["cells"])
                 expect(page.locator(".court-lane .lane-cell.booked")).to_have_count(2)
-                if day == "2026-10-25":
-                    # Both 01:00 ticks must be distinct and carry different offsets.
+                if details["hours"] == 25:
+                    # Both 01:00 ticks must be distinct and carry different offsets
+                    # on autumn rollbacks, independent of calendar year.
                     labels = page.locator(".time-axis span").all_text_contents()
                     one_oclock = [label for label in labels if label.startswith("01:00")]
                     assert len(one_oclock) == 2, labels
