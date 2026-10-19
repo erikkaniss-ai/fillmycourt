@@ -59,3 +59,17 @@ test("OAuth callback page forbids Referer propagation before loading any assets"
  const script=html.indexOf('<script');
  assert.ok(meta>=0&&css>meta&&script>meta);
 });
+
+test("Implicit URL access/refresh tokens cannot initiate a Get player session",()=>{
+ const js=require("node:fs").readFileSync("getacourt/assets/app.js","utf8");
+ assert.match(js,/rejectImplicitAuthHash\(\)/);
+ const start=js.indexOf("  function rejectImplicitAuthHash(){");
+ const end=js.indexOf("  async function completeGoogleSignIn(){",start);
+ assert.ok(start>=0&&end>start);
+ const source=js.slice(start,end);
+ assert.match(source,/hash\.has\("access_token"\)/);
+ assert.match(source,/hash\.has\("refresh_token"\)/);
+ assert.match(source,/history\.replaceState\(null,"",location\.pathname\+location\.search\)/);
+ assert.doesNotMatch(source,/saveSession\(|localStorage\.setItem\(/);
+ assert.doesNotMatch(js,/function consumeAuthHash\(/);
+});
