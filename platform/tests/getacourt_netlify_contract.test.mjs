@@ -268,3 +268,32 @@ test("Get booking history uses venue timezone in both summer and winter (DST)", 
     assert.equal(result.body.bookings[0].venue.timezone,"Europe/Lisbon");
   }
 });
+
+test("Get rollback 01:30 slots remain distinct AND visibly distinguishable, even when only one is available",async()=>{
+  // Portugal clocks turn back on 2026-10-25: these two 01:30 values are
+  // distinct instants and must not look like the same booking choice.
+  const early={...SLOT,starts_at:"2026-10-25T01:30:00+01:00",duration_minutes:60};
+  const late={...SLOT,starts_at:"2026-10-25T01:30:00+00:00",duration_minutes:60};
+  const query=path("/api/gac/search?sport=padel&date=2026-10-25&from=00:00&to=04:00");
+  for(const options of [[early,late],[early],[late]]){
+    const r=await harness(searchHandler,()=>({body:{slots:options}}),query,
+      {approvedVenueIds:"venue-1"});
+    assert.equal(r.status,200);
+    assert.equal(r.calls.length,2,"GET-only 60/90-minute Core search");
+    assert.equal(r.body.venues.length,1);
+    const slots=r.body.venues[0].slots;
+    assert.equal(slots.length,options.length);
+    const byInstant=new Map(slots.map(s=>[s.startsAt,s]));
+    assert.equal(byInstant.size,options.length,"Keep authoritative ISO instants separate");
+    for(const [source,offset] of [[early,"UTC+1"],[late,"UTC+0"]]){
+      if(!options.includes(source)) continue;
+      const s=byInstant.get(source.starts_at);
+      assert.ok(s,"Original Core slot retained");
+      assert.equal(s.time,"01:30","Core local-time contract unchanged");
+      assert.equal(s.date,"2026-10-25");
+      assert.equal(s.displayTime,"01:30 "+offset,
+        "Do not present two local 01:30 instants as identical booking times");
+      assert.equal(s.courtId,source.id);
+    }
+  }
+});
