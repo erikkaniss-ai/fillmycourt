@@ -116,3 +116,12 @@ test("Operations rejects expired or unauthorized bearer without inventing sessio
   assert.equal(r.body.error,"PERMISSION_DENIED");
   assert.equal(r.headers.get("cache-control"),"no-store, private");
 });
+
+test("Private Fill root always redirects to Operator, even though GetACourt index exists",()=>{
+  const conf=readFileSync("platform/netlify.toml","utf8");
+  const root=readFileSync("platform/public/index.html","utf8");
+  assert.match(root,/<title>GetACourt /,"Shared platform publishes a GetACourt root document");
+  // Netlify otherwise shadows a non-forced / redirect with the physical index.html.
+  // This MUST only apply to the isolated private platform/netlify.toml, not public sites.
+  assert.match(conf,/\[\[redirects\]\]\s+from = "\/"\s+to = "\/fill\/"\s+status = 302\s+force = true/);
+});
