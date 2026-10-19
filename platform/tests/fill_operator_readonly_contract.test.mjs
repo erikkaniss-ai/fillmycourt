@@ -35,13 +35,15 @@ test("Fill operator data use only Core GET contracts; password auth is separate"
   const elements = Object.fromEntries(["#authGate", "#workspace", "#orgSelect", "#identity", "#signOut", "#dateInput", "#refreshButton", "#error", "#pageTitle", "#todayView", "#calendarView", "#revenueView", "#kpis", "#courtUtilisation", "#utilisationBadge", "#emptyCapacity", "#calendarTimeline", "#revenueKpis", "#opportunityQueue", "#courtComparison", "#operatorSignIn", "#operatorEmail", "#operatorPassword", "#operatorLoginButton", "#operatorLoginError"].map((id) => [id, makeElement()]));
   const navigation = [makeElement({ view: "today" }), makeElement({ view: "calendar" }), makeElement({ view: "revenue" })];
   const calls = [];
-  const local = new Map([["fill.access", "fixture-session"]]);
+  const local = new Map([["fill.access", "stale-persistent-fixture"]]);
+  const session = new Map([["fill.access", "fixture-session"]]);
   const response = (body) => ({ ok: true, status: 200, json: async () => body });
   const context = {
     URLSearchParams, Intl, Date, Map, Number, String, Error, Headers, encodeURIComponent,
     document: { querySelector(selector) { return elements[selector]; }, querySelectorAll(selector) { return selector === ".nav-item" ? navigation : []; } },
     location: { hash: "", pathname: "/fill/", search: "" }, history: { replaceState() {} },
     localStorage: { getItem: (key) => local.get(key) || null, setItem: (key, value) => local.set(key, value), removeItem: (key) => local.delete(key) },
+    sessionStorage: { getItem: (key) => session.get(key) || null, setItem: (key, value) => session.set(key, value), removeItem: (key) => session.delete(key) },
     fetch: async (path, options = {}) => {
       calls.push({ path, method: options.method || "GET" });
       if (path === "/api/me") return response({ user: { email: "operator@example.test" } });
@@ -55,6 +57,8 @@ test("Fill operator data use only Core GET contracts; password auth is separate"
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
+  assert.equal(local.has("fill.access"), false, "stale persistent bearer purged");
+  assert.equal(session.get("fill.access"), "fixture-session");
   assert.deepEqual(calls.map((call) => call.method), ["GET", "GET", "GET"]);
   assert.match(elements["#courtUtilisation"].innerHTML, /Needs rate coverage/);
   assert.match(elements["#opportunityQueue"].innerHTML, /Capacity candidate only/);
