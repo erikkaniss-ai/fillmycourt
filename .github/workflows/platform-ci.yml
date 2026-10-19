@@ -11,7 +11,26 @@ on:
       - "platform/**"
       - ".github/workflows/platform-ci.yml"
 
+concurrency:
+  group: platform-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  fast-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fast Fill syntax, authorization and preview gates
+        run: |
+          node --check platform/public/fill/app.js
+          node --test platform/tests/fill_operator_readonly_contract.test.mjs
+          node --experimental-strip-types --test platform/tests/fill_operator_preview_gateway_contract.test.mjs platform/tests/fill_operator_password_login_contract.test.mjs
+          node --test platform/tests/fill_private_deploy_workflow_contract.test.mjs platform/tests/fill_ci_gate_contract.test.mjs
+          node --test platform/tests/fill_operator_demo_contract.test.mjs
+          node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
     services:
@@ -49,7 +68,7 @@ jobs:
       - name: Verify staging-only operator password-login contracts
         run: node --experimental-strip-types --test platform/tests/fill_operator_password_login_contract.test.mjs
       - name: Verify fail-closed Fill private draft deployment workflow
-        run: node --test platform/tests/fill_private_deploy_workflow_contract.test.mjs
+        run: node --test platform/tests/fill_private_deploy_workflow_contract.test.mjs platform/tests/fill_ci_gate_contract.test.mjs
       - name: Verify opt-in synthetic Fill demo safety contract
         run: node --test platform/tests/fill_operator_demo_contract.test.mjs
       - name: GetAcourt Netlify boundary contracts (no network / no writes)
