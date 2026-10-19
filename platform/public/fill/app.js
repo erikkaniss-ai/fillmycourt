@@ -417,6 +417,7 @@
     state.calendar = null;
     [el.kpis, el.util, el.empty, el.revenueKpis, el.opportunityQueue,
       el.courtComparison, el.timeline].forEach((node) => { node.textContent = ""; });
+    el.utilBadge.textContent = "—";
     clearError();
     try {
       const today = await api(`/api/fmc/${encodeURIComponent(org)}/today?date=${encodeURIComponent(date)}`);
