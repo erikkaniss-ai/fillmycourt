@@ -400,6 +400,13 @@
     const org = state.org, date = el.date.value;
     const authEpoch = state.authEpoch, readEpoch = ++state.readEpoch;
     state.calendarEpoch++;
+    // Do not leave a previous organisation's capacity or calendar in the DOM
+    // while the newly selected organisation is loading. A late response is
+    // separately rejected by auth/read epochs below.
+    state.today = null;
+    state.calendar = null;
+    [el.kpis, el.util, el.empty, el.revenueKpis, el.opportunityQueue,
+      el.courtComparison, el.timeline].forEach((node) => { node.textContent = ""; });
     clearError();
     try {
       const today = await api(`/api/fmc/${encodeURIComponent(org)}/today?date=${encodeURIComponent(date)}`);
