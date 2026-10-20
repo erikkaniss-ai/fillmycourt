@@ -18,6 +18,7 @@ from sqlalchemy import text
 from .common import DomainError
 from .playtomic import Deferred, Playtomic
 from .provider_read_gate import require_official_club_read
+from .provider_page_budget import read_page_state, next_page_state, PageBudgetError
 from .supabase_v1 import V1Store, one, rows
 
 
@@ -107,94 +108,113 @@ def _sync_playtomic(db: V1Store, job: dict):
     # This gate denies unless a separately approved named-club booking scope and
     # explicit owner-enabled deployment flag exist, BEFORE credential access.
     require_official_club_read(connection, stream)
-    client_id, secret, tenant = _credential(connection)
-    api = Playtomic(client_id, secret, tenant)
+    # A single connection-level reservation is shared across all streams and
+    # worker processes. This occurs BEFORE any provider credentials are read.
     now = datetime.now(timezone.utc)
     start = payload.get("window_start") or (now - timedelta(days=30)).isoformat()
-    end = payload.get("window_end") or (now + (timedelta(days=90) if stream=="bookings" else timedelta())).isoformat()
-    cursor = None
-    page = 0
-    total = 0
-    max_pages = 200
-    while True:
-        if page >= max_pages:
-            raise DomainError("PROVIDER_PAGINATION", "Provider pagination exceeded safety limit.", 502)
-        response = api.page(stream, start, end, cursor=cursor, page=page)
-        records = response["records"]
-        with db.trusted() as c:
-            for rec in records:
-                _observe(c, connection["organization_id"], pc_id, stream, rec, complete=True)
-                if stream == "players":
-                    consent = rec.get("consent")
-                    marketing = True if consent == "granted" else None
-                    c.execute(text("""
-                        insert into public.people
-                          (organization_id,external_key,full_name,email,phone,marketing_consent,source,source_updated_at)
-                        values(cast(:org as uuid),:external,:name,nullif(:email,''),nullif(:phone,''),:consent,'playtomic',now())
-                        on conflict(organization_id,source,external_key) do update set
-                          full_name=excluded.full_name,email=excluded.email,phone=excluded.phone,
-                          marketing_consent=excluded.marketing_consent,source_updated_at=now(),updated_at=now()
-                    """), {"org": connection["organization_id"], "external": rec["external_id"],
-                           "name": rec.get("name"), "email": rec.get("email",""),
-                           "phone": rec.get("phone",""), "consent": marketing})
-                elif stream == "payments":
-                    amount = int(rec.get("gross_minor") or rec.get("net_minor") or 0)
-                    kind = "refund" if rec.get("status") == "REFUNDED" else "capture"
-                    c.execute(text("""
-                        insert into public.payments
-                          (organization_id,provider,external_reference,kind,status,currency,amount_minor,
-                           fee_minor,payout_reference,occurred_at,metadata)
-                        values(cast(:org as uuid),'playtomic',:external,:kind,:status,:currency,:amount,:fee,:payout,now(),cast(:metadata as jsonb))
-                        on conflict(organization_id,provider,external_reference,kind) do update set
-                          status=excluded.status,amount_minor=excluded.amount_minor,fee_minor=excluded.fee_minor,
-                          payout_reference=excluded.payout_reference,metadata=excluded.metadata
-                    """), {"org": connection["organization_id"], "external": rec.get("external_id"),
-                           "kind": kind, "status": rec.get("status") or "UNKNOWN",
-                           "currency": rec.get("currency") or "EUR", "amount": amount,
-                           "fee": rec.get("fee_minor"), "payout": rec.get("payout_id"),
-                           "metadata": _json(rec)})
-                elif stream == "bookings":
-                    mapping = _mapping(db, c, pc_id, rec["court_external_id"])
-                    if mapping:
-                        status = rec.get("status")
-                        if status not in ("confirmed","cancelled","completed","no_show"):
-                            status = "confirmed"
-                        c.execute(text("""
-                            insert into public.bookings
-                              (organization_id,venue_id,court_id,status,starts_at,ends_at,currency,
-                               gross_amount_minor,source,external_reference,metadata)
-                            values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:status as public.fmc_booking_status),
-                                   :starts,:ends,:currency,:amount,'playtomic',:external,cast(:metadata as jsonb))
-                            on conflict(organization_id,source,external_reference) where external_reference is not null
-                            do update set court_id=excluded.court_id,venue_id=excluded.venue_id,status=excluded.status,
-                              starts_at=excluded.starts_at,ends_at=excluded.ends_at,currency=excluded.currency,
-                              gross_amount_minor=excluded.gross_amount_minor,metadata=excluded.metadata,updated_at=now()
-                        """), {"org": connection["organization_id"], "venue": mapping["venue_id"],
-                               "court": mapping["court_id"], "status": status,
-                               "starts": rec["starts_at"], "ends": rec["ends_at"],
-                               "currency": rec["currency"], "amount": rec["total_minor"],
-                               "external": rec["external_id"], "metadata": _json({"provider":"playtomic","shadow":True})})
-            c.execute(text("""
-                insert into public.sync_cursors(provider_connection_id,stream,cursor,last_started_at,last_completed_at,last_error)
-                values(cast(:pc as uuid),:stream,cast(:cursor as jsonb),now(),
-                       case when :done then now() else null end,null)
-                on conflict(provider_connection_id,stream) do update set
-                  cursor=excluded.cursor,last_started_at=coalesce(public.sync_cursors.last_started_at,now()),
-                  last_completed_at=case when :done then now() else public.sync_cursors.last_completed_at end,
-                  last_error=null
-            """), {"pc": pc_id, "stream": stream,
-                   "cursor": _json({"cursor": response.get("next_cursor"), "page": page}),
-                   "done": not response["has_more"]})
-        total += len(records)
-        if not response["has_more"]:
-            break
-        cursor = response.get("next_cursor")
-        page += 1
+    end = payload.get("window_end") or (now + timedelta(days=90)).isoformat()
+    try:
+        page_state = read_page_state(payload, start, end)
+    except PageBudgetError as exc:
+        raise DomainError("PROVIDER_CHECKPOINT", str(exc), 422) from None
+    prior_records = payload.get("records_observed", 0)
+    if type(prior_records) is not int or not 0 <= prior_records <= 10000:
+        raise DomainError("PROVIDER_CHECKPOINT", "Invalid count.", 422)
+    seconds_to_wait = db.reserve_provider_request(pc_id)
+    if seconds_to_wait:
+        raise Deferred("PROVIDER_RATE", seconds_to_wait)
+    client_id, secret, tenant = _credential(connection)
+    api = Playtomic(client_id, secret, tenant)
+    # Exactly ONE provider data page is requested per leased worker job.
+    response = api.page(stream, start, end, cursor=page_state["cursor"], page=page_state["page"])
+    try:
+        continuation = next_page_state(page_state, response)
+    except PageBudgetError as exc:
+        raise DomainError("PROVIDER_PAGINATION", str(exc), 502) from None
+    records = response["records"]
+    total = prior_records + len(records)
+    if total > 10000:
+        raise DomainError("PROVIDER_SYNC_LIMIT", "Source batch exceeded safety cap.", 413)
     with db.trusted() as c:
+        for rec in records:
+            _observe(c, connection["organization_id"], pc_id, stream, rec, complete=True)
+            if stream == "players":
+                consent = rec.get("consent")
+                marketing = True if consent == "granted" else None
+                c.execute(text("""
+                    insert into public.people
+                      (organization_id,external_key,full_name,email,phone,marketing_consent,source,source_updated_at)
+                    values(cast(:org as uuid),:external,:name,nullif(:email,''),nullif(:phone,''),:consent,'playtomic',now())
+                    on conflict(organization_id,source,external_key) do update set
+                      full_name=excluded.full_name,email=excluded.email,phone=excluded.phone,
+                      marketing_consent=excluded.marketing_consent,source_updated_at=now(),updated_at=now()
+                """), {"org": connection["organization_id"], "external": rec["external_id"],
+                       "name": rec.get("name"), "email": rec.get("email",""),
+                       "phone": rec.get("phone",""), "consent": marketing})
+            elif stream == "payments":
+                amount = int(rec.get("gross_minor") or rec.get("net_minor") or 0)
+                kind = "refund" if rec.get("status") == "REFUNDED" else "capture"
+                c.execute(text("""
+                    insert into public.payments
+                      (organization_id,provider,external_reference,kind,status,currency,amount_minor,
+                       fee_minor,payout_reference,occurred_at,metadata)
+                    values(cast(:org as uuid),'playtomic',:external,:kind,:status,:currency,:amount,:fee,:payout,now(),cast(:metadata as jsonb))
+                    on conflict(organization_id,provider,external_reference,kind) do update set
+                      status=excluded.status,amount_minor=excluded.amount_minor,fee_minor=excluded.fee_minor,
+                      payout_reference=excluded.payout_reference,metadata=excluded.metadata
+                """), {"org": connection["organization_id"], "external": rec.get("external_id"),
+                       "kind": kind, "status": rec.get("status") or "UNKNOWN",
+                       "currency": rec.get("currency") or "EUR", "amount": amount,
+                       "fee": rec.get("fee_minor"), "payout": rec.get("payout_id"),
+                       "metadata": _json(rec)})
+            elif stream == "bookings":
+                mapping = _mapping(db, c, pc_id, rec["court_external_id"])
+                if mapping:
+                    status = rec.get("status")
+                    if status not in ("confirmed","cancelled","completed","no_show"):
+                        status = "confirmed"
+                    c.execute(text("""
+                        insert into public.bookings
+                          (organization_id,venue_id,court_id,status,starts_at,ends_at,currency,
+                           gross_amount_minor,source,external_reference,metadata)
+                        values(cast(:org as uuid),cast(:venue as uuid),cast(:court as uuid),cast(:status as public.fmc_booking_status),
+                               :starts,:ends,:currency,:amount,'playtomic',:external,cast(:metadata as jsonb))
+                        on conflict(organization_id,source,external_reference) where external_reference is not null
+                        do update set court_id=excluded.court_id,venue_id=excluded.venue_id,status=excluded.status,
+                          starts_at=excluded.starts_at,ends_at=excluded.ends_at,currency=excluded.currency,
+                          gross_amount_minor=excluded.gross_amount_minor,metadata=excluded.metadata,updated_at=now()
+                    """), {"org": connection["organization_id"], "venue": mapping["venue_id"],
+                           "court": mapping["court_id"], "status": status,
+                           "starts": rec["starts_at"], "ends": rec["ends_at"],
+                           "currency": rec["currency"], "amount": rec["total_minor"],
+                           "external": rec["external_id"], "metadata": _json({"provider":"playtomic","shadow":True})})
         c.execute(text("""
-            update public.provider_connections set last_success_at=now(),last_error_at=null
-            where id=cast(:id as uuid)
-        """), {"id": pc_id})
+            insert into public.sync_cursors(provider_connection_id,stream,cursor,last_started_at,last_completed_at,last_error)
+            values(cast(:pc as uuid),:stream,cast(:cursor as jsonb),now(),
+                   case when :done then now() else null end,null)
+            on conflict(provider_connection_id,stream) do update set
+              cursor=excluded.cursor,last_started_at=coalesce(public.sync_cursors.last_started_at,now()),
+              last_completed_at=case when :done then now() else public.sync_cursors.last_completed_at end,
+              last_error=null
+        """), {"pc": pc_id, "stream": stream,
+               "cursor": _json({"cursor": response.get("next_cursor"), "page": page_state["page"]}),
+               "done": not response["has_more"]})
+        if continuation is not None:
+            next_payload = {**payload, "window_start": start, "window_end": end,
+                            "records_observed": total, "progress": continuation}
+            # Persist page observations + job cursor/lease in ONE transaction.
+            db.checkpoint_provider_job(
+                c, job["id"], job["lease_token"], next_payload, delay_seconds=60
+            )
+        else:
+            c.execute(text("""
+                update public.provider_connections
+                set last_success_at=now(),last_error_at=null
+                where id=cast(:id as uuid)
+            """), {"id": pc_id})
+    if continuation is not None:
+        return {"checkpointed": True, "provider": "playtomic",
+                "stream": stream, "records_observed": total}
     return {"provider": "playtomic", "stream": stream, "records": total}
 
 
@@ -291,10 +311,11 @@ def run(settings, service: str):
                 continue
             try:
                 result = _reconcile(db, job) if service == "reconciliation-worker" else _sync_playtomic(db, job)
-                db.finish_job(job["id"], job["lease_token"], result)
+                if not result.get("checkpointed"):
+                    db.finish_job(job["id"], job["lease_token"], result)
             except Deferred as exc:
-                db.fail_job(job["id"], job["lease_token"], exc.code)
-                time.sleep(min(exc.seconds, 5))
+                # 202/429 and reserved read windows defer WITHOUT burning retries.
+                db.defer_provider_job(job["id"], job["lease_token"], max(60, exc.seconds))
             except DomainError as exc:
                 db.fail_job(job["id"], job["lease_token"], f"{exc.code}:{exc.message}")
             except Exception as exc:
