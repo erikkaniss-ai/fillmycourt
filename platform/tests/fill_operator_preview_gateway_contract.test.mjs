@@ -196,3 +196,31 @@ test("Upstream lying about Content-Length cannot bypass UTF-8 response limit",as
     globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;
   }
 });
+
+
+test("Oversize streaming response is cancelled before consuming more than allowed bytes",async()=>{
+  const oldFetch=globalThis.fetch, oldNetlify=globalThis.Netlify;
+  let cancelled=false, pulls=0;
+  const oversized = new ReadableStream({
+    pull(controller){
+      pulls++;
+      if(pulls===1)controller.enqueue(new Uint8Array(1024));
+      else if(pulls===2)controller.enqueue(new Uint8Array(1024*1024));
+      else controller.close();
+    },
+    cancel(){cancelled=true;}
+  },{highWaterMark:0});
+  globalThis.Netlify={env:{get:()=>null}};
+  globalThis.fetch=async()=>new Response(oversized,{status:200,headers:{
+    "content-type":"application/json"
+  }});
+  try{
+    const response=await proxy(request("/api/me"),{site:{id:FILL_SITE_ID}});
+    assert.equal(response.status,502);
+    assert.deepEqual(await response.json(),{error:"OPERATIONS_RESPONSE_LIMIT"});
+    assert.equal(cancelled,true,"Body stream must be explicitly cancelled at byte ceiling");
+    assert.equal(pulls,2,"Never request additional upstream chunks beyond the limit");
+  }finally{
+    globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;
+  }
+});
