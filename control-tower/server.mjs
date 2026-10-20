@@ -68,6 +68,48 @@ async function githubJson(url, fetchImpl, token) {
   return response.json();
 }
 
+
+/**
+ * Evidence-only required CI classification.
+ * Never treat a successful unrelated workflow or a previous PR head as green.
+ * GitHub's pull_request merge-SHA is admissible only with explicit PR/head proof.
+ */
+export function assessRequiredCi(required, runs, headSha, prNumber) {
+  const unknown={verdict:"unverified",checks:[]};
+  if(!Array.isArray(required)||!required.length || !Array.isArray(runs) ||
+     !/^[a-f0-9]{40}$/.test(headSha)||!Number.isInteger(prNumber)||prNumber<1)
+    return unknown;
+  const allowed=runs.filter(run=>{
+    if(!run||run.event!=="pull_request"||typeof run.name!=="string")return false;
+    const refs=Array.isArray(run.pull_requests)?run.pull_requests:[];
+    const linked=refs.some(p=>p?.number===prNumber && p.head?.sha===headSha);
+    const direct=run.head_sha===headSha && (refs.length===0 || linked);
+    return direct||linked;
+  });
+  const checks=required.map(workflow=>{
+    const matching=allowed.filter(r=>r.name===workflow).sort((a,b)=>
+      (Date.parse(b.created_at)||0)-(Date.parse(a.created_at)||0) ||
+      (Number(b.run_attempt)||0)-(Number(a.run_attempt)||0) ||
+      (Number(b.id)||0)-(Number(a.id)||0));
+    const latest=matching[0];
+    if(!latest)return {workflow,status:"unverified",runId:null,url:null};
+    const status=latest.status==="completed"
+      ? latest.conclusion==="success"?"success"
+        : ["failure","timed_out","cancelled","startup_failure","action_required"].includes(latest.conclusion)
+          ?"failed_or_other":"unverified"
+      : ["queued","waiting","pending","in_progress","requested"].includes(latest.status)
+        ?"running":"unverified";
+    const url=typeof latest.html_url==="string" &&
+      /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/actions\/runs\/[0-9]+$/i.test(latest.html_url)
+      ? latest.html_url:null;
+    return {workflow,status,runId:Number.isSafeInteger(latest.id)?latest.id:null,url};
+  });
+  const verdict=checks.some(c=>c.status==="failed_or_other")?"failed_or_other"
+    :checks.some(c=>c.status==="running")?"running"
+    :checks.some(c=>c.status==="unverified")?"unverified":"success";
+  return {verdict,checks};
+}
+
 export async function refreshGithub(project, { fetchImpl = fetch, now = new Date(), token = process.env.GITHUB_TOKEN } = {}) {
   if (!project.github?.repository) return null;
   const repo = project.github.repository;
@@ -79,7 +121,8 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
       const pulls = await githubJson(`https://api.github.com/repos/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=100`, fetchImpl, token);
       const tracked = pulls.slice(0, 5);
       const pullRequests = await Promise.all(tracked.map(async (pr) => {
-        const result = await refreshGithub({ github: { repository: repo, pullRequest: pr.number } }, { fetchImpl, now, token });
+        const result = await refreshGithub({ github: { repository: repo, pullRequest: pr.number,
+          requiredWorkflows: project.github.requiredWorkflows, private: project.github.private } }, { fetchImpl, now, token });
         return { ...result, blockerLabels: (pr.labels || []).map((label) => label.name).filter((name) => /block|needs.?go|approval/i.test(name)) };
       }));
       return { state: "actual_verified", fetchedAt: now.toISOString(), repository: repo, openPullsReturned: pulls.length,
@@ -95,6 +138,8 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
     // Never attach a previous head's green run to the current PR. Keep each workflow's latest run.
     const workflows = [...new Map((runs.workflow_runs || []).filter((run) => run.head_sha === sha)
       .map((run) => [run.workflow_id || run.name, run]).reverse()).values()];
+    const requiredCi = assessRequiredCi(project.github.requiredWorkflows, runs.workflow_runs || [], sha, prNumber);
+    // Raw runs are informational. Only requiredCi is the release-evidence assessment.
     const latestRun = workflows.find((run) => run.name === "Platform CI") || workflows[0] || null;
     return {
       state: "actual_verified",
@@ -123,8 +168,9 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
         runId: null,
         url: null
       },
-      commitStatus: checks.total_count === 0 ? "not reported" : checks.state || "unknown"
-      ,workflows: workflows.map((run) => ({ name: run.name, status: run.status, conclusion: run.conclusion, runId: run.id, url: run.html_url, sha: run.head_sha }))
+      commitStatus: checks.total_count === 0 ? "not reported" : checks.state || "unknown",
+      requiredCi,
+      workflows: workflows.map((run) => ({ name: run.name, status: run.status, conclusion: run.conclusion, runId: run.id, url: run.html_url, sha: run.head_sha }))
     };
   } catch {
     return {
