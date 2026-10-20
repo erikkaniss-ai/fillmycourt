@@ -1,0 +1,43 @@
+name: Control Tower private online deployment
+on:
+  push:
+    branches: [cto/development-control-tower]
+    paths: ['control-tower/**', '.github/workflows/control-tower-deploy.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-tower-private-alias
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    if: github.repository == 'erikkaniss-ai/fillmycourt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify read-only dashboard contracts
+        run: |
+          node --experimental-strip-types --test control-tower/test/*.test.mjs
+          node --check control-tower/server.mjs
+          node --check control-tower/public/app.js
+          git diff --check HEAD^ HEAD
+      - name: Install pinned deployment and browser tools
+        run: npm install --prefix "$RUNNER_TEMP/control-tower-tools" --no-audit --no-fund netlify-cli@27.12.1 playwright-core@1.56.1
+      - name: Browser acceptance at mobile and desktop widths
+        env:
+          CONTROL_TOWER_TOOLS: ${{ runner.temp }}/control-tower-tools/node_modules
+        run: node control-tower/test/browser-acceptance.mjs
+      - name: Deploy isolated alias on existing protected site
+        working-directory: control-tower
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.FILL_NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: d763b7a1-dccd-4638-8876-ac1670171698
+        run: node scripts/deploy-private.mjs

@@ -5,6 +5,10 @@ const stateLabel = {
   unverified: "unverified"
 };
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
+}
+
 function formatTime(value) {
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
@@ -28,15 +32,15 @@ function renderGithub(target, github) {
     return;
   }
   if (github.state !== "actual_verified") {
-    target.innerHTML = `${badge("unverified")} <span>GitHub refresh unavailable: ${github.error || "unknown reason"}.</span>`;
+    target.innerHTML = `${badge("unverified")} <span>GitHub refresh unavailable: ${escapeHtml(github.error || "unknown reason")}.</span>`;
     return;
   }
   const ci = github.ci;
-  const ciText = ci?.runId ? `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})` : ci?.name;
+  const ciText = escapeHtml(ci?.runId ? `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})` : ci?.name);
   const pr = github.pullRequest;
   target.innerHTML = `
     <div class="live-source-top">${badge("actual_verified")} <strong>GitHub live refresh</strong><span>${formatTime(github.fetchedAt)}</span></div>
-    <p><a href="${pr.url}" target="_blank" rel="noreferrer">PR #${pr.number}</a> · ${pr.draft ? "draft" : pr.state} · <code>${pr.sha.slice(0, 12)}</code></p>
+    <p><a href="${escapeHtml(pr.url)}" target="_blank" rel="noreferrer">PR #${Number(pr.number)}</a> · ${pr.draft ? "draft" : escapeHtml(pr.state)} · <code>${escapeHtml(pr.sha.slice(0, 12))}</code></p>
     <p>${ci?.url ? `<a href="${ci.url}" target="_blank" rel="noreferrer">${ciText}</a>` : ciText || "CI unknown"} · commit status: ${github.commitStatus}</p>`;
 }
 
@@ -82,7 +86,7 @@ function render(snapshot) {
   document.querySelector("#freshness").innerHTML = `${badge("actual_verified")} GitHub refresh: ${formatTime(snapshot.fetchedAt)}`;
   document.querySelector("#rollup").innerHTML = `
     <div class="rollup-number">${rollup.percent === null ? "—" : `${rollup.percent}%`}</div>
-    <div><strong>Cross-project weighted engineering acceptance</strong><p>${rollup.baselinedProjects} of ${rollup.totalProjects} projects have a reviewed baseline. ${rollup.completedWeight} of ${rollup.totalWeight} weighted points are passed; unbaselined projects are excluded rather than counted as zero.</p></div>`;
+    <div><strong>Proposed milestone model · owner review pending</strong><p>${rollup.baselinedProjects} of ${rollup.totalProjects} projects have a draft model. ${rollup.completedWeight} of ${rollup.totalWeight} weighted points map to recorded evidence. Weights are engineering proposals and are not owner-approved project completion metrics.</p></div>`;
   const projects = document.querySelector("#projects");
   projects.replaceChildren(...snapshot.projects.map(renderProject));
 }
@@ -94,8 +98,9 @@ async function start() {
     render(await response.json());
   } catch (error) {
     document.querySelector("#freshness").innerHTML = `${badge("unverified")} Snapshot unavailable`;
-    document.querySelector("#rollup").innerHTML = `<p class="error">The read-only snapshot could not be loaded: ${error.message}</p>`;
+    document.querySelector("#rollup").innerHTML = `<p class="error">The read-only snapshot could not be loaded: ${escapeHtml(error.message)}</p>`;
   }
 }
 
 start();
+setInterval(start, 300_000);

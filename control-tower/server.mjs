@@ -63,7 +63,7 @@ async function githubJson(url, fetchImpl, token) {
     "User-Agent": "development-control-tower"
   };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetchImpl(url, { headers });
+  const response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(8000), redirect: "error" });
   if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
   return response.json();
 }
@@ -79,7 +79,7 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
       githubJson(`https://api.github.com/repos/${repo}/commits/${sha}/status`, fetchImpl, token),
       githubJson(`https://api.github.com/repos/${repo}/actions/runs?event=pull_request&head_sha=${sha}&per_page=5`, fetchImpl, token)
     ]);
-    const latestRun = (runs.workflow_runs || [])[0] || null;
+    const latestRun = (runs.workflow_runs || []).find((run) => run.name === "Platform CI") || (runs.workflow_runs || [])[0] || null;
     return {
       state: "actual_verified",
       fetchedAt: now.toISOString(),
@@ -107,7 +107,7 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
         runId: null,
         url: null
       },
-      commitStatus: checks.state || "unknown"
+      commitStatus: checks.total_count === 0 ? "not reported" : checks.state || "unknown"
     };
   } catch (error) {
     return {
