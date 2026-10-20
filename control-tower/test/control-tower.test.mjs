@@ -76,3 +76,84 @@ test("snapshot retains unknown projects and keeps them out of the calculated rol
   assert.equal(snapshot.rollup.percent, 100);
   assert.equal(snapshot.projects[1].progress, null);
 });
+
+
+test("required CI ignores unrelated green packaging and is tied to current PR HEAD", async () => {
+  const sha="a".repeat(40);
+  const run=(name,conclusion,status="completed",head=sha,id=50)=>({
+    id,name,status,conclusion,head_sha:head,event:"pull_request",
+    created_at:"2026-10-20T10:00:00Z",
+    html_url:"https://github.com/erikkaniss-ai/rebloom-world/actions/runs/"+id,
+    pull_requests:[{number:53,head:{sha}}]
+  });
+  const requests=[];
+  const fetchImpl=async (url)=>{
+    requests.push(url);
+    if(url.includes("/pulls/53"))return new Response(JSON.stringify({
+      number:53,html_url:"https://github.com/erikkaniss-ai/rebloom-world/pull/53",title:"UX",
+      draft:true,state:"open",base:{ref:"main"},head:{ref:"feature",sha}
+    }));
+    if(url.endsWith("/status"))return new Response(JSON.stringify({total_count:0}));
+    return new Response(JSON.stringify({workflow_runs:[
+      run("ReBloom latest B UX reviewed Netlify-root artifact (NO DEPLOY)","success"),
+      run("ReBloom canonical Linux validation","failure","completed",sha,51)
+    ]}));
+  };
+  const project={github:{repository:"erikkaniss-ai/rebloom-world",pullRequest:53,
+    requiredWorkflows:["ReBloom canonical Linux validation"]}};
+  const result=await refreshGithub(project,{fetchImpl,token:"test-token"});
+  assert.equal(result.state,"actual_verified");
+  assert.equal(result.requiredCi.verdict,"failed_or_other");
+  assert.equal(result.requiredCi.checks[0].workflow,"ReBloom canonical Linux validation");
+  assert.ok(requests.some(url=>url.includes("head_sha=")));
+});
+
+test("CI is UNKNOWN when a required workflow is missing, skipped or has mismatched PR", async()=>{
+  const {assessRequiredCi}=await import("../server.mjs");
+  const sha="b".repeat(40);
+  const run=(name,status,conclusion,head_sha=sha,number=5)=>({
+    id:7,name,event:"pull_request",head_sha,status,conclusion,
+    created_at:"2026-10-20T10:00:00Z",pull_requests:[{number,head:{sha}}]
+  });
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    run("Optional Preview","completed","success")],sha,5).verdict,"unverified");
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    run("Platform CI","completed","skipped")],sha,5).verdict,"unverified");
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    run("Platform CI","completed","success",sha,6)],sha,5).verdict,"unverified");
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    run("Platform CI","completed","success","c".repeat(40),5)],sha,5).verdict,"unverified");
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    run("Platform CI","in_progress",null)],sha,5).verdict,"running");
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    run("Platform CI","completed","success")],sha,5).verdict,"success");
+  assert.equal(assessRequiredCi([],[
+    run("Platform CI","completed","success")],sha,5).verdict,"unverified");
+});
+
+test("private open PR listing inherits required CI policies without leaking token", async()=>{
+  const sha="d".repeat(40);
+  const calls=[];
+  const fetchImpl=async(url,options)=>{
+    calls.push({url,header:options.headers.Authorization});
+    if(url.includes("/pulls?"))return new Response(JSON.stringify([{
+      number:53,updated_at:"2026-10-20T10:00:00Z",labels:[]
+    }]));
+    if(url.includes("/pulls/53"))return new Response(JSON.stringify({
+      number:53,html_url:"https://github.com/x/y/pull/53",title:"UX",
+      draft:true,state:"open",base:{ref:"main"},head:{ref:"feature",sha}
+    }));
+    if(url.endsWith("/status"))return new Response(JSON.stringify({total_count:0}));
+    return new Response(JSON.stringify({workflow_runs:[
+      {id:70,name:"ReBloom canonical Linux validation",head_sha:sha,event:"pull_request",
+        status:"completed",conclusion:"success",created_at:"2026-10-20T10:00:00Z",
+        pull_requests:[{number:53,head:{sha}}]}
+    ]}));
+  };
+  const project={github:{repository:"erikkaniss-ai/rebloom-world",private:true,
+    mode:"open-pulls",requiredWorkflows:["ReBloom canonical Linux validation"]}};
+  const result=await refreshGithub(project,{token:"restricted-secret",fetchImpl});
+  assert.equal(result.pullRequests[0].requiredCi.verdict,"success");
+  assert.equal(JSON.stringify(result).includes("restricted-secret"),false);
+  assert.equal(calls.every(x=>x.header==="Bearer restricted-secret"),true);
+});
