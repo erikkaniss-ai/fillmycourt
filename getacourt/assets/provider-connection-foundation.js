@@ -20,7 +20,7 @@
   ]);
   const ISSUED_SYNTHETIC=new WeakSet();
   function credentialField(key){
-    return SENSITIVE_FIELDS.has(key.replace(/[\\s_-]/g,"").toLowerCase());
+    return SENSITIVE_FIELDS.has(key.replace(/[^a-z0-9]/gi,"").toLowerCase());
   }
   const PROVIDERS=Object.freeze({
     // The public Playtomic material currently documents a club/chain,
