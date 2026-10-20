@@ -67,3 +67,34 @@ test("foundation source contains no live transport, storage, OAuth, or provider 
   assert.match(source,/OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED/);
   assert.match(source,/synthetic_read_only/);
 });
+
+test("synthetic foundation rejects credential aliases at every exposed entry point",()=>{
+  assert.throws(()=>foundation.consent({...input.consent,api_key:"never-accept"}),/credentials/);
+  assert.throws(()=>foundation.consent({...input.consent,Authorization:"Bearer never-accept"}),/credentials/);
+  assert.throws(()=>foundation.createSyntheticConnection({...input,metadata:{headers:{"x-api-key":"never-accept"}}}),/credentials/);
+  assert.throws(()=>foundation.createSyntheticConnection({...input,metadata:{refresh_token:"never-accept"}}),/credentials/);
+});
+
+test("issued connection guard rejects forged objects and invalid event chronology",()=>{
+  const created=foundation.createSyntheticConnection(input);
+  const forged={...created,provider:{...created.provider,capabilities:{account_link_supported:"verified"}}};
+  assert.throws(()=>foundation.authorizationPlan(forged),/Issued synthetic connection/);
+  assert.throws(()=>foundation.availabilityStatus(forged),/Issued synthetic connection/);
+  assert.throws(()=>foundation.disconnect(forged,"2026-10-20T08:02:00Z"),/Issued synthetic connection/);
+  assert.throws(()=>foundation.createSyntheticConnection({...input,created_at:"2026-10-20T07:59:00Z"}),/must not postdate/);
+  assert.throws(()=>foundation.disconnect(created,"2026-10-20T08:00:59Z"),/must not predate/);
+});
+
+test("unverified provider availability always fails closed with zero visible slots",()=>{
+  for(const provider of foundation.registry().map(x=>x.id)){
+    const created=foundation.createSyntheticConnection({...input,provider});
+    const result=foundation.availabilityStatus(created);
+    assert.equal(result.status,"unknown",provider);
+    assert.equal(result.freshness,"not_observed",provider);
+    assert.equal(result.provider_authorized,false,provider);
+    assert.equal(result.can_display_slots,false,provider);
+    assert.deepEqual(result.slots,[],provider);
+    assert.equal(result.reason,"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED",provider);
+    assert.equal(Object.isFrozen(result.slots),true);
+  }
+});
