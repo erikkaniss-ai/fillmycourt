@@ -134,3 +134,13 @@ def test_worker_synthetic_connection_is_denied_even_with_enabled_env(monkeypatch
         v1_workers._sync_playtomic(object(), {
             "payload":{"provider_connection_id":"fixture-id","stream":"bookings"}
         })
+
+
+def test_adapter_capability_is_not_pilot_authority_or_availability_handoff():
+    from fmc.playtomic import capabilities
+    cap=capabilities()
+    assert cap["read_sync"] is True  # adapter supports a club API after gate
+    assert cap["handoff"] is False
+    assert cap["availability_read"] is False
+    assert cap["player_delegated_oauth"] is False
+    assert cap["authorized_native_write"] is False
