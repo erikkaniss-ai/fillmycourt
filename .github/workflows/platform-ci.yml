@@ -34,6 +34,7 @@ jobs:
           node --check getacourt/assets/app.js
           node --check getacourt/assets/auth-pkce.js
           node --check getacourt/assets/commercial-signals.js
+          node --check getacourt/assets/provider-connection-foundation.js
           node --experimental-strip-types --test \
             platform/tests/getacourt_booking_source_guard.test.mjs \
             platform/tests/getacourt_date_contract.test.mjs \
@@ -46,6 +47,7 @@ jobs:
             platform/tests/getacourt_map_csp_contract.test.mjs \
             platform/tests/getacourt_install_contract.test.mjs \
             platform/tests/getacourt_commercial_signals_contract.test.mjs \
+            platform/tests/getacourt_provider_connection_foundation.test.mjs \
             platform/tests/getacourt_ci_dispatch_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
@@ -78,9 +80,11 @@ jobs:
       - name: Verify GetAcourt CI dispatch and full-suite retention contracts
         run: node --test platform/tests/getacourt_ci_dispatch_contract.test.mjs
       - name: Verify GetAcourt browser JS syntax
-        run: node --check getacourt/assets/app.js && node --check getacourt/assets/commercial-signals.js
+        run: node --check getacourt/assets/app.js && node --check getacourt/assets/commercial-signals.js && node --check getacourt/assets/provider-connection-foundation.js
       - name: Decision 104 GetAcourt commercial observability shadow contracts
         run: node --test platform/tests/getacourt_commercial_signals_contract.test.mjs
+      - name: GetAcourt synthetic provider connection foundation contracts
+        run: node --test platform/tests/getacourt_provider_connection_foundation.test.mjs
       - name: GetACourt native-only booking source guard contracts
         run: node --test platform/tests/getacourt_booking_source_guard.test.mjs
       - name: Install isolated QA-08 browser runner (no deploy)
