@@ -32,6 +32,7 @@ The owner-approved PCT-2026-10-20-v1 baseline is packaged as server-only data.
 The public repository contains only an empty placeholder. Private acceptance
 receipts and workflow selectors are stored in the isolated deployment workflow's
 `CONTROL_TOWER_APPROVED_MODEL` secret, never in static assets or public CI logs.
+The secret also accepts a `gzip:` plus base64 envelope to stay under the secret-size limit without dropping evidence. Decoding is server-build-only, bounded to 256 KiB, and rejects credential-shaped content after decompression.
 The packaging step validates the fixed 100-point project weights and four equally
 weighted product scorecards, binds the bundle to the deployed source SHA, and
 fails closed if data is missing or invalid.
