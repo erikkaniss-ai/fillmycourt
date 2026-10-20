@@ -106,3 +106,49 @@ test("issued synthetic connection freezes provider capabilities against mutation
   assert.throws(()=>{connection.provider.capabilities.account_link_supported="verified";},TypeError);
   assert.equal(foundation.authorizationPlan(connection).account_link_supported,"unverified");
 });
+
+
+test("synthetic provider read preflight models cooldown and freshness without a network route",()=>{
+  const connection=foundation.createSyntheticConnection(input);
+  const result=foundation.syntheticReadPreflight(connection,{
+    now:"2026-10-20T08:03:00Z",last_attempt_at:"2026-10-20T08:02:30Z",
+    min_interval_ms:60000,last_fixture_observed_at:"2026-10-20T08:00:00Z",
+    fixture_ttl_ms:60000
+  });
+  assert.equal(result.mode,"simulation_only");
+  assert.equal(result.status,"blocked");
+  assert.equal(result.authorized,false);
+  assert.equal(result.request_allowed,false);
+  assert.equal(result.can_display_slots,false);
+  assert.deepEqual(result.slots,[]);
+  assert.equal(result.rate_state,"cooldown");
+  assert.equal(result.next_eligible_simulation_at,"2026-10-20T08:03:30.000Z");
+  assert.equal(result.fixture_freshness,"stale");
+  assert.equal(result.reason,"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED");
+});
+
+test("synthetic read never upgrades a provider when rate simulation permits it",()=>{
+  for(const provider of foundation.registry().map(x=>x.id)){
+    const c=foundation.createSyntheticConnection({...input,provider});
+    const result=foundation.syntheticReadPreflight(c,{
+      now:"2026-10-20T09:01:00Z",last_attempt_at:"2026-10-20T08:00:00Z",
+      last_fixture_observed_at:"2026-10-20T09:00:30Z",
+      fixture_ttl_ms:60000
+    });
+    assert.equal(result.rate_state,"eligible_in_simulation",provider);
+    assert.equal(result.fixture_freshness,"fresh_fixture_only",provider);
+    assert.equal(result.request_allowed,false,provider);
+    assert.equal(result.can_display_slots,false,provider);
+  }
+});
+
+test("preflight rejects fake connections, forbidden credentials, clock skew and bypass intervals",()=>{
+  const c=foundation.createSyntheticConnection(input);
+  assert.throws(()=>foundation.syntheticReadPreflight({...c},{now:"2026-10-20T08:03:00Z"}),/Issued/);
+  assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"2026-10-20T08:03:00Z",api_key:"fake"}),/credentials/);
+  assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"2026-10-20T08:03:00Z",min_interval_ms:0}),/minimum interval/);
+  assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"2026-10-20T08:03:00Z",min_interval_ms:-1}),/minimum interval/);
+  assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"2026-10-20T08:03:00Z",last_attempt_at:"2026-10-20T08:04:00Z"}),/future/);
+  assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"2026-10-20T08:03:00Z",last_fixture_observed_at:"2026-10-20T08:04:00Z"}),/future/);
+  assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"bad"}),/timestamp/);
+});
