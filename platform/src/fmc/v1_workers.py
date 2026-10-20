@@ -194,7 +194,7 @@ def _sync_playtomic(db: V1Store, job: dict):
                    case when :done then now() else null end,null)
             on conflict(provider_connection_id,stream) do update set
               cursor=excluded.cursor,last_started_at=coalesce(public.sync_cursors.last_started_at,now()),
-              last_completed_at=case when :done then now() else public.sync_cursors.last_completed_at end,
+              last_completed_at=case when :done then now() else null end,
               last_error=null
         """), {"pc": pc_id, "stream": stream,
                "cursor": _json({"cursor": response.get("next_cursor"), "page": page_state["page"]}),
