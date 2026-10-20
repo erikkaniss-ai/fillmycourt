@@ -464,7 +464,7 @@ test("real Chromium: My bookings distinguishes repeated Lisbon 01:30 with UTC of
     });
     await ready(page);
     const before=forbiddenWrites.length;
-    await page.locator("#my-bookings").click();
+    await page.locator("#myBookingsButton").click();
     await page.locator("#bookingsDialog[open]").waitFor({timeout:10000});
     assert.equal(requests,1);
     const rows=await page.locator("#bookingsList .booking-item").allInnerTexts();
