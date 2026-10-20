@@ -57,6 +57,15 @@ function renderGithub(target, github) {
     }
     return;
   }
+  const required = github.requiredCi || { verdict: "unverified", checks: [] };
+  const names = {success:"PASS",running:"RUNNING",failed_or_other:"FAIL/BLOCKED",unverified:"UNKNOWN"};
+  const requiredState = Object.hasOwn(names,required.verdict) ? required.verdict : "unverified";
+  const requiredBadge = requiredState === "success" ? badge("actual_verified") : badge("unverified");
+  const requiredRows = (required.checks||[]).map(check =>
+    "<li>"+escapeHtml(check.workflow)+": <strong>"+
+    escapeHtml(names[check.status]||"UNKNOWN")+"</strong>"+
+    (check.url ? " · "+safeLink(check.url,"CI evidence") : "")+"</li>").join("") ||
+    "<li>Required workflow baseline not configured. CI readiness: UNKNOWN.</li>";
   const ci = github.ci;
   const ciText = escapeHtml(ci?.runId ? `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})` : ci?.name);
   const pr = github.pullRequest;
@@ -64,7 +73,9 @@ function renderGithub(target, github) {
     <div class="live-source-top">${badge("actual_verified")} <strong>GitHub live refresh</strong><span>${formatTime(github.fetchedAt)}</span></div>
     <p>${safeLink(pr.url, `PR #${pr.number}`)} · ${pr.draft ? "draft" : escapeHtml(pr.state)} · <code>${escapeHtml(pr.sha.slice(0, 12))}</code></p>
     <p>${escapeHtml(pr.title)}</p>
-    <p>${ci?.url ? safeLink(ci.url, `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})`) : ciText || "CI UNKNOWN"} · commit status: ${escapeHtml(github.commitStatus)}</p>
+    <p>${requiredBadge} <strong>Required CI: ${escapeHtml(names[requiredState])}</strong></p>
+    <ul>${requiredRows}</ul>
+    <p>Other workflow observation: ${ci?.url ? safeLink(ci.url, `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})`) : ciText || "UNKNOWN"} · commit status: ${escapeHtml(github.commitStatus)}</p>
     <ul>${(github.workflows || []).map((run) => `<li>${safeLink(run.url, `${run.name}: ${run.conclusion || run.status}`)} · exact HEAD</li>`).join("") || "<li>Exact-head workflow evidence: UNKNOWN</li>"}</ul>`;
 }
 
