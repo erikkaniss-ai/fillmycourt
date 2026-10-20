@@ -96,11 +96,43 @@ export default async function fillOperatorReadonly(request, context) {
       return reply(502, "OPERATIONS_INVALID_RESPONSE");
     if (Number(upstream.headers.get("content-length") || 0) > 1024 * 1024)
       return reply(502, "OPERATIONS_RESPONSE_LIMIT");
-    const body = await upstream.text();
-    // Upstream Content-Length is not trustworthy and JS string.length counts
-    // UTF-16 code units, not the UTF-8 wire bytes. Enforce the actual bound.
-    if (new TextEncoder().encode(body).byteLength > 1024 * 1024)
-      return reply(502, "OPERATIONS_RESPONSE_LIMIT");
+    // Read incrementally: a chunked/lying upstream cannot consume unbounded
+    // function memory. The byte ceiling is UTF-8 wire bytes, not JS length.
+    const reader = upstream.body?.getReader();
+    if (!reader) return reply(502, "OPERATIONS_INVALID_RESPONSE");
+    const chunks = [];
+    const limit = 1024 * 1024;
+    let bytesRead = 0;
+    try {
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) {
+          await reader.cancel();
+          return reply(502, "OPERATIONS_INVALID_RESPONSE");
+        }
+        bytesRead += value.byteLength;
+        if (bytesRead > limit) {
+          await reader.cancel();
+          return reply(502, "OPERATIONS_RESPONSE_LIMIT");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(bytesRead);
+    let position = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, position);
+      position += chunk.byteLength;
+    }
+    let body;
+    try {
+      body = new TextDecoder("utf-8", {fatal:true}).decode(bytes);
+    } catch {
+      return reply(502, "OPERATIONS_INVALID_RESPONSE");
+    }
     return new Response(body, {status: upstream.status, headers: JSON_HEADERS});
   } catch {
     return reply(502, "OPERATIONS_UNAVAILABLE");
