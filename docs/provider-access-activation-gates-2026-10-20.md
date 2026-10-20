@@ -37,3 +37,20 @@ Booked slots or payments do not themselves constitute a complete, authoritative 
 ## Owner-only commercial gate
 
 Select one named eligible Portugal club for permitted read-only pilot **or** approve a Playtomic Connect application. Confirm contracting OS entity and legal authority before external account identifiers, real tokens, emails, customer data or provider API requests. Production remains unchanged.
+
+## Worker-side provider authorization gate — added in Draft PR #5
+
+The existing Playtomic worker can acquire club credentials if a DB connection is configured. A new mandatory gate in platform/src/fmc/provider_read_gate.py is now called BEFORE credential access by platform/src/fmc/v1_workers.py.
+
+Default is DENY. The gate requires ALL of:
+
+- Exact deployment environment flag FMC_OFFICIAL_PROVIDER_READS_ENABLED=true (not enabled by this work).
+- Configured Playtomic club connection with write_mode=read_sync and official_read_authorized set to Boolean true.
+- A named internal config.official_grant status=approved, authority=club_or_certified_partner, exact organization_id / tenant_id binding, opaque agreement_ref and owner_approval_ref, UTC approved_at and future UTC expires_at.
+- Exact scopes list [bookings.read], with no extra scope and no players, payments, account-link, availability or booking.write permission inferred.
+
+The gate returns a limited internal read receipt, NOT a provider token and NOT provider-issued proof. Written provider/club rights remain a separate approval and documentation requirement.
+
+DO NOT ENABLE LIVE CONNECTIVITY YET: worker page iteration currently may request successive pages within a single job. The new grant gate alone does not ensure the official per-minute API pacing, durable cursor/backoff, legal privacy review or full provider pilot acceptance. Rate-budget and checkpointing must be separately accepted before setting the opt-in environment flag. No environment, staging credentials, production or real provider accounts were changed.
+
+The Playtomic adapter now describes supported source code without inventing rights: read_sync=true (adapter capability), handoff=false, availability_read=false, player_delegated_oauth=false, authorized_native_write=false.
