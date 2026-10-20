@@ -70,3 +70,59 @@ test("no browser-shipped source contains server credentials",()=>{
   for(const text of [ui,html,css])
     assert.doesNotMatch(text,/CONTROL_TOWER_GITHUB_READ_TOKEN|ghp_[A-Za-z0-9]{15}/);
 });
+
+
+test("CI evidence requires canonical workflow(s), exact PR/head and no unrelated workflow substitution",async()=>{
+  const {classifyRequiredCI}=await import("../model.mjs");
+  const sha="a".repeat(40);
+  const make=(name,status="completed",conclusion="success",created_at="2026-10-20T09:00:00Z")=>({
+    id:100,name,status,conclusion,head_sha:sha,event:"pull_request",created_at,
+    html_url:"https://github.com/erikkaniss-ai/fillmycourt/actions/runs/100",
+    pull_requests:[{number:5,head:{sha}}]
+  });
+  assert.equal(classifyRequiredCI(["Platform CI"],[make("Optional artifact")],sha,5).ci,"unverified");
+  assert.equal(classifyRequiredCI(["Platform CI"],[make("Platform CI")],"b".repeat(40),5).ci,"unverified");
+  assert.equal(classifyRequiredCI(["Platform CI"],[{
+    ...make("Platform CI"),head_sha:"b".repeat(40),
+    pull_requests:[{number:6,head:{sha}}]}],sha,5).ci,"unverified");
+  assert.equal(classifyRequiredCI(["Platform CI"],[make("Platform CI")],sha,5).ci,"success");
+  assert.equal(classifyRequiredCI(["Platform CI","Private preview"],[make("Platform CI")],sha,5).ci,"unverified");
+  assert.equal(classifyRequiredCI([], [make("Platform CI")],sha,5).ci,"unverified");
+});
+
+test("CI state is fail-closed: failed required run beats a successful unrelated run",async()=>{
+  const {classifyRequiredCI}=await import("../model.mjs");
+  const sha="c".repeat(40);
+  const run=(name,conclusion,status="completed",created_at="2026-10-20T09:00:00Z",id=100)=>({
+    id,name,status,conclusion,head_sha:sha,event:"pull_request",created_at,
+    html_url:"https://github.com/example/test/actions/runs/"+id,
+    pull_requests:[{number:5,head:{sha}}]
+  });
+  assert.equal(classifyRequiredCI(["Platform CI"],[
+    run("Platform CI","failure"),run("Preview deploy","success")],sha,5).ci,"failed_or_other");
+  assert.equal(classifyRequiredCI(["Platform CI"],[
+    run("Platform CI",null,"in_progress")],sha,5).ci,"running");
+  assert.equal(classifyRequiredCI(["Platform CI"],[
+    run("Platform CI","cancelled")],sha,5).ci,"failed_or_other");
+  assert.equal(classifyRequiredCI(["Platform CI"],[
+    run("Platform CI","skipped")],sha,5).ci,"unverified");
+  assert.equal(classifyRequiredCI(["Platform CI"],[
+    run("Platform CI","failure","completed","2026-10-20T08:00:00Z",101),
+    run("Platform CI","success","completed","2026-10-20T10:00:00Z",102)],sha,5).ci,"success");
+  const mixed=classifyRequiredCI(["Platform CI","Private preview"],[
+    run("Platform CI","success"),run("Private preview","failure")],sha,5);
+  assert.equal(mixed.ci,"failed_or_other");
+});
+
+test("merge-SHA workflow evidence must explicitly belong to same PR and current source HEAD",async()=>{
+  const {classifyRequiredCI}=await import("../model.mjs");
+  const sha="d".repeat(40);
+  const merge="e".repeat(40);
+  const known={name:"Platform CI",id:43,event:"pull_request",head_sha:merge,
+    status:"completed",conclusion:"success",created_at:"2026-10-20T09:00:00Z",
+    html_url:"https://github.com/x/y/actions/runs/43",
+    pull_requests:[{number:5,head:{sha}}]};
+  assert.equal(classifyRequiredCI(["Platform CI"],[known],sha,5).ci,"success");
+  assert.equal(classifyRequiredCI(["Platform CI"],[{...known,pull_requests:[]}],sha,5).ci,"unverified");
+  assert.equal(classifyRequiredCI(["Platform CI"],[{...known,pull_requests:[{number:5,head:{sha:"f".repeat(40)}}]}],sha,5).ci,"unverified");
+});
