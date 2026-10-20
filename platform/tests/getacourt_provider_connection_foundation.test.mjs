@@ -98,3 +98,11 @@ test("unverified provider availability always fails closed with zero visible slo
     assert.equal(Object.isFrozen(result.slots),true);
   }
 });
+
+test("issued synthetic connection freezes provider capabilities against mutation",()=>{
+  const connection=foundation.createSyntheticConnection(input);
+  assert.equal(Object.isFrozen(connection.provider),true);
+  assert.equal(Object.isFrozen(connection.provider.capabilities),true);
+  assert.throws(()=>{connection.provider.capabilities.account_link_supported="verified";},TypeError);
+  assert.equal(foundation.authorizationPlan(connection).account_link_supported,"unverified");
+});
