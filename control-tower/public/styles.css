@@ -1,0 +1,48 @@
+:root {
+  color-scheme: light dark;
+  --ink: light-dark(#162036, #eef3ff);
+  --muted: light-dark(#5d6b86, #b4bfd3);
+  --surface: light-dark(#ffffff, #172237);
+  --ground: light-dark(#f4f7fb, #0d1524);
+  --line: light-dark(#dbe3f0, #2b3b58);
+  --blue: light-dark(#2456d3, #8cafff);
+  --green: light-dark(#137350, #73deb3);
+  --orange: light-dark(#9b5d00, #f5c66a);
+  --red: light-dark(#b52c3b, #ff9ba6);
+  --purple: light-dark(#7650c9, #c9b2ff);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ground); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
+a { color: var(--blue); }
+.shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 72px; }
+.hero, .section-heading, .card-heading, .live-source-top, .milestone-heading, .rollup { display: flex; gap: 20px; justify-content: space-between; align-items: start; }
+.hero { padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+.eyebrow, .portfolio { margin: 0 0 4px; color: var(--muted); font-size: .78rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+h1, h2, h3, h4, p { margin-top: 0; }
+h1 { margin-bottom: 8px; font-size: clamp(2rem, 5vw, 3.75rem); letter-spacing: -.055em; line-height: 1; }
+h2 { margin-bottom: 0; font-size: 1.45rem; }
+h3 { margin-bottom: 0; font-size: 1.3rem; }
+h4 { margin-bottom: 8px; font-size: .82rem; letter-spacing: .06em; text-transform: uppercase; }
+.subhead { max-width: 700px; margin-bottom: 0; color: var(--muted); }
+.freshness { max-width: 290px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: .86rem; }
+.rollup { margin: 28px 0 38px; padding: 22px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.rollup-number { color: var(--blue); font-size: 3rem; font-weight: 750; letter-spacing: -.06em; line-height: 1; }
+.rollup p { margin: 4px 0 0; color: var(--muted); }
+.section-heading { align-items: end; margin-bottom: 16px; }
+.legend { margin: 0; color: var(--muted); font-size: .78rem; }
+.dot { display: inline-block; width: 8px; height: 8px; margin: 0 3px 1px 8px; border-radius: 50%; }
+.dot.verified { background: var(--green); }.dot.synthetic { background: var(--purple); }.dot.manual { background: var(--orange); }.dot.unknown { background: var(--red); }
+.project-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.project-card { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.access { padding: 4px 7px; border-radius: 7px; background: color-mix(in srgb, var(--blue) 12%, transparent); color: var(--blue); font-size: .72rem; font-weight: 700; text-transform: uppercase; }
+.progress-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; margin-top: 20px; }
+.progress-track { overflow: hidden; height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--line) 84%, transparent); }.progress-value { height: 100%; border-radius: inherit; background: var(--blue); }.unknown-track { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--line) 80%, transparent) 0 8px, transparent 8px 16px); }
+.progress-label { font-variant-numeric: tabular-nums; }.progress-note { margin: 8px 0 18px; color: var(--muted); font-size: .84rem; }
+.live-source { padding: 12px; border-radius: 9px; background: color-mix(in srgb, var(--blue) 8%, transparent); font-size: .83rem; }.live-source p { margin: 6px 0 0; }.live-source-top { gap: 8px; align-items: center; }.live-source-top span:last-child { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 6px; font-size: .69rem; font-weight: 750; line-height: 1.3; text-transform: uppercase; }.badge.actual_verified { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }.badge.synthetic_verified { background: color-mix(in srgb, var(--purple) 18%, transparent); color: var(--purple); }.badge.manual { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }.badge.unverified { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
+.details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }.details summary { color: var(--blue); cursor: pointer; font-weight: 650; }.milestones, .lanes ul, .history { padding-left: 18px; }.milestones { display: grid; gap: 12px; }.milestones li { padding-bottom: 12px; border-bottom: 1px solid var(--line); }.milestones p { margin: 6px 0 0; color: var(--muted); font-size: .86rem; }.milestone-heading { gap: 8px; }.milestone-heading span { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }.lanes section { min-width: 0; padding: 12px; border-radius: 9px; background: color-mix(in srgb, var(--ground) 68%, transparent); }.lanes ul { margin: 0; color: var(--muted); font-size: .84rem; }.lanes li + li { margin-top: 7px; }
+.environment { margin: 12px 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-size: .86rem; }.environment span { color: var(--muted); }.history { color: var(--muted); font-size: .84rem; }.history li + li { margin-top: 9px; }.error { color: var(--red); }
+@media (max-width: 760px) { .shell { width: min(100% - 24px, 680px); padding-top: 22px; }.hero, .section-heading { display: block; }.freshness { margin-top: 18px; }.legend { margin-top: 14px; line-height: 2; }.project-grid { grid-template-columns: 1fr; }.lanes { grid-template-columns: 1fr; }.rollup { gap: 14px; }.live-source-top { flex-wrap: wrap; }.live-source-top span:last-child { margin-left: 0; } }
+@media (max-width: 390px) { .project-card, .rollup { padding: 16px; }.card-heading { gap: 10px; }.access { font-size: .64rem; }.milestone-heading { display: block; }.milestone-heading span { display: block; margin-top: 3px; }.rollup-number { font-size: 2.4rem; } }

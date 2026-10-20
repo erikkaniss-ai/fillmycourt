@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "Human-owned milestones and read-only runtime evidence",
+  "projects": [
+    {
+      "id": "getacourt",
+      "name": "GetACourt",
+      "portfolio": "FillMyCourt × GetACourt",
+      "access": "private-preview",
+      "baseline": true,
+      "github": {
+        "repository": "erikkaniss-ai/fillmycourt",
+        "pullRequest": 5
+      },
+      "milestones": [
+        {
+          "name": "Discovery, mobile navigation and Lisbon DST acceptance",
+          "weight": 20,
+          "acceptance": "passed",
+          "evidence": "actual_verified",
+          "reference": "PR #5 exact-head Platform CI #347: PostgreSQL 16, Node/Python, Chromium, Leaflet and protected-preview smoke."
+        },
+        {
+          "name": "Provider Connection Foundation (synthetic/read-only)",
+          "weight": 25,
+          "acceptance": "passed",
+          "evidence": "synthetic_verified",
+          "reference": "Synthetic transport-free registry and consent contract only; no provider account, token, request or booking."
+        },
+        {
+          "name": "Preview-only Google sign-in with real mobile UAT",
+          "weight": 15,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "Issue #6: owner-controlled Google Cloud client, Supabase configuration and explicit preview-only GO are required."
+        },
+        {
+          "name": "One provider-authorised availability path and pilot UAT",
+          "weight": 25,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "Requires provider-specific agreement, documented scope, legal/privacy evidence and Erik GO."
+        },
+        {
+          "name": "Release decision",
+          "weight": 15,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "No production merge, public deployment, booking, hold or payment activation is authorised."
+        }
+      ],
+      "now": [
+        "Keep Provider Connection Foundation capability-first and transport-free.",
+        "Surface only current verified PR/CI freshness; never infer provider access from a green build."
+      ],
+      "next": [
+        "Select one named provider or a consenting club/chain for documented access review.",
+        "Obtain official endpoint, scope, freshness, rate-limit, DPA and revocation evidence before an authorization UX."
+      ],
+      "blocked": [
+        "Player-delegated provider OAuth/availability is not verified for the Portugal P0 pack.",
+        "Google sign-in remains disabled pending Issue #6 approvals."
+      ],
+      "environments": [
+        {
+          "name": "Get protected preview",
+          "state": "actual_verified",
+          "value": "Netlify deploy preview READY; Team Login required",
+          "url": "https://deploy-preview-5--getacourt-preview.netlify.app/",
+          "lastVerifiedAt": "2026-10-20T07:12:00Z"
+        },
+        {
+          "name": "Public deployment",
+          "state": "actual_verified",
+          "value": "Published deploy 6ac6ed4e3c52dc0008214752 unchanged",
+          "url": "https://getacourt.com",
+          "lastVerifiedAt": "2026-10-20T00:00:00Z"
+        }
+      ],
+      "history": [
+        {
+          "at": "2026-10-20T07:12:00Z",
+          "state": "actual_verified",
+          "change": "Provider Connection Foundation added to PR #5; exact-head CI #347 succeeded."
+        },
+        {
+          "at": "2026-10-20T00:15:31Z",
+          "state": "synthetic_verified",
+          "change": "DST, browser and protected-preview acceptance completed on the preceding PR #5 head."
+        }
+      ]
+    },
+    {
+      "id": "fillmycourt",
+      "name": "FillMyCourt",
+      "portfolio": "FillMyCourt × GetACourt",
+      "access": "private-preview",
+      "baseline": true,
+      "github": {
+        "repository": "erikkaniss-ai/fillmycourt",
+        "pullRequest": 8
+      },
+      "milestones": [
+        {
+          "name": "Read-only operator foundation and rate-coverage guard",
+          "weight": 30,
+          "acceptance": "passed",
+          "evidence": "actual_verified",
+          "reference": "PR #8 exact-head Platform CI #323 succeeded; the private-draft workflow #39 also succeeded."
+        },
+        {
+          "name": "Protected hosted acceptance on exact source",
+          "weight": 20,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "Exact 320/390/1440 viewport UAT and controlled login/logout remain outstanding on the current head."
+        },
+        {
+          "name": "Cross-tenant negative authorization check",
+          "weight": 20,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "A real second-organisation 403 proof is still required; synthetic coverage is not a hosted proof."
+        },
+        {
+          "name": "Authorised live club inventory pilot",
+          "weight": 15,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "No real partner inventory, provider access, CRM write or payment activity is authorised."
+        },
+        {
+          "name": "Release decision",
+          "weight": 15,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "No production/main merge or public deployment is authorised."
+        }
+      ],
+      "now": [
+        "Maintain GET-only tenant isolation and the rate-coverage safety guard.",
+        "Use the protected preview only for authorised testing."
+      ],
+      "next": [
+        "Run exact-head responsive hosted UAT when a test operator identity is authorised.",
+        "Run a controlled second-organisation 403 check without exposing a bearer token."
+      ],
+      "blocked": [
+        "Authorised hosted test identity and real partner inventory/UAT are not yet available."
+      ],
+      "environments": [
+        {
+          "name": "Private Fill preview",
+          "state": "actual_verified",
+          "value": "Team Login required; PR #8 alias is available",
+          "url": "https://fill-pr8-619f773--fillmycourt-preview.netlify.app/fill/",
+          "lastVerifiedAt": "2026-10-20T00:00:00Z"
+        },
+        {
+          "name": "Public deployment",
+          "state": "actual_verified",
+          "value": "Published deploy 6ac1affcbcf7f400085f217d unchanged",
+          "url": "https://fillmycourt.com",
+          "lastVerifiedAt": "2026-10-20T00:00:00Z"
+        }
+      ],
+      "history": [
+        {
+          "at": "2026-10-19T14:28:13Z",
+          "state": "actual_verified",
+          "change": "PR #8 updated; source remains open and draft with successful exact-head CI evidence."
+        }
+      ]
+    },
+    {
+      "id": "platform",
+      "name": "Shared Platform",
+      "portfolio": "FillMyCourt × GetACourt",
+      "access": "staging",
+      "baseline": true,
+      "github": {
+        "repository": "erikkaniss-ai/fillmycourt",
+        "pullRequest": 3
+      },
+      "milestones": [
+        {
+          "name": "Shared Core contract and from-zero migration CI",
+          "weight": 40,
+          "acceptance": "passed",
+          "evidence": "actual_verified",
+          "reference": "PR #3 exact-head Platform CI #231 succeeded."
+        },
+        {
+          "name": "Staging runtime parity with the current PR head",
+          "weight": 20,
+          "acceptance": "unknown",
+          "evidence": "unverified",
+          "reference": "Railway is healthy, but its observed deployments do not prove that PR #3 head is deployed."
+        },
+        {
+          "name": "Provider-authorised read path",
+          "weight": 20,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "Provider agreement, scope and source provenance are required."
+        },
+        {
+          "name": "Production release decision",
+          "weight": 20,
+          "acceptance": "blocked",
+          "evidence": "manual",
+          "reference": "No production activation is in scope."
+        }
+      ],
+      "now": [
+        "Keep Core as the single booking/inventory/pricing authority.",
+        "Keep Operations GET-only and provider capability defaults fail-closed."
+      ],
+      "next": [
+        "Reconcile PR-head versus Railway deployment only with explicit staging release authority."
+      ],
+      "blocked": [
+        "No provider/club access grant and no production approval."
+      ],
+      "environments": [
+        {
+          "name": "Railway staging",
+          "state": "actual_verified",
+          "value": "4 services report SUCCESS; no staged changes or pending work",
+          "lastVerifiedAt": "2026-10-20T00:00:00Z"
+        },
+        {
+          "name": "Supabase staging",
+          "state": "actual_verified",
+          "value": "fmc-platform-staging ACTIVE_HEALTHY (eu-central-1)",
+          "lastVerifiedAt": "2026-10-20T00:00:00Z"
+        }
+      ],
+      "history": [
+        {
+          "at": "2026-10-20T00:00:00Z",
+          "state": "actual_verified",
+          "change": "Railway staging readback: 4/4 services successful, no pending or staged work."
+        }
+      ]
+    },
+    {
+      "id": "rebloom",
+      "name": "ReBloom",
+      "portfolio": "ReBloom × Continuum",
+      "access": "unverified",
+      "baseline": false,
+      "milestones": [],
+      "now": [
+        "Current repository, PR, CI, environment and acceptance baseline have not been read in this Control Tower refresh."
+      ],
+      "next": [
+        "Connect the canonical repository and milestone register, then verify exact branch/PR/CI/deploy status."
+      ],
+      "blocked": [
+        "No current source mapping or verified live snapshot is available in this dashboard input."
+      ],
+      "environments": [],
+      "history": []
+    },
+    {
+      "id": "continuum",
+      "name": "Continuum",
+      "portfolio": "ReBloom × Continuum",
+      "access": "unverified",
+      "baseline": false,
+      "milestones": [],
+      "now": [
+        "Current repository, PR, CI, environment and acceptance baseline have not been read in this Control Tower refresh."
+      ],
+      "next": [
+        "Connect the canonical repository and milestone register, then verify exact branch/PR/CI/deploy status."
+      ],
+      "blocked": [
+        "No current source mapping or verified live snapshot is available in this dashboard input."
+      ],
+      "environments": [],
+      "history": []
+    }
+  ]
+}
