@@ -155,3 +155,44 @@ test("No bearer, malformed origin or wrong Netlify site cannot reach another org
   assert.deepEqual(trials.map(x=>x.status),[401,403,503]);
   assert.ok(trials.every(x=>x.calls.length===0));
 });
+
+
+test("Unicode byte-size limit rejects oversized no-Content-Length upstream data",async()=>{
+  const oldFetch=globalThis.fetch, oldNetlify=globalThis.Netlify;
+  const body=JSON.stringify({private_data:"€".repeat(420000)});
+  assert.ok(body.length<1024*1024,"fixture is below character limit");
+  assert.ok(new TextEncoder().encode(body).byteLength>1024*1024,"fixture is above BYTE limit");
+  let calls=0;
+  globalThis.Netlify={env:{get:()=>null}};
+  globalThis.fetch=async(url,init)=>{
+    calls++;
+    assert.equal(init.method,"GET");
+    assert.ok(String(url).startsWith(OPS+"/api/"));
+    return new Response(body,{status:200,headers:{"content-type":"application/json"}});
+  };
+  try{
+    const r=await proxy(request("/api/me"),{site:{id:FILL_SITE_ID}});
+    assert.equal(r.status,502);
+    assert.deepEqual(await r.json(),{error:"OPERATIONS_RESPONSE_LIMIT"});
+    assert.equal(r.headers.get("cache-control"),"no-store, private");
+    assert.equal(calls,1);
+  }finally{
+    globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;
+  }
+});
+
+test("Upstream lying about Content-Length cannot bypass UTF-8 response limit",async()=>{
+  const oldFetch=globalThis.fetch, oldNetlify=globalThis.Netlify;
+  const body=JSON.stringify({notes:"界".repeat(400000)});
+  globalThis.Netlify={env:{get:()=>null}};
+  globalThis.fetch=async()=>new Response(body,{status:200,headers:{
+    "content-type":"application/json","content-length":"100"
+  }});
+  try{
+    const r=await proxy(request("/api/me"),{site:{id:FILL_SITE_ID}});
+    assert.equal(r.status,502);
+    assert.deepEqual(await r.json(),{error:"OPERATIONS_RESPONSE_LIMIT"});
+  }finally{
+    globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;
+  }
+});
