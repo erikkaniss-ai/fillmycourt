@@ -131,14 +131,19 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
     if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error("Invalid PR mapping");
     const pr = await githubJson(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, fetchImpl, token);
     const sha = pr.head.sha;
-    const [checks, runs] = await Promise.all([
+    // A missing secondary scope must not discard the positively verified PR.
+    // CI remains UNKNOWN when Actions cannot be read; commit-status UNKNOWN
+    // when the commit status API fails. Neither failure becomes a green check.
+    const [checkResult, runResult] = await Promise.allSettled([
       githubJson(`https://api.github.com/repos/${repo}/commits/${sha}/status`, fetchImpl, token),
       githubJson(`https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=30`, fetchImpl, token)
     ]);
+    const checks = checkResult.status === "fulfilled" ? checkResult.value : null;
+    const runs = runResult.status === "fulfilled" ? runResult.value : null;
     // Never attach a previous head's green run to the current PR. Keep each workflow's latest run.
-    const workflows = [...new Map((runs.workflow_runs || []).filter((run) => run.head_sha === sha)
+    const workflows = [...new Map((runs?.workflow_runs || []).filter((run) => run.head_sha === sha)
       .map((run) => [run.workflow_id || run.name, run]).reverse()).values()];
-    const requiredCi = assessRequiredCi(project.github.requiredWorkflows, runs.workflow_runs || [], sha, prNumber);
+    const requiredCi = assessRequiredCi(project.github.requiredWorkflows, runs?.workflow_runs || [], sha, prNumber);
     // Raw runs are informational. Only requiredCi is the release-evidence assessment.
     const latestRun = workflows.find((run) => run.name === "Platform CI") || workflows[0] || null;
     return {
@@ -168,7 +173,13 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
         runId: null,
         url: null
       },
-      commitStatus: checks.total_count === 0 ? "not reported" : checks.state || "unknown",
+      commitStatus: !checks ? "unverified" :
+        checks.total_count === 0 ? "not reported" : checks.state || "unknown",
+      sourceCoverage: {
+        pr: true,
+        actions: runResult.status === "fulfilled",
+        commitStatus: checkResult.status === "fulfilled"
+      },
       requiredCi,
       workflows: workflows.map((run) => ({ name: run.name, status: run.status, conclusion: run.conclusion, runId: run.id, url: run.html_url, sha: run.head_sha }))
     };
