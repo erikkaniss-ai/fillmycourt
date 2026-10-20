@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#071e33">
+  <title>Development Control Tower | Olsen Steiner</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div><div class="eyebrow">OLSEN STEINER / ENGINEERING</div>
+        <h1>Development Control Tower</h1>
+        <p class="subtitle">Portfolio status, evidence, blockers and owner decisions.</p></div>
+      <div class="refresh"><span id="connection" class="pill">Loading</span>
+        <button id="reload" type="button">Refresh now</button></div>
+    </header>
+    <p class="notice">Private source-code preview. Live hosting has not been authorised. CI success does not mean release readiness.</p>
+    <section class="summary" aria-label="Portfolio summary">
+      <div class="metric"><span class="value" id="count">—</span><span>Products</span></div>
+      <div class="metric"><span class="value" id="verified">—</span><span>GitHub verified</span></div>
+      <div class="metric"><span class="value" id="green">—</span><span>CI success</span></div>
+      <div class="metric"><span class="value" id="unbaselined">—</span><span>Unbaselined plans</span></div>
+    </section>
+    <div class="sectionhead"><h2>Product delivery</h2>
+      <span id="updated" class="muted">Not refreshed</span></div>
+    <section id="cards" class="cards" aria-live="polite"><p>Loading evidence…</p></section>
+    <footer>
+      <p><strong>Progress policy:</strong> percentages require owner-reviewed milestones, weights and acceptance evidence. No percentage is inferred from commits, PR counts or green CI.</p>
+      <p><strong>Sources:</strong> GitHub API observations are live when marked verified; NOW/NEXT and GO descriptions are static checkpoint notes dated 20 October 2026. Netlify, Railway and Supabase are not live-synced in this slice.</p>
+    </footer>
+  </main>
+</body>
+</html>
