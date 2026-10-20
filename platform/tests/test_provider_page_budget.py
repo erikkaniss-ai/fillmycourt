@@ -139,6 +139,8 @@ def test_worker_processes_only_one_page_per_lease_and_resumes_exact_offset(monke
         calls=[]
         def __init__(self,client_id,secret,tenant):
             assert (client_id,secret,tenant)==("fixture-id","fixture-secret","club-fixture-01")
+        def token_usable(self,min_remaining_seconds=120):
+            return True  # synthetic token already acquired in prior job
         def page(self,kind,start,end,cursor=None,page=0):
             self.calls.append((kind,start,end,cursor,page))
             return {"records":[],"has_more":page==0,"next_cursor":None}
