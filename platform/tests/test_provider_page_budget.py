@@ -111,3 +111,100 @@ def test_checkpoint_transaction_rollback_does_not_advance_cursor(store):
         row=c.execute(text("select payload,status from public.jobs where id=cast(:id as uuid)"),{"id":job_id}).mappings().one()
         assert row["payload"]=={}
         assert row["status"]=="leased"
+
+
+def test_worker_processes_only_one_page_per_lease_and_resumes_exact_offset(monkeypatch):
+    from contextlib import contextmanager
+    from fmc import v1_workers
+    class Conn:
+        def __init__(self):
+            self.statements=[]
+        def execute(self, stmt, params=None):
+            self.statements.append((str(stmt),params))
+    class FakeDb:
+        def __init__(self):
+            self.conn=Conn()
+            self.requests=0
+            self.checkpoints=[]
+        def reserve_provider_request(self, _connection_id):
+            self.requests+=1
+            return 0
+        @contextmanager
+        def trusted(self):
+            yield self.conn
+        def checkpoint_provider_job(self,c,job_id,lease,payload,delay_seconds):
+            assert c is self.conn
+            self.checkpoints.append((job_id,lease,payload,delay_seconds))
+    class FakePlaytomic:
+        calls=[]
+        def __init__(self,client_id,secret,tenant):
+            assert (client_id,secret,tenant)==("fixture-id","fixture-secret","club-fixture-01")
+        def page(self,kind,start,end,cursor=None,page=0):
+            self.calls.append((kind,start,end,cursor,page))
+            return {"records":[],"has_more":page==0,"next_cursor":None}
+    c={
+        "provider":"playtomic","organization_id":"11111111-1111-4111-8111-111111111111",
+        "status":"configured","capabilities":{"write_mode":"read_sync","official_read_authorized":True},
+        "config":{"tenant_id":"club-fixture-01","official_grant":{
+            "provider":"playtomic","status":"approved",
+            "authority":"club_or_certified_partner",
+            "organization_id":"11111111-1111-4111-8111-111111111111",
+            "tenant_id":"club-fixture-01","agreement_ref":"fixture-agreement-01",
+            "owner_approval_ref":"fixture-owner-01","scopes":["bookings.read"],
+            "approved_at":"2026-01-01T00:00:00Z",
+            "expires_at":"2027-01-01T00:00:00Z"
+        }}
+    }
+    monkeypatch.setattr(v1_workers,"_connection",lambda db,pc:c)
+    monkeypatch.setattr(v1_workers,"_credential",lambda c:("fixture-id","fixture-secret","club-fixture-01"))
+    monkeypatch.setattr(v1_workers,"Playtomic",FakePlaytomic)
+    monkeypatch.setenv("FMC_OFFICIAL_PROVIDER_READS_ENABLED","true")
+    db=FakeDb()
+    job={"id":"fake-job","lease_token":"fake-lease","payload":{
+        "provider_connection_id":"fixture-connection","stream":"bookings",
+        "window_start":"2026-10-20T00:00:00Z",
+        "window_end":"2026-10-21T00:00:00Z"}}
+    result=v1_workers._sync_playtomic(db,job)
+    assert result["checkpointed"] is True
+    assert db.requests==1
+    assert len(FakePlaytomic.calls)==1
+    assert db.checkpoints[0][2]["progress"]["page"]==1
+    assert db.checkpoints[0][3]==60
+    # Separate leased invocation resumes exactly at the durable page offset.
+    next_job={**job,"payload":db.checkpoints[0][2]}
+    done=v1_workers._sync_playtomic(db,next_job)
+    assert done=={"provider":"playtomic","stream":"bookings","records":0}
+    assert db.requests==2
+    assert [x[-1] for x in FakePlaytomic.calls]==[0,1]
+    assert len(db.checkpoints)==1
+
+
+def test_worker_rate_wait_stops_before_credential_and_network(monkeypatch):
+    from fmc import v1_workers
+    from fmc.playtomic import Deferred
+    db=type("NoReadDb",(),{
+        "reserve_provider_request":lambda self,pc:54
+    })()
+    c={"provider":"playtomic","status":"configured",
+       "organization_id":"11111111-1111-4111-8111-111111111111",
+       "capabilities":{"write_mode":"read_sync","official_read_authorized":True},
+       "config":{"tenant_id":"club-fixture-01","official_grant":{
+           "provider":"playtomic","status":"approved",
+           "authority":"club_or_certified_partner",
+           "organization_id":"11111111-1111-4111-8111-111111111111",
+           "tenant_id":"club-fixture-01","agreement_ref":"fixture-agreement-01",
+           "owner_approval_ref":"fixture-owner-01","scopes":["bookings.read"],
+           "approved_at":"2026-01-01T00:00:00Z",
+           "expires_at":"2027-01-01T00:00:00Z"}}}
+    monkeypatch.setattr(v1_workers,"_connection",lambda db,pc:c)
+    def denied(*_args,**_kwargs):
+        raise AssertionError("Never fetch credentials or call provider")
+    monkeypatch.setattr(v1_workers,"_credential",denied)
+    monkeypatch.setattr(v1_workers,"Playtomic",denied)
+    monkeypatch.setenv("FMC_OFFICIAL_PROVIDER_READS_ENABLED","true")
+    with pytest.raises(Deferred) as err:
+        v1_workers._sync_playtomic(db,{"id":"fake-job","lease_token":"fake-lease",
+            "payload":{"provider_connection_id":"fixture","stream":"bookings",
+                       "window_start":"2026-10-20T00:00:00Z",
+                       "window_end":"2026-10-21T00:00:00Z"}})
+    assert err.value.seconds==54
