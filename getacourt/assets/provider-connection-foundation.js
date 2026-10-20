@@ -12,10 +12,16 @@
     "account_link_supported","discovery.read","availability.read",
     "provider_handoff","native_booking_authorized"
   ]);
+  // Normalize key spelling so snake_case and HTTP headers are rejected too.
   const SENSITIVE_FIELDS=new Set([
-    "accessToken","refreshToken","authorizationCode","clientSecret",
-    "password","cookie","credentials"
+    "accesstoken","refreshtoken","authorizationcode","clientsecret",
+    "password","cookie","setcookie","credentials","apikey","xapikey",
+    "authorization","privatekey","bearertoken"
   ]);
+  const ISSUED_SYNTHETIC=new WeakSet();
+  function credentialField(key){
+    return SENSITIVE_FIELDS.has(key.replace(/[\\s_-]/g,"").toLowerCase());
+  }
   const PROVIDERS=Object.freeze({
     // The public Playtomic material currently documents a club/chain,
     // read-only API and Connect partner programme. It does not establish a
@@ -81,11 +87,12 @@
     if(seen.has(input))return;
     seen.add(input);
     for(const [key,value] of Object.entries(input)){
-      if(SENSITIVE_FIELDS.has(key))throw Error("Provider credentials are not accepted by the synthetic foundation.");
+      if(credentialField(key))throw Error("Provider credentials are not accepted by the synthetic foundation.");
       assertNoCredential(value,seen);
     }
   }
   function consent(input){
+    assertNoCredential(input);
     const value=input&&typeof input==="object"?input:{};
     if(!isOpaqueRef(value.subject_ref)||!isOpaqueRef(value.proof_ref))
       throw Error("Use internal opaque subject_ref and proof_ref values.");
@@ -95,25 +102,34 @@
       granted_at:asIso(value.granted_at),jurisdiction:typeof value.jurisdiction==="string"?value.jurisdiction:"unknown"
     });
   }
+  function requireIssuedConnection(connection){
+    if(!connection||typeof connection!=="object"||!ISSUED_SYNTHETIC.has(connection))
+      throw Error("Issued synthetic connection required.");
+  }
   function createSyntheticConnection(input={}){
     assertNoCredential(input);
     const provider=copyProvider(input.provider);
     const evidence=consent(input.consent);
     if(!isOpaqueRef(input.connection_ref))throw Error("Use an opaque connection_ref.");
+    const createdAt=asIso(input.created_at);
+    if(Date.parse(evidence.granted_at)>Date.parse(createdAt))
+      throw Error("Consent must not postdate synthetic connection creation.");
     // No provider state is claimed: no redirect, token, account identifier,
     // external request, scheduled sync, availability result, or write path.
-    return Object.freeze({
+    const connection=Object.freeze({
       connection_ref:input.connection_ref,provider,consent:evidence,
       mode:"synthetic_read_only",status:"not_authorized",
       token_state:"not_collected",freshness:"not_observed",
-      created_at:asIso(input.created_at),audit:Object.freeze([Object.freeze({
-        event:"provider_connection.synthetic_created",at:asIso(input.created_at),
+      created_at:createdAt,audit:Object.freeze([Object.freeze({
+        event:"provider_connection.synthetic_created",at:createdAt,
         provider:provider.id,scope:evidence.scope
       })])
     });
+    ISSUED_SYNTHETIC.add(connection);
+    return connection;
   }
   function authorizationPlan(connection){
-    if(!connection||connection.mode!=="synthetic_read_only")throw Error("Synthetic connection required.");
+    requireIssuedConnection(connection);
     return Object.freeze({
       status:"blocked",reason:"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED",
       provider:connection.provider.id,required_capability:"availability.read",
@@ -121,9 +137,19 @@
       external_request:false,token_collection:false,scheduled_sync:false,provider_write:false
     });
   }
+  function availabilityStatus(connection){
+    requireIssuedConnection(connection);
+    return Object.freeze({
+      status:"unknown",freshness:"not_observed",provider_authorized:false,
+      can_display_slots:false,slots:Object.freeze([]),
+      reason:"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED"
+    });
+  }
   function disconnect(connection,at){
-    if(!connection||connection.mode!=="synthetic_read_only")throw Error("Synthetic connection required.");
+    requireIssuedConnection(connection);
     const timestamp=asIso(at);
+    if(Date.parse(timestamp)<Date.parse(connection.created_at))
+      throw Error("Disconnect must not predate synthetic connection creation.");
     return Object.freeze({
       connection_ref:connection.connection_ref,provider:connection.provider.id,
       status:"disconnected",token_state:"not_collected",external_revoke:false,
@@ -149,7 +175,7 @@
 
   const api=Object.freeze({
     capability_names:CAPABILITIES,registry,consent,createSyntheticConnection,
-    authorizationPlan,disconnect,canBeginDelegatedAuthorization,validateRegistry
+    authorizationPlan,availabilityStatus,disconnect,canBeginDelegatedAuthorization,validateRegistry
   });
   root.GACProviderConnectionFoundation=api;
   if(typeof module!=="undefined"&&module.exports)module.exports=api;
