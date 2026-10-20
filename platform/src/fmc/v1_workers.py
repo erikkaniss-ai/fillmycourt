@@ -18,6 +18,7 @@ from sqlalchemy import text
 from .common import DomainError
 from .playtomic import Deferred, Playtomic
 from .provider_read_gate import require_official_club_read
+from .provider_token_sessions import ProviderTokenSessions
 from .provider_page_budget import read_page_state, next_page_state, PageBudgetError
 from .supabase_v1 import V1Store, one, rows
 
@@ -97,7 +98,7 @@ def _observe(c, org: str, pc: str, stream: str, record: dict, complete=True):
            "fp": fp, "complete": complete, "payload": payload})
 
 
-def _sync_playtomic(db: V1Store, job: dict):
+def _sync_playtomic(db: V1Store, job: dict, *, sessions=None):
     payload = job["payload"] or {}
     pc_id = payload.get("provider_connection_id")
     stream = payload.get("stream")
@@ -120,11 +121,23 @@ def _sync_playtomic(db: V1Store, job: dict):
     prior_records = payload.get("records_observed", 0)
     if type(prior_records) is not int or not 0 <= prior_records <= 10000:
         raise DomainError("PROVIDER_CHECKPOINT", "Invalid count.", 422)
+    # This one reservation covers ONE outbound operation: either OAuth token
+    # acquisition OR a bookings page, never both in the same 60s window.
     seconds_to_wait = db.reserve_provider_request(pc_id)
     if seconds_to_wait:
         raise Deferred("PROVIDER_RATE", seconds_to_wait)
     client_id, secret, tenant = _credential(connection)
-    api = Playtomic(client_id, secret, tenant)
+    if sessions is None:
+        sessions = ProviderTokenSessions(factory=Playtomic)
+    api = sessions.get(organization_id=connection["organization_id"],
+                       connection_id=pc_id, client_id=client_id,
+                       secret=secret, tenant=tenant)
+    if not api.token_usable(min_remaining_seconds=120):
+        # The token is held only by the current worker process, not in a
+        # job, browser or database. Fresh auth uses this request reservation;
+        # the data page is a separately leased job at least 60s later.
+        api.get_token(force_refresh=True)
+        raise Deferred("PROVIDER_AUTH_PACING", 60)
     # Exactly ONE provider data page is requested per leased worker job.
     response = api.page(stream, start, end, cursor=page_state["cursor"], page=page_state["page"])
     try:
@@ -303,6 +316,7 @@ def run(settings, service: str):
     db = V1Store(settings.database)
     server = _health_server(db)
     kinds = ("reconcile",) if service == "reconciliation-worker" else ("sync_bookings","sync_players","sync_payments")
+    sessions = ProviderTokenSessions(factory=Playtomic) # isolated per process; not persisted
     try:
         while True:
             job = db.claim_job(kinds)
@@ -310,7 +324,7 @@ def run(settings, service: str):
                 time.sleep(1)
                 continue
             try:
-                result = _reconcile(db, job) if service == "reconciliation-worker" else _sync_playtomic(db, job)
+                result = _reconcile(db, job) if service == "reconciliation-worker" else _sync_playtomic(db, job, sessions=sessions)
                 if not result.get("checkpointed"):
                     db.finish_job(job["id"], job["lease_token"], result)
             except Deferred as exc:
