@@ -152,3 +152,47 @@ test("preflight rejects fake connections, forbidden credentials, clock skew and 
   assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"2026-10-20T08:03:00Z",last_fixture_observed_at:"2026-10-20T08:04:00Z"}),/future/);
   assert.throws(()=>foundation.syntheticReadPreflight(c,{now:"bad"}),/timestamp/);
 });
+
+
+test("club bookings never imply free court inventory or player OAuth authority",()=>{
+  for(const provider of foundation.registry().map(x=>x.id)){
+    const c=foundation.createSyntheticConnection({...input,provider});
+    const receipt=foundation.inspectSyntheticObservation(c,{
+      kind:"booking_events",source_ref:"fixture-club-01",
+      observed_at:"2026-10-20T08:05:00Z",fixture_records_count:12
+    });
+    assert.equal(receipt.status,"not_authorized",provider);
+    assert.equal(receipt.kind,"booking_events",provider);
+    assert.equal(receipt.fixture_records_count,12,provider);
+    assert.equal(receipt.can_display_availability,false,provider);
+    assert.equal(receipt.can_link_player_account,false,provider);
+    assert.equal(receipt.booking_events_are_availability,false,provider);
+    assert.equal(receipt.provider_read_occurred,false,provider);
+    assert.deepEqual(receipt.slots,[],provider);
+    assert.equal(Object.isFrozen(receipt),true);
+  }
+});
+
+test("even a synthetic availability snapshot cannot activate real venue slots",()=>{
+  const c=foundation.createSyntheticConnection(input);
+  const receipt=foundation.inspectSyntheticObservation(c,{
+    kind:"availability_snapshot",source_ref:"fixture-club-01",
+    observed_at:"2026-10-20T08:05:00Z",fixture_records_count:8
+  });
+  assert.equal(receipt.status,"not_authorized");
+  assert.equal(receipt.can_display_availability,false);
+  assert.equal(receipt.provider_read_occurred,false);
+  assert.deepEqual(receipt.slots,[]);
+});
+
+test("observation inspection rejects unissued sources, credentials, non-opaque provenance and missing timestamps",()=>{
+  const c=foundation.createSyntheticConnection(input);
+  for(const extra of [
+    {kind:"booking_events",source_ref:"fixture-club-01",observed_at:"bad"},
+    {kind:"booking_events",source_ref:"https://external.test",observed_at:"2026-10-20T08:05:00Z"},
+    {kind:"booking_events",source_ref:"fixture-club-01",observed_at:"2026-10-20T08:05:00Z",fixture_records_count:-1},
+    {kind:"booking_events",source_ref:"fixture-club-01",observed_at:"2026-10-20T08:05:00Z",api_key:"secret"},
+    {kind:"booking_events",source_ref:"fixture-club-01",observed_at:"2026-10-20T08:05:00Z",access_token:"secret"}
+  ]) assert.throws(()=>foundation.inspectSyntheticObservation(c,extra));
+  assert.throws(()=>foundation.inspectSyntheticObservation({...c},{kind:"booking_events"}),/Issued/);
+});
