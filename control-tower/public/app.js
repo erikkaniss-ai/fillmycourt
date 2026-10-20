@@ -72,6 +72,12 @@ function renderGithub(target, github) {
     escapeHtml(names[check.status]||"UNKNOWN")+"</strong>"+
     (check.url ? " · "+safeLink(check.url,"CI evidence") : "")+"</li>").join("") ||
     "<li>Required workflow baseline not configured. CI readiness: UNKNOWN.</li>";
+  const activity = (github.sourceActivity || []).map(event =>
+    "<li>"+safeLink(event.url,event.label)+" · "+
+    escapeHtml(formatTime(event.at))+"</li>").join("");
+  const activityPanel = activity
+    ? "<details><summary>Recent GitHub activity (source timestamps, not acceptance)</summary><ul>"+activity+"</ul></details>"
+    : "<p>Recent GitHub activity: UNKNOWN (no verifiable timestamps).</p>";
   const ci = github.ci;
   const ciText = escapeHtml(ci?.runId ? `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})` : ci?.name);
   const pr = github.pullRequest;
@@ -83,7 +89,8 @@ function renderGithub(target, github) {
     <p>${requiredBadge} <strong>Required CI: ${escapeHtml(names[requiredState])}</strong></p>
     <ul>${requiredRows}</ul>
     <p>Other workflow observation: ${ci?.url ? safeLink(ci.url, `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})`) : ciText || "UNKNOWN"} · commit status: ${escapeHtml(github.commitStatus)}</p>
-    <ul>${(github.workflows || []).map((run) => `<li>${safeLink(run.url, `${run.name}: ${run.conclusion || run.status}`)} · exact HEAD</li>`).join("") || "<li>Exact-head workflow evidence: UNKNOWN</li>"}</ul>`;
+    <ul>${(github.workflows || []).map((run) => `<li>${safeLink(run.url, `${run.name}: ${run.conclusion || run.status}`)} · exact HEAD</li>`).join("") || "<li>Exact-head workflow evidence: UNKNOWN</li>"}</ul>
+    ${activityPanel}`;
 }
 
 function renderProject(project) {
