@@ -36,6 +36,10 @@ jobs:
         env:
           CONTROL_TOWER_TOOLS: ${{ runner.temp }}/control-tower-tools/node_modules
         run: node control-tower/test/browser-acceptance.mjs
+      - name: Package approved private acceptance data into server function only
+        env:
+          CONTROL_TOWER_APPROVED_MODEL: ${{ secrets.CONTROL_TOWER_APPROVED_MODEL }}
+        run: node control-tower/scripts/prepare-approved-model.mjs
       - name: Deploy isolated alias on existing protected site
         working-directory: control-tower
         env:

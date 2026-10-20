@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateApprovedModel, assessMilestone, progressBreakdown, approvedRollup, assessScopedCi } from './acceptance.mjs';
 
 const here = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const publicDir = join(here, "public");
@@ -149,7 +150,8 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
       const tracked = pulls.slice(0, 5);
       const pullRequests = await Promise.all(tracked.map(async (pr) => {
         const result = await refreshGithub({ github: { repository: repo, pullRequest: pr.number,
-          requiredWorkflows: project.github.requiredWorkflows, private: project.github.private } }, { fetchImpl, now, token });
+          requiredWorkflows: project.github.requiredWorkflows, private: project.github.private,
+          scopedPolicy: project.github.scopedPolicies?.find(s => s.pr === pr.number), policyRequired: project.github.policyRequired } }, { fetchImpl, now, token });
         return { ...result, blockerLabels: (pr.labels || []).map((label) => label.name).filter((name) => /block|needs.?go|approval/i.test(name)) };
       }));
       return { state: "actual_verified", fetchedAt: now.toISOString(), repository: repo, openPullsReturned: pulls.length,
@@ -170,7 +172,10 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
     // Never attach a previous head's green run to the current PR. Keep each workflow's latest run.
     const workflows = [...new Map((runs?.workflow_runs || []).filter((run) => run.head_sha === sha)
       .map((run) => [run.workflow_id || run.name, run]).reverse()).values()];
-    const requiredCi = assessRequiredCi(project.github.requiredWorkflows, runs?.workflow_runs || [], sha, prNumber);
+    const requiredCi = project.github.scopedPolicy || project.github.policyRequired
+      ? await assessScopedCi(project.github.scopedPolicy, runs?.workflow_runs || [], sha, prNumber, pr.head.ref,
+        runId => githubJson(`https://api.github.com/repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`, fetchImpl, token))
+      : assessRequiredCi(project.github.requiredWorkflows, runs?.workflow_runs || [], sha, prNumber);
     // Raw runs are informational. Only requiredCi is the release-evidence assessment.
     const latestRun = workflows.find((run) => run.name === "Platform CI") || workflows[0] || null;
     return {
@@ -223,9 +228,23 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
 
 export async function buildSnapshot(config, options = {}) {
   const now = options.now || new Date();
-  const projects = await Promise.all(config.projects.map(async (project) => {
+  const model = validateApprovedModel(options.approvedModel) ? options.approvedModel : null;
+  const projectConfig = [...config.projects];
+  if (model) for (const p of model.projects) if (!projectConfig.some(c => c.id === p.id)) projectConfig.push({ id: p.id, name: p.name, portfolio: 'Shared tooling', access: 'private-preview', now: [], next: [], blocked: [], milestones: [] });
+  const projects = await Promise.all(projectConfig.map(async (project) => {
+    const definition = model?.projects.find(p => p.id === project.id);
+    const policies = project.id === 'continuum' ? model?.continuumCiPolicy?.selectors : null;
+    const sourceProject = policies ? { ...project, github: { ...project.github, scopedPolicies: policies, policyRequired: true } } : project;
     const token = project.github?.private ? options.privateToken || "" : options.token || "";
-    const github = await refreshGithub(project, { ...options, now, token });
+    const github = await refreshGithub(sourceProject, { ...options, now, token });
+    if (definition) {
+      const milestones = definition.milestones.map(m => assessMilestone(m, model.receipts?.[m.id], github, model.releaseSha, now));
+      const progress = progressBreakdown(milestones, true);
+      return { ...publicProject(project), kind: definition.kind, portfolioWeight: definition.portfolioWeight,
+        baseline: true, approval: { id: model.proposalId, by: model.approvedBy, at: model.approvedAt },
+        milestones, milestoneWeight: 100, progress: progress.overall, progressBreakdown: progress,
+        owner: definition.owner, target: definition.target, githubLive: github };
+    }
     return { ...publicProject(project), githubLive: github };
   }));
   return {
@@ -233,7 +252,8 @@ export async function buildSnapshot(config, options = {}) {
     source: config.generatedFrom,
     fetchedAt: now.toISOString(),
     projects,
-    rollup: buildRollup(projects)
+    rollup: model ? approvedRollup(projects) : buildRollup(projects),
+    approvedBaseline: model ? { id: model.proposalId, by: model.approvedBy, at: model.approvedAt, releaseSha: model.releaseSha } : null
   };
 }
 

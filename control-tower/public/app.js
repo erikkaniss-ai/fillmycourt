@@ -10,6 +10,7 @@ function escapeHtml(value) {
 }
 
 function formatTime(value) {
+  if (!Number.isFinite(Date.parse(value))) return 'UNKNOWN';
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
@@ -70,7 +71,8 @@ function renderGithub(target, github) {
   const requiredRows = (required.checks||[]).map(check =>
     "<li>"+escapeHtml(check.workflow)+": <strong>"+
     escapeHtml(names[check.status]||"UNKNOWN")+"</strong>"+
-    (check.url ? " · "+safeLink(check.url,"CI evidence") : "")+"</li>").join("") ||
+    (check.url ? " · "+safeLink(check.url,"CI evidence") : "")+
+    (check.reason ? " — "+escapeHtml(check.reason) : "")+"</li>").join("") ||
     "<li>Required workflow baseline not configured. CI readiness: UNKNOWN.</li>";
   const activity = (github.sourceActivity || []).map(event =>
     "<li>"+safeLink(event.url,event.label)+" · "+
@@ -103,7 +105,12 @@ function renderProject(project) {
 
   const progress = project.progress;
   const label = root.querySelector(".progress-label");
-  if (progress === null) {
+  const breakdown = project.progressBreakdown;
+  if (breakdown?.approved) {
+    label.textContent = `${breakdown.confirmed}% confirmed · ${breakdown.unknown}% UNKNOWN`;
+    root.querySelector('.progress-value').style.width = `${breakdown.confirmed}%`;
+    root.querySelector('.progress-note').textContent = `Approved ${project.approval.id}. Known unfinished: ${breakdown.unfinished}%. Overall readiness: ${breakdown.overall === null ? 'UNKNOWN' : breakdown.overall + '%'}. Confirmed source/synthetic acceptance is not hosted/live readiness or release GO. ${project.kind === 'product' ? 'Product rollup weight: ' + project.portfolioWeight + '%.' : 'Dependency/enabler: excluded from product rollup.'}`;
+  } else if (progress === null) {
     label.textContent = "UNKNOWN · no approved baseline";
     root.querySelector(".progress-note").textContent = "Progress is intentionally withheld until weighted acceptance criteria are defined and reviewed.";
     root.querySelector(".progress-track").classList.add("unknown-track");
@@ -117,8 +124,12 @@ function renderProject(project) {
   const milestoneList = root.querySelector(".milestones");
   milestoneList.innerHTML = (project.milestones || []).map((milestone) => `
     <li>
-      <div class="milestone-heading"><strong>${escapeHtml(milestone.name)}</strong><span>${Number(milestone.weight)}% draft weight · ${escapeHtml(milestone.acceptance)}</span></div>
+      <div class="milestone-heading"><strong>${escapeHtml(milestone.id || '')} ${escapeHtml(milestone.name)}</strong><span>${Number(milestone.weight)}% ${project.baseline ? 'approved' : 'draft'} weight · ${escapeHtml(milestone.acceptance)}</span></div>
       ${badge(milestone.evidence)}<p>${escapeHtml(milestone.reference)}</p>
+      ${(milestone.acceptanceCriteria || []).map(c => `<p>Acceptance: ${escapeHtml(c)}</p>`).join('')}
+      ${milestone.blockerOwner ? `<p>Owner: ${escapeHtml(milestone.blockerOwner)}. Erik GO: ${escapeHtml(milestone.erikGo)}</p>` : ''}
+      ${milestone.receipt ? `<p>Reviewed: ${escapeHtml(milestone.receipt.reviewer)} · ${escapeHtml(formatTime(milestone.receipt.verifiedAt))}</p>` : ''}
+      ${(milestone.receipt?.evidenceUrls || []).map(url => `<p>${safeLink(url, 'Acceptance evidence')}</p>`).join('')}
     </li>`).join("") || "<li>No milestone baseline has been supplied.</li>";
 
   list(root.querySelector(".now"), project.now);
@@ -137,7 +148,7 @@ function render(snapshot) {
   document.querySelector("#freshness").innerHTML = `${badge(verified === configured && configured > 0 ? "actual_verified" : "unverified")} GitHub ${verified}/${configured}: ${formatTime(snapshot.fetchedAt)}`;
   document.querySelector("#rollup").innerHTML = `
     <div class="rollup-number">${rollup.percent === null ? "UNKNOWN" : `${rollup.percent}%`}</div>
-    <div><strong>Owner-approved weighted acceptance only</strong><p>${rollup.baselinedProjects} of ${rollup.totalProjects} projects have an approved baseline. Draft weights are excluded. Green CI is not deployed acceptance or project completion. Manual decision gates are not live blocker checks.</p></div>`;
+    <div><strong>Owner-approved P0/MVP acceptance only</strong><p>${snapshot.approvedBaseline ? `Approved ${escapeHtml(snapshot.approvedBaseline.id)}. Confirmed: ${rollup.confirmed}%; UNKNOWN: ${rollup.unknown}%; known unfinished: ${rollup.unfinished}%. Four products at 25% each; Shared Platform and Control Tower excluded to prevent double counting.` : `${rollup.baselinedProjects} of ${rollup.totalProjects} projects have an approved baseline.`} Green CI is not deployed acceptance or project completion. Overall readiness stays UNKNOWN while evidence is incomplete.</p></div>`;
   const projects = document.querySelector("#projects");
   projects.replaceChildren(...snapshot.projects.map(renderProject));
 }

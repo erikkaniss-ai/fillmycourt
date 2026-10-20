@@ -28,8 +28,29 @@ credential for the two private repositories, caches results for 15 minutes,
 and the browser checks for an updated snapshot every five minutes. Returned
 timestamps show the actual snapshot time. A rate limit/error is unverified.
 
-Milestone weights are proposed engineering models pending owner review;
-they must not be presented as owner-approved overall project completion.
+The owner-approved PCT-2026-10-20-v1 baseline is packaged as server-only data.
+The public repository contains only an empty placeholder. Private acceptance
+receipts and workflow selectors are stored in the isolated deployment workflow's
+`CONTROL_TOWER_APPROVED_MODEL` secret, never in static assets or public CI logs.
+The packaging step validates the fixed 100-point project weights and four equally
+weighted product scorecards, binds the bundle to the deployed source SHA, and
+fails closed if data is missing or invalid.
+
+The API reports confirmed, UNKNOWN and known-unfinished weights separately.
+UNKNOWN always remains in the denominator; the overall percentage is withheld
+while any weight is unverified. Shared infrastructure and the dashboard enabler
+are visible but excluded from the product rollup. All-or-nothing milestone
+receipts require a reviewer, timestamp, every acceptance condition and current
+exact-source required CI. Source changes invalidate those receipts. Synthetic
+tests never establish hosted/live readiness. Baseline approval is not release GO.
+
+Continuum's required CI is assessed using reviewed exact-source workflow paths,
+job names and every required step, not a green workflow name alone. Dependency
+freeze, full regression, strict TypeScript, schema-generation no-op, native build,
+tracked/untracked cleanliness and risk-lane tests are the approved policy.
+Missing, skipped, cancelled, truncated or unaudited evidence remains UNKNOWN.
+This dashboard policy does not modify repository branch protection or workflows
+in any monitored private repository.
 
 ## Local preview
 
@@ -57,8 +78,8 @@ separate. Persistent snapshots/time-series and automatic Netlify/Railway/Drive
 evidence are deliberately excluded from this minimal-cost release until
 authorised source contracts, persistence budget and review criteria exist.
 
-The weighted progress fields remain UNKNOWN while owner-reviewed milestone
-baselines are false. Do not infer a percentage from GitHub activity. No
+Without the approved private model, weighted progress fields remain UNKNOWN.
+With it, only verified acceptance earns confirmed weight. Do not infer a percentage from GitHub activity. No
 production launch, provider authorization or payment readiness is implied.
 
 ## Live source freshness
@@ -77,8 +98,9 @@ This slice records the current Netlify/Railway state as dated human-reviewed evi
 
 The owner authorised online hosting on an existing resource on 20 October 2026.
 The private Fill preview site and its existing Team Login were selected.
-Automatic Netlify/Railway refresh remains unconfigured. ReBloom/Continuum mappings
-are connected in code; live activation requires the dedicated credential and authenticated hosted readback. Those sources remain UNKNOWN until then. No approved milestone baseline is currently configured, so all completion percentages are UNKNOWN.
+Automatic Netlify/Railway refresh remains unconfigured. ReBloom/Continuum reads
+use the separately approved restricted server credential. Every returned source
+has its own freshness and coverage; unavailable evidence remains UNKNOWN.
 
 ## Verification
 
@@ -88,4 +110,8 @@ node --check control-tower/server.mjs
 node --check control-tower/public/app.js
 ```
 
-The test suite checks weighted-percent semantics, unknown-project rollup exclusion and server-only credential handling using a mocked GitHub response. It makes no external calls.
+The test suite checks approved fixed-denominator accounting, six-card integration,
+source/SHA/CI receipt invalidation, workflow job/step policy, server-only credential
+handling and the legacy unapproved fallback using mocked GitHub responses.
+It makes no external calls. Browser acceptance checks both fallback and approved
+synthetic models at 320, 390 and 1440 pixels; no private data enters those fixtures.

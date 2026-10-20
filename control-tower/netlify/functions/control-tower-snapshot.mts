@@ -1,4 +1,5 @@
 import projects from "../../config/projects.json" with { type: "json" };
+import approvedModel from "../../config/approved-model.json" with { type: "json" };
 import { buildSnapshot } from "../../server.mjs";
 
 const SITE_ID = "d763b7a1-dccd-4638-8876-ac1670171698";
@@ -18,10 +19,11 @@ export default async (request: Request, context: { site: { id: string }; deploy:
   }
   if (request.method !== "GET") return Response.json({ error: "READ_ONLY" }, { status: 405, headers });
   if (!cached || Date.now() >= expires) {
-    // Dedicated two-repository read-only credential: Functions scope only, never client-side.
+    // Credential is read by this server function only. Actual site plan scopes
+    // include Builds/Functions/Runtime; the value is branch-restricted.
     // Never use the deployment token or a personal CLI credential for GitHub reads.
     const privateToken = process.env.CONTROL_TOWER_GITHUB_READ_TOKEN || "";
-    pending ||= buildSnapshot(projects, { token: "", privateToken }).then((value: unknown) => {
+    pending ||= buildSnapshot(projects, { token: "", privateToken, approvedModel }).then((value: unknown) => {
       cached = value;
       // Nine public GitHub GETs per refresh: 15 minutes stays below the
       // anonymous 60-requests/hour allowance for a warm instance.
