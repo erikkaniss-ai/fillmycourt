@@ -160,3 +160,54 @@ test("private open PR listing inherits required CI policies without leaking toke
   assert.equal(JSON.stringify(result).includes("restricted-secret"),false);
   assert.equal(calls.every(x=>x.header==="Bearer restricted-secret"),true);
 });
+
+
+test("independent PR, Actions and commit-status reads preserve partial verified evidence",async()=>{
+  const sha="a".repeat(40);
+  const project={github:{repository:"erikkaniss-ai/fillmycourt",pullRequest:5,
+    requiredWorkflows:["Platform CI"]}};
+  const pr={number:5,html_url:"https://github.com/erikkaniss-ai/fillmycourt/pull/5",
+    title:"Draft",draft:true,state:"open",base:{ref:"getacourt-staging"},
+    head:{ref:"get/rc",sha}};
+  const run={id:50,name:"Platform CI",head_sha:sha,event:"pull_request",
+    status:"completed",conclusion:"success",created_at:"2026-10-20T10:00:00Z",
+    pull_requests:[{number:5,head:{sha}}]};
+  const statusDenied=await refreshGithub(project,{token:"read-only-test",
+    fetchImpl:async url=>{
+      if(url.includes("/pulls/5"))return new Response(JSON.stringify(pr));
+      if(url.endsWith("/status"))return new Response("forbidden",{status:403});
+      return new Response(JSON.stringify({workflow_runs:[run]}));
+    }});
+  assert.equal(statusDenied.state,"actual_verified");
+  assert.equal(statusDenied.pullRequest.sha,sha);
+  assert.equal(statusDenied.requiredCi.verdict,"success");
+  assert.equal(statusDenied.commitStatus,"unverified");
+  assert.equal(statusDenied.sourceCoverage.pr,true);
+  assert.equal(statusDenied.sourceCoverage.actions,true);
+  assert.equal(statusDenied.sourceCoverage.commitStatus,false);
+  const actionsDenied=await refreshGithub(project,{token:"read-only-test",
+    fetchImpl:async url=>{
+      if(url.includes("/pulls/5"))return new Response(JSON.stringify(pr));
+      if(url.endsWith("/status"))return new Response(JSON.stringify({total_count:0,state:"pending"}));
+      return new Response("forbidden",{status:403});
+    }});
+  assert.equal(actionsDenied.state,"actual_verified");
+  assert.equal(actionsDenied.pullRequest.sha,sha);
+  assert.equal(actionsDenied.requiredCi.verdict,"unverified");
+  assert.equal(actionsDenied.workflows.length,0);
+  assert.equal(actionsDenied.sourceCoverage.pr,true);
+  assert.equal(actionsDenied.sourceCoverage.actions,false);
+  assert.equal(actionsDenied.sourceCoverage.commitStatus,true);
+});
+
+test("a failed PR read is not silently upgraded by unrelated Actions",async()=>{
+  const project={github:{repository:"erikkaniss-ai/fillmycourt",pullRequest:5,
+    requiredWorkflows:["Platform CI"]}};
+  let count=0;
+  const result=await refreshGithub(project,{token:"read-only-test",fetchImpl:async()=>{
+    count++;return new Response("forbidden",{status:403});
+  }});
+  assert.equal(result.state,"unverified");
+  assert.equal(result.pullRequest,undefined);
+  assert.equal(count,1);
+});
