@@ -121,8 +121,11 @@ test("CI is UNKNOWN when a required workflow is missing, skipped or has mismatch
     run("Platform CI","completed","skipped")],sha,5).verdict,"unverified");
   assert.equal(assessRequiredCi(["Platform CI"],[
     run("Platform CI","completed","success",sha,6)],sha,5).verdict,"unverified");
+  // GitHub PR workflows may use a synthetic merge SHA; explicit PR + source SHA permits it.
   assert.equal(assessRequiredCi(["Platform CI"],[
-    run("Platform CI","completed","success","c".repeat(40),5)],sha,5).verdict,"unverified");
+    run("Platform CI","completed","success","c".repeat(40),5)],sha,5).verdict,"success");
+  assert.equal(assessRequiredCi(["Platform CI"],[
+    {...run("Platform CI","completed","success","c".repeat(40),5),pull_requests:[]}],sha,5).verdict,"unverified");
   assert.equal(assessRequiredCi(["Platform CI"],[
     run("Platform CI","in_progress",null)],sha,5).verdict,"running");
   assert.equal(assessRequiredCi(["Platform CI"],[
