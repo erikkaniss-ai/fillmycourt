@@ -97,7 +97,10 @@ export default async function fillOperatorReadonly(request, context) {
     if (Number(upstream.headers.get("content-length") || 0) > 1024 * 1024)
       return reply(502, "OPERATIONS_RESPONSE_LIMIT");
     const body = await upstream.text();
-    if (body.length > 1024 * 1024) return reply(502, "OPERATIONS_RESPONSE_LIMIT");
+    // Upstream Content-Length is not trustworthy and JS string.length counts
+    // UTF-16 code units, not the UTF-8 wire bytes. Enforce the actual bound.
+    if (new TextEncoder().encode(body).byteLength > 1024 * 1024)
+      return reply(502, "OPERATIONS_RESPONSE_LIMIT");
     return new Response(body, {status: upstream.status, headers: JSON_HEADERS});
   } catch {
     return reply(502, "OPERATIONS_UNAVAILABLE");
