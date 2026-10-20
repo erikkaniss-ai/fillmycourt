@@ -7,7 +7,7 @@
       "name": "GetACourt",
       "portfolio": "FillMyCourt × GetACourt",
       "access": "private-preview",
-      "baseline": true,
+      "baseline": false,
       "github": {
         "repository": "erikkaniss-ai/fillmycourt",
         "pullRequest": 5
@@ -95,7 +95,7 @@
       "name": "FillMyCourt",
       "portfolio": "FillMyCourt × GetACourt",
       "access": "private-preview",
-      "baseline": true,
+      "baseline": false,
       "github": {
         "repository": "erikkaniss-ai/fillmycourt",
         "pullRequest": 8
@@ -177,7 +177,7 @@
       "name": "Shared Platform",
       "portfolio": "FillMyCourt × GetACourt",
       "access": "staging",
-      "baseline": true,
+      "baseline": false,
       "github": {
         "repository": "erikkaniss-ai/fillmycourt",
         "pullRequest": 3
@@ -248,17 +248,18 @@
       "id": "rebloom",
       "name": "ReBloom",
       "portfolio": "ReBloom × Continuum",
-      "access": "unverified",
+      "access": "private-preview",
       "baseline": false,
+      "github": { "repository": "erikkaniss-ai/rebloom-world", "private": true, "mode": "open-pulls" },
       "milestones": [],
       "now": [
-        "Current repository, PR, CI, environment and acceptance baseline have not been read in this Control Tower refresh."
+        "Read-only monitoring of the five most recently updated open PRs and exact-head workflows. No release or live integration authority."
       ],
       "next": [
-        "Connect the canonical repository and milestone register, then verify exact branch/PR/CI/deploy status."
+        "Owner: Erik / CTO. Review weighted milestone acceptance and authorised hosted QA; current completion remains UNKNOWN."
       ],
       "blocked": [
-        "No current source mapping or verified live snapshot is available in this dashboard input."
+        "MANUAL decision gate: owner Erik GO is required for any release, production change or live integration. Current environment/QA acceptance is UNKNOWN until verified."
       ],
       "environments": [],
       "history": []
@@ -267,17 +268,18 @@
       "id": "continuum",
       "name": "Continuum",
       "portfolio": "ReBloom × Continuum",
-      "access": "unverified",
+      "access": "private-preview",
       "baseline": false,
+      "github": { "repository": "erikkaniss-ai/continuum-internal-preservation", "private": true, "mode": "open-pulls" },
       "milestones": [],
       "now": [
-        "Current repository, PR, CI, environment and acceptance baseline have not been read in this Control Tower refresh."
+        "Read-only monitoring of the five most recently updated open PRs and exact-head workflows. Source/CI success does not establish deployed runtime readiness."
       ],
       "next": [
-        "Connect the canonical repository and milestone register, then verify exact branch/PR/CI/deploy status."
+        "Owner: Erik / CTO. Review weighted milestone acceptance and runtime evidence; current completion remains UNKNOWN."
       ],
       "blocked": [
-        "No current source mapping or verified live snapshot is available in this dashboard input."
+        "MANUAL decision gate: owner Erik GO required for real customer data, provider writes, model spend and outbound communications. Current runtime readiness is UNKNOWN."
       ],
       "environments": [],
       "history": []

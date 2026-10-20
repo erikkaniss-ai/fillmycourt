@@ -13,6 +13,9 @@
 }
 
 * { box-sizing: border-box; }
+.project-card, .rollup { overflow-wrap: anywhere; }
+.live-source > section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.rollup > div { min-width: 0; }
 body { margin: 0; background: var(--ground); color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
 a { color: var(--blue); }
 .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 72px; }
@@ -45,4 +48,4 @@ h4 { margin-bottom: 8px; font-size: .82rem; letter-spacing: .06em; text-transfor
 .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }.lanes section { min-width: 0; padding: 12px; border-radius: 9px; background: color-mix(in srgb, var(--ground) 68%, transparent); }.lanes ul { margin: 0; color: var(--muted); font-size: .84rem; }.lanes li + li { margin-top: 7px; }
 .environment { margin: 12px 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-size: .86rem; }.environment span { color: var(--muted); }.history { color: var(--muted); font-size: .84rem; }.history li + li { margin-top: 9px; }.error { color: var(--red); }
 @media (max-width: 760px) { .shell { width: min(100% - 24px, 680px); padding-top: 22px; }.hero, .section-heading { display: block; }.freshness { margin-top: 18px; }.legend { margin-top: 14px; line-height: 2; }.project-grid { grid-template-columns: 1fr; }.lanes { grid-template-columns: 1fr; }.rollup { gap: 14px; }.live-source-top { flex-wrap: wrap; }.live-source-top span:last-child { margin-left: 0; } }
-@media (max-width: 390px) { .project-card, .rollup { padding: 16px; }.card-heading { gap: 10px; }.access { font-size: .64rem; }.milestone-heading { display: block; }.milestone-heading span { display: block; margin-top: 3px; }.rollup-number { font-size: 2.4rem; } }
+@media (max-width: 390px) { .project-card, .rollup { padding: 16px; }.card-heading { gap: 10px; }.access { font-size: .64rem; }.milestone-heading { display: block; }.milestone-heading span { display: block; margin-top: 3px; }.rollup-number { font-size: 2rem; }.rollup { display: block; }.rollup-number { margin-bottom: 12px; }.progress-row { grid-template-columns: 1fr; } }

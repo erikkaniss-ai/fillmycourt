@@ -12,8 +12,6 @@ Read-only, mobile-first portfolio dashboard for owner review. It is deliberately
 
 The static `config/projects.json` is the human-owned decision layer. A green GitHub run refreshes its evidence card only; it cannot change a milestone percentage. That requires an editor to update the milestone's acceptance state and evidence reference after review.
 
-## Local preview
-
 ## Online access
 
 Stable address: https://control-tower--fillmycourt-preview.netlify.app/
@@ -25,7 +23,8 @@ preview at the primary site address is preserved. No laptop process is needed.
 GitHub Actions `Control Tower private online deployment` checks and publishes
 changes pushed to `cto/development-control-tower`. It reuses the existing
 `FILL_NETLIFY_AUTH_TOKEN` deployment secret in CI only. The hosted function
-uses public GitHub GETs without any credential, caches results for 15 minutes,
+uses public GitHub GETs without a credential and a separate restricted server-only
+credential for the two private repositories, caches results for 15 minutes,
 and the browser checks for an updated snapshot every five minutes. Returned
 timestamps show the actual snapshot time. A rate limit/error is unverified.
 
@@ -44,7 +43,11 @@ Then open `http://127.0.0.1:4173`. The server binds to loopback only, sends no-s
 
 ## Live source freshness
 
-The browser receives a same-origin `/api/snapshot` response. The server reads `GITHUB_TOKEN` only from its own environment when supplied; it is never serialised into the response, static files or logs. Public repositories work without a token, subject to GitHub's anonymous rate limit.
+The browser receives a same-origin `/api/snapshot` response. Private repository reads require `CONTROL_TOWER_GITHUB_READ_TOKEN` in the Netlify Functions environment; no personal CLI token or deployment credential is reused. Public repository requests receive no credential. Missing access and API errors produce UNKNOWN, not stale green evidence.
+
+For the private connection, select only `rebloom-world` and `continuum-internal-preservation` under GitHub fine-grained token settings, with Pull requests, Actions and Commit statuses set to Read-only (metadata read is implicit). Set a short expiry and rotate before expiry. Store the value only in Netlify Functions scope for this non-production branch context. Never paste it in chat, put it in source, publish assets or logs. User approval is recorded; token issuance still requires owner GitHub login. Do not claim activation until the authenticated hosted API has been read back successfully.
+
+Private cards automatically discover open PRs (at most 100 returned) and show the five most recently updated PRs. All latest workflows returned for each exact head are displayed, not just one green run. The API returns a coverage warning, so this bounded feed is not mistaken for every PR or project completion. GitHub blocker labels are shown when present; absence of a label does not prove absence of blockers. Manual decision gates and dated environment snapshots remain explicitly separate from live GitHub evidence. No Google Drive sync is claimed.
 
 To add a project, copy a project entry in `config/projects.json`, define weighted milestone acceptance criteria, add an optional GitHub `repository` and `pullRequest`, and leave `baseline` false until the owner reviews those criteria. A project with no reviewed baseline is shown as **No verified baseline**, not as 0%.
 
@@ -54,8 +57,8 @@ This slice records the current Netlify/Railway state as dated human-reviewed evi
 
 The owner authorised online hosting on an existing resource on 20 October 2026.
 The private Fill preview site and its existing Team Login were selected.
-Automatic Netlify/Railway refresh and ReBloom/Continuum source mappings remain
-unconfigured. Those cards retain dated manual evidence or unverified state.
+Automatic Netlify/Railway refresh remains unconfigured. ReBloom/Continuum mappings
+are connected in code; live activation requires the dedicated credential and authenticated hosted readback. Those sources remain UNKNOWN until then. No approved milestone baseline is currently configured, so all completion percentages are UNKNOWN.
 
 ## Verification
 

@@ -2,7 +2,7 @@ const stateLabel = {
   actual_verified: "actual verified",
   synthetic_verified: "synthetic verified",
   manual: "manual",
-  unverified: "unverified"
+  unverified: "UNKNOWN"
 };
 
 function escapeHtml(value) {
@@ -18,12 +18,20 @@ function formatTime(value) {
 }
 
 function badge(state) {
-  const label = stateLabel[state] || "unverified";
-  return `<span class="badge ${state || "unverified"}">${label}</span>`;
+  const safeState = Object.hasOwn(stateLabel, state) ? state : "unverified";
+  return `<span class="badge ${safeState}">${stateLabel[safeState]}</span>`;
 }
 
 function list(target, values) {
-  target.innerHTML = (values || []).map((value) => `<li>${value}</li>`).join("") || "<li>None recorded.</li>";
+  target.innerHTML = (values || []).map((value) => `<li>${escapeHtml(value)}</li>`).join("") || "<li>None recorded.</li>";
+}
+
+function safeLink(url, label) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error();
+    return `<a href="${escapeHtml(parsed.href)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`;
+  } catch { return escapeHtml(label); }
 }
 
 function renderGithub(target, github) {
@@ -35,13 +43,29 @@ function renderGithub(target, github) {
     target.innerHTML = `${badge("unverified")} <span>GitHub refresh unavailable: ${escapeHtml(github.error || "unknown reason")}.</span>`;
     return;
   }
+  if (github.pullRequests) {
+    target.innerHTML = `${badge("actual_verified")} GitHub listing · ${formatTime(github.fetchedAt)}<p>${github.openPullsReturned}${github.listingMayBeTruncated ? "+" : ""} open PRs returned. ${escapeHtml(github.coverage)}.</p>`;
+    for (const pull of github.pullRequests) {
+      const item = document.createElement("section");
+      renderGithub(item, pull);
+      if (pull.blockerLabels?.length) {
+        const labels = document.createElement("p");
+        labels.textContent = `GitHub blocker labels: ${pull.blockerLabels.join(", ")}. Owner / GO details: UNKNOWN unless recorded in the decision source.`;
+        item.append(labels);
+      }
+      target.append(item);
+    }
+    return;
+  }
   const ci = github.ci;
   const ciText = escapeHtml(ci?.runId ? `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})` : ci?.name);
   const pr = github.pullRequest;
   target.innerHTML = `
     <div class="live-source-top">${badge("actual_verified")} <strong>GitHub live refresh</strong><span>${formatTime(github.fetchedAt)}</span></div>
-    <p><a href="${escapeHtml(pr.url)}" target="_blank" rel="noreferrer">PR #${Number(pr.number)}</a> · ${pr.draft ? "draft" : escapeHtml(pr.state)} · <code>${escapeHtml(pr.sha.slice(0, 12))}</code></p>
-    <p>${ci?.url ? `<a href="${ci.url}" target="_blank" rel="noreferrer">${ciText}</a>` : ciText || "CI unknown"} · commit status: ${github.commitStatus}</p>`;
+    <p>${safeLink(pr.url, `PR #${pr.number}`)} · ${pr.draft ? "draft" : escapeHtml(pr.state)} · <code>${escapeHtml(pr.sha.slice(0, 12))}</code></p>
+    <p>${escapeHtml(pr.title)}</p>
+    <p>${ci?.url ? safeLink(ci.url, `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})`) : ciText || "CI UNKNOWN"} · commit status: ${escapeHtml(github.commitStatus)}</p>
+    <ul>${(github.workflows || []).map((run) => `<li>${safeLink(run.url, `${run.name}: ${run.conclusion || run.status}`)} · exact HEAD</li>`).join("") || "<li>Exact-head workflow evidence: UNKNOWN</li>"}</ul>`;
 }
 
 function renderProject(project) {
@@ -55,7 +79,7 @@ function renderProject(project) {
   const progress = project.progress;
   const label = root.querySelector(".progress-label");
   if (progress === null) {
-    label.textContent = "No verified baseline";
+    label.textContent = "UNKNOWN · no approved baseline";
     root.querySelector(".progress-note").textContent = "Progress is intentionally withheld until weighted acceptance criteria are defined and reviewed.";
     root.querySelector(".progress-track").classList.add("unknown-track");
   } else {
@@ -68,16 +92,16 @@ function renderProject(project) {
   const milestoneList = root.querySelector(".milestones");
   milestoneList.innerHTML = (project.milestones || []).map((milestone) => `
     <li>
-      <div class="milestone-heading"><strong>${milestone.name}</strong><span>${milestone.weight}% · ${milestone.acceptance}</span></div>
-      ${badge(milestone.evidence)}<p>${milestone.reference}</p>
+      <div class="milestone-heading"><strong>${escapeHtml(milestone.name)}</strong><span>${Number(milestone.weight)}% draft weight · ${escapeHtml(milestone.acceptance)}</span></div>
+      ${badge(milestone.evidence)}<p>${escapeHtml(milestone.reference)}</p>
     </li>`).join("") || "<li>No milestone baseline has been supplied.</li>";
 
   list(root.querySelector(".now"), project.now);
   list(root.querySelector(".next"), project.next);
   list(root.querySelector(".blocked"), project.blocked);
   root.querySelector(".environments").innerHTML = (project.environments || []).map((environment) => `
-    <p class="environment">${badge(environment.state)} <strong>${environment.name}</strong> — ${environment.url ? `<a href="${environment.url}" target="_blank" rel="noreferrer">${environment.value}</a>` : environment.value}<br><span>Last read: ${formatTime(environment.lastVerifiedAt)}</span></p>`).join("") || "<p>No environment has been verified for this project in the current dashboard input.</p>";
-  root.querySelector(".history").innerHTML = (project.history || []).map((entry) => `<li>${badge(entry.state)} <strong>${formatTime(entry.at)}</strong> — ${entry.change}</li>`).join("") || "<li>No verified change history is available yet.</li>";
+    <p class="environment">${badge("manual")} <strong>${escapeHtml(environment.name)}</strong> — ${environment.url ? safeLink(environment.url, environment.value) : escapeHtml(environment.value)}<br><span>Dated recorded snapshot: ${formatTime(environment.lastVerifiedAt)}. Current state: UNKNOWN; not a live deployment check.</span></p>`).join("") || "<p>Environment / hosted QA: UNKNOWN. No current verified environment input.</p>";
+  root.querySelector(".history").innerHTML = (project.history || []).map((entry) => `<li>${badge(entry.state)} <strong>${formatTime(entry.at)}</strong> — ${escapeHtml(entry.change)}</li>`).join("") || "<li>Persistent change history: UNKNOWN; not collected yet.</li>";
   return fragment;
 }
 
@@ -87,8 +111,8 @@ function render(snapshot) {
   const verified = snapshot.projects.filter((project) => project.githubLive?.state === "actual_verified").length;
   document.querySelector("#freshness").innerHTML = `${badge(verified === configured && configured > 0 ? "actual_verified" : "unverified")} GitHub ${verified}/${configured}: ${formatTime(snapshot.fetchedAt)}`;
   document.querySelector("#rollup").innerHTML = `
-    <div class="rollup-number">${rollup.percent === null ? "—" : `${rollup.percent}%`}</div>
-    <div><strong>Proposed milestone model · owner review pending</strong><p>${rollup.baselinedProjects} of ${rollup.totalProjects} projects have a draft model. ${rollup.completedWeight} of ${rollup.totalWeight} weighted points map to recorded evidence. Weights are engineering proposals and are not owner-approved project completion metrics.</p></div>`;
+    <div class="rollup-number">${rollup.percent === null ? "UNKNOWN" : `${rollup.percent}%`}</div>
+    <div><strong>Owner-approved weighted acceptance only</strong><p>${rollup.baselinedProjects} of ${rollup.totalProjects} projects have an approved baseline. Draft weights are excluded. Green CI is not deployed acceptance or project completion. Manual decision gates are not live blocker checks.</p></div>`;
   const projects = document.querySelector("#projects");
   projects.replaceChildren(...snapshot.projects.map(renderProject));
 }

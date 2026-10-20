@@ -48,7 +48,7 @@ export function buildRollup(projects = []) {
 }
 
 function publicProject(project) {
-  const progress = weightedProgress(project.milestones);
+  const progress = project.baseline === true ? weightedProgress(project.milestones) : null;
   return {
     ...project,
     progress,
@@ -69,17 +69,33 @@ async function githubJson(url, fetchImpl, token) {
 }
 
 export async function refreshGithub(project, { fetchImpl = fetch, now = new Date(), token = process.env.GITHUB_TOKEN } = {}) {
-  if (!project.github?.repository || !project.github?.pullRequest) return null;
+  if (!project.github?.repository) return null;
   const repo = project.github.repository;
   const prNumber = project.github.pullRequest;
   try {
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error("Invalid repository mapping");
+    if (project.github.private && !token) throw new Error("Dedicated read-only GitHub access is not configured; private PR/CI UNKNOWN");
+    if (project.github.mode === "open-pulls") {
+      const pulls = await githubJson(`https://api.github.com/repos/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=100`, fetchImpl, token);
+      const tracked = pulls.slice(0, 5);
+      const pullRequests = await Promise.all(tracked.map(async (pr) => {
+        const result = await refreshGithub({ github: { repository: repo, pullRequest: pr.number } }, { fetchImpl, now, token });
+        return { ...result, blockerLabels: (pr.labels || []).map((label) => label.name).filter((name) => /block|needs.?go|approval/i.test(name)) };
+      }));
+      return { state: "actual_verified", fetchedAt: now.toISOString(), repository: repo, openPullsReturned: pulls.length,
+        listingMayBeTruncated: pulls.length === 100, coverage: "Five most recently updated open PRs; not a project completion metric", pullRequests };
+    }
+    if (!Number.isInteger(prNumber) || prNumber < 1) throw new Error("Invalid PR mapping");
     const pr = await githubJson(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, fetchImpl, token);
     const sha = pr.head.sha;
     const [checks, runs] = await Promise.all([
       githubJson(`https://api.github.com/repos/${repo}/commits/${sha}/status`, fetchImpl, token),
-      githubJson(`https://api.github.com/repos/${repo}/actions/runs?event=pull_request&head_sha=${sha}&per_page=5`, fetchImpl, token)
+      githubJson(`https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=30`, fetchImpl, token)
     ]);
-    const latestRun = (runs.workflow_runs || []).find((run) => run.name === "Platform CI") || (runs.workflow_runs || [])[0] || null;
+    // Never attach a previous head's green run to the current PR. Keep each workflow's latest run.
+    const workflows = [...new Map((runs.workflow_runs || []).filter((run) => run.head_sha === sha)
+      .map((run) => [run.workflow_id || run.name, run]).reverse()).values()];
+    const latestRun = workflows.find((run) => run.name === "Platform CI") || workflows[0] || null;
     return {
       state: "actual_verified",
       fetchedAt: now.toISOString(),
@@ -108,13 +124,14 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
         url: null
       },
       commitStatus: checks.total_count === 0 ? "not reported" : checks.state || "unknown"
+      ,workflows: workflows.map((run) => ({ name: run.name, status: run.status, conclusion: run.conclusion, runId: run.id, url: run.html_url, sha: run.head_sha }))
     };
-  } catch (error) {
+  } catch {
     return {
       state: "unverified",
       fetchedAt: now.toISOString(),
       repository: repo,
-      error: error.message
+      error: project.github.private && !token ? "Dedicated read-only GitHub access is not configured; private PR/CI UNKNOWN" : "GitHub read unavailable; status UNKNOWN (check access, API limit or network)"
     };
   }
 }
@@ -122,7 +139,8 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
 export async function buildSnapshot(config, options = {}) {
   const now = options.now || new Date();
   const projects = await Promise.all(config.projects.map(async (project) => {
-    const github = await refreshGithub(project, { ...options, now });
+    const token = project.github?.private ? options.privateToken || "" : options.token || "";
+    const github = await refreshGithub(project, { ...options, now, token });
     return { ...publicProject(project), githubLive: github };
   }));
   return {

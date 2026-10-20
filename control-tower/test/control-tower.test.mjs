@@ -28,7 +28,7 @@ test("GitHub refresh exposes status evidence but never server credentials", asyn
       base: { ref: "getacourt-staging" }, head: { ref: "get/rc", sha: "abc123456789abcdef" }
     }));
     if (url.includes("/status")) return new Response(JSON.stringify({ state: "success" }));
-    return new Response(JSON.stringify({ workflow_runs: [{ id: 7, name: "Platform CI", status: "completed", conclusion: "success", html_url: "https://github.test/run/7" }] }));
+    return new Response(JSON.stringify({ workflow_runs: [{ id: 7, head_sha: "abc123456789abcdef", name: "Platform CI", status: "completed", conclusion: "success", html_url: "https://github.test/run/7" }] }));
   };
   const result = await refreshGithub({ github: { repository: "org/repo", pullRequest: 5 } }, { fetchImpl, token: "never-client-side", now: new Date("2026-10-20T08:00:00Z") });
   assert.equal(result.state, "actual_verified");
@@ -36,6 +36,35 @@ test("GitHub refresh exposes status evidence but never server credentials", asyn
   assert.equal(result.ci.runId, 7);
   assert.equal(JSON.stringify(result).includes("never-client-side"), false);
   assert.equal(calls.every((call) => call.options.headers.Authorization === "Bearer never-client-side"), true);
+});
+
+test("private projects fail closed without making anonymous reads", async () => {
+  const result = await refreshGithub({ github: { repository: "org/private", private: true, mode: "open-pulls" } }, {
+    token: "", fetchImpl: async () => { throw new Error("must not be called"); }
+  });
+  assert.equal(result.state, "unverified");
+  assert.match(result.error, /UNKNOWN/);
+});
+
+test("unapproved draft weights never produce project or rollup percentages", async () => {
+  const result = await buildSnapshot({ projects: [{ baseline: false, milestones: [{ weight: 100, acceptance: "passed" }] }] });
+  assert.equal(result.projects[0].progress, null);
+  assert.equal(result.rollup.percent, null);
+});
+
+test("private read credential is isolated to private mappings and never in output", async () => {
+  const calls = [];
+  const result = await buildSnapshot({ projects: [
+    { github: { repository: "org/public", pullRequest: 1 } },
+    { github: { repository: "org/private", private: true, mode: "open-pulls" } }
+  ] }, { privateToken: "restricted-test-secret", fetchImpl: async (url, options) => {
+    calls.push({ url, authorization: options.headers.Authorization });
+    if (url.includes("/private/pulls?")) return new Response("[]");
+    return new Response("{}", { status: 403 });
+  } });
+  assert.equal(calls.find((item) => item.url.includes("/private/")).authorization, "Bearer restricted-test-secret");
+  assert.equal(calls.find((item) => item.url.includes("/public/")).authorization, undefined);
+  assert.equal(JSON.stringify(result).includes("restricted-test-secret"), false);
 });
 
 test("snapshot retains unknown projects and keeps them out of the calculated rollup", async () => {

@@ -18,8 +18,10 @@ export default async (request: Request, context: { site: { id: string }; deploy:
   }
   if (request.method !== "GET") return Response.json({ error: "READ_ONLY" }, { status: 405, headers });
   if (!cached || Date.now() >= expires) {
-    // Public-repository GETs only. No deployment credential or user bearer is read.
-    pending ||= buildSnapshot(projects, { token: "" }).then((value: unknown) => {
+    // Dedicated two-repository read-only credential: Functions scope only, never client-side.
+    // Never use the deployment token or a personal CLI credential for GitHub reads.
+    const privateToken = process.env.CONTROL_TOWER_GITHUB_READ_TOKEN || "";
+    pending ||= buildSnapshot(projects, { token: "", privateToken }).then((value: unknown) => {
       cached = value;
       // Nine public GitHub GETs per refresh: 15 minutes stays below the
       // anonymous 60-requests/hour allowance for a warm instance.
