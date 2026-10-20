@@ -211,3 +211,41 @@ test("a failed PR read is not silently upgraded by unrelated Actions",async()=>{
   assert.equal(result.pullRequest,undefined);
   assert.equal(count,1);
 });
+
+
+test("verified activity exposes dated PR updates and Actions results without treating them as completion",async()=>{
+  const sha="e".repeat(40);
+  const source={github:{repository:"erikkaniss-ai/fillmycourt",pullRequest:5,
+    requiredWorkflows:["Platform CI"]}};
+  const pr={number:5,html_url:"https://github.com/erikkaniss-ai/fillmycourt/pull/5",
+    updated_at:"2026-10-20T10:30:00Z",title:"Draft",draft:true,state:"open",
+    base:{ref:"getacourt-staging"},head:{ref:"get/rc",sha}};
+  const workflows=[{id:57,name:"Platform CI",event:"pull_request",head_sha:sha,
+    status:"completed",conclusion:"success",
+    html_url:"https://github.com/erikkaniss-ai/fillmycourt/actions/runs/57",
+    created_at:"2026-10-20T10:35:00Z",
+    pull_requests:[{number:5,head:{sha}}]}];
+  const result=await refreshGithub(source,{token:"test-only",fetchImpl:async url=>{
+    if(url.includes("/pulls/5"))return Response.json(pr);
+    if(url.endsWith("/status"))return Response.json({total_count:0});
+    return Response.json({workflow_runs:workflows});
+  }});
+  assert.equal(result.sourceActivity.length,2);
+  assert.equal(result.sourceActivity[0].kind,"ci_run");
+  assert.equal(result.sourceActivity[0].at,"2026-10-20T10:35:00.000Z");
+  assert.equal(result.sourceActivity[1].kind,"pr_updated");
+  assert.equal(result.sourceActivity[1].at,"2026-10-20T10:30:00.000Z");
+  assert.equal(result.sourceActivity.every(e=>e.url.startsWith("https://github.com/")),true);
+  assert.equal(result.requiredCi.verdict,"success");
+  assert.equal(result.progress,undefined);
+});
+
+test("invalid or absent dates never become invented timeline events",async()=>{
+  const {sourceActivity}=await import("../server.mjs");
+  const sha="f".repeat(40);
+  const events=sourceActivity({
+    number:5,html_url:"https://github.com/example/repo/pull/5",updated_at:"invalid"
+  },[{id:71,name:"Optional",head_sha:sha,status:"completed",conclusion:"success",
+    created_at:"",html_url:"https://github.com/example/repo/actions/runs/71"}],sha);
+  assert.deepEqual(events,[]);
+});
