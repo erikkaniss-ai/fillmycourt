@@ -11,9 +11,9 @@ from .common import DomainError
 BASE='https://thirdparty.playtomic.io'
 # This adapter deliberately has no provider booking-write method. A future
 # write adapter needs separate provider authorization and per-court approval.
-CAPABILITIES={'read_sync':True,'handoff':True,'authorized_native_write':False}
+CAPABILITIES={'read_sync':True,'handoff':False,'availability_read':False,'player_delegated_oauth':False,'authorized_native_write':False}
 def capabilities():
-    """Return declared modes; never infer provider write permission."""
+    """Adapter supports approved club reads only; runtime grant is separately gated."""
     return CAPABILITIES.copy()
 class Deferred(DomainError):
     def __init__(self,code,seconds):super().__init__(code,'Provider is preparing data or rate limited; queued for retry.',503);self.seconds=max(5,min(3600,seconds))
