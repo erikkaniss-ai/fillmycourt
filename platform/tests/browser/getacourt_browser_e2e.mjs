@@ -463,6 +463,15 @@ test("real Chromium: My bookings distinguishes repeated Lisbon 01:30 with UTC of
         body:JSON.stringify({bookings:items})});
     });
     await ready(page);
+    await page.setViewportSize({width:320,height:700});
+    const layout=await page.evaluate(()=>({
+      width:document.documentElement.clientWidth,
+      pageWidth:document.documentElement.scrollWidth,
+      navWidth:document.querySelector("header .nav")?.clientWidth
+    }));
+    assert.ok(layout.navWidth>0,"Mobile player nav must be visible");
+    assert.ok(layout.pageWidth<=layout.width+1,
+      "Mobile navigation must not cause document overflow: "+JSON.stringify(layout));
     const before=forbiddenWrites.length;
     await page.locator("#myBookingsButton").click();
     await page.locator("#bookingsDialog[open]").waitFor({timeout:10000});
