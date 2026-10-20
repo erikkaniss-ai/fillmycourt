@@ -208,3 +208,34 @@ def test_worker_rate_wait_stops_before_credential_and_network(monkeypatch):
                        "window_start":"2026-10-20T00:00:00Z",
                        "window_end":"2026-10-21T00:00:00Z"}})
     assert err.value.seconds==54
+
+
+def test_rate_deferral_retains_payload_and_retry_budget(store):
+    """429/202 and reserved-window waits must not lose a page or burn retries."""
+    org=str(uuid.uuid4()); jid=str(uuid.uuid4()); lease=str(uuid.uuid4())
+    progress={"page":3,"cursor":None,"window_start":"2026-10-20T00:00:00Z",
+              "window_end":"2026-10-21T00:00:00Z"}
+    with store.trusted() as c:
+        c.execute(text("""
+            insert into public.organizations(id,slug,name)
+            values(cast(:org as uuid),:slug,'CI defer org')
+        """),{"org":org,"slug":"defer-"+org[:8]})
+        c.execute(text("""
+            insert into public.jobs(id,organization_id,kind,dedupe_key,payload,status,attempts,lease_token,lease_until)
+            values(cast(:id as uuid),cast(:org as uuid),'sync_bookings','ci-deferred',
+                   cast(:payload as jsonb),'leased',4,cast(:lease as uuid),now()+interval '45 seconds')
+        """),{"id":jid,"org":org,"lease":lease,
+              "payload":__import__("json").dumps({"stream":"bookings","progress":progress})})
+    store.defer_provider_job(jid,lease,delay_seconds=120)
+    with store.trusted() as c:
+        row=c.execute(text("""
+            select payload,status,attempts,lease_token,(due_at>now()) as delayed
+            from public.jobs where id=cast(:id as uuid)
+        """),{"id":jid}).mappings().one()
+        assert row["payload"]["progress"]==progress
+        assert row["status"]=="queued"
+        assert row["attempts"]==3
+        assert row["lease_token"] is None
+        assert row["delayed"] is True
+    with pytest.raises(DomainError):
+        store.defer_provider_job(jid,lease,delay_seconds=60)
