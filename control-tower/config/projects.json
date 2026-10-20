@@ -10,7 +10,10 @@
       "baseline": false,
       "github": {
         "repository": "erikkaniss-ai/fillmycourt",
-        "pullRequest": 5
+        "pullRequest": 5,
+        "requiredWorkflows": [
+          "Platform CI"
+        ]
       },
       "milestones": [
         {
@@ -98,7 +101,11 @@
       "baseline": false,
       "github": {
         "repository": "erikkaniss-ai/fillmycourt",
-        "pullRequest": 8
+        "pullRequest": 8,
+        "requiredWorkflows": [
+          "Platform CI",
+          "FillMyCourt private draft preview"
+        ]
       },
       "milestones": [
         {
@@ -180,7 +187,10 @@
       "baseline": false,
       "github": {
         "repository": "erikkaniss-ai/fillmycourt",
-        "pullRequest": 3
+        "pullRequest": 3,
+        "requiredWorkflows": [
+          "Platform CI"
+        ]
       },
       "milestones": [
         {
@@ -250,7 +260,14 @@
       "portfolio": "ReBloom × Continuum",
       "access": "private-preview",
       "baseline": false,
-      "github": { "repository": "erikkaniss-ai/rebloom-world", "private": true, "mode": "open-pulls" },
+      "github": {
+        "repository": "erikkaniss-ai/rebloom-world",
+        "private": true,
+        "mode": "open-pulls",
+        "requiredWorkflows": [
+          "ReBloom canonical Linux validation"
+        ]
+      },
       "milestones": [],
       "now": [
         "Read-only monitoring of the five most recently updated open PRs and exact-head workflows. No release or live integration authority."
@@ -270,7 +287,12 @@
       "portfolio": "ReBloom × Continuum",
       "access": "private-preview",
       "baseline": false,
-      "github": { "repository": "erikkaniss-ai/continuum-internal-preservation", "private": true, "mode": "open-pulls" },
+      "github": {
+        "repository": "erikkaniss-ai/continuum-internal-preservation",
+        "private": true,
+        "mode": "open-pulls",
+        "requiredWorkflows": []
+      },
       "milestones": [],
       "now": [
         "Read-only monitoring of the five most recently updated open PRs and exact-head workflows. Source/CI success does not establish deployed runtime readiness."
