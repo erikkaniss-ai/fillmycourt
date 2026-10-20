@@ -108,7 +108,8 @@
   }
   function createSyntheticConnection(input={}){
     assertNoCredential(input);
-    const provider=copyProvider(input.provider);
+    const definition=copyProvider(input.provider);
+    const provider=Object.freeze({...definition,capabilities:Object.freeze({...definition.capabilities})});
     const evidence=consent(input.consent);
     if(!isOpaqueRef(input.connection_ref))throw Error("Use an opaque connection_ref.");
     const createdAt=asIso(input.created_at);
