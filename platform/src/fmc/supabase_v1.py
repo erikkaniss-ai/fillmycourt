@@ -267,7 +267,9 @@ class V1Store:
                 values(cast(:pc as uuid)) on conflict do nothing
             """), {"pc": provider_connection_id})
             wait = c.execute(text("""
-                select greatest(extract(epoch from next_allowed_at - clock_timestamp()),0)
+                select case when next_allowed_at='-infinity'::timestamptz then 0
+                            else greatest(extract(epoch from next_allowed_at - clock_timestamp()),0)
+                       end
                 from public.provider_request_windows
                 where provider_connection_id=cast(:pc as uuid) for update
             """), {"pc": provider_connection_id}).scalar_one()
