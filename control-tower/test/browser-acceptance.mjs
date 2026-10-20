@@ -17,8 +17,9 @@ try {
     await page.locator(".project-card").first().waitFor({ timeout: 30000 });
     assert.equal(await page.locator(".project-card").count(), 5);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Horizontal overflow at ${width}`);
-    await page.locator("summary").first().click();
-    assert.equal(await page.locator("details").first().getAttribute("open"), "");
+    assert.equal(await page.locator('.source-details').first().getAttribute('open'), null);
+    await page.getByText('Milestones and acceptance evidence', {exact: true}).first().click();
+    assert.equal(await page.locator('.milestones').first().isVisible(), true);
     console.log(`Browser PASS: ${width}px, five cards, milestone expansion, no horizontal overflow`);
   }
   assert.deepEqual(errors, []);

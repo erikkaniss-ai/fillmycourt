@@ -123,6 +123,17 @@ function renderProject(project) {
   if (project.evidenceReview) root.querySelector('.progress-note').textContent +=
     ' Decision evidence reviewed: ' + formatTime(project.evidenceReview.reviewedAt) + '. Scope: ' + (project.evidenceReview.scope || 'manual review') + '.';
   renderGithub(root.querySelector(".live-source"), project.githubLive);
+  const tracked = project.githubLive?.state === 'actual_verified'
+    ? (project.githubLive.pullRequests || [project.githubLive]) : [];
+  const sourceCounts = tracked.reduce((counts, pull) => {
+    const verdict = pull.requiredCi?.verdict || 'unverified';
+    counts[verdict] = (counts[verdict] || 0) + 1;
+    return counts;
+  }, {});
+  root.querySelector('.source-summary').textContent = tracked.length
+    ? 'PR / CI evidence · ' + tracked.length + ' tracked · ' + (sourceCounts.success || 0) + ' PASS · ' +
+      (sourceCounts.unverified || 0) + ' UNKNOWN · ' + (sourceCounts.failed_or_other || 0) + ' FAIL · ' + (sourceCounts.running || 0) + ' RUNNING'
+    : 'PR / CI evidence · UNKNOWN (unavailable or not configured)';
   const milestoneList = root.querySelector(".milestones");
   milestoneList.innerHTML = (project.milestones || []).map((milestone) => `
     <li>
