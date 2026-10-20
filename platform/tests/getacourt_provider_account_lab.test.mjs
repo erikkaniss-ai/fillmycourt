@@ -53,7 +53,7 @@ test("cannot submit identity, credentials, cookies, arbitrary consent or externa
     {redirect_uri:"https://example.test/steal"},
     {api_authorized:true},{provider_oauth_verified:true}
   ])assert.throws(()=>lab.createPersonalTestPlan({...plan,...extra}),/Unsupported or sensitive/);
-  assert.throws(()=>lab.createPersonalTestPlan({...plan,participant_ref:"test@example.test"}),/opaque/);
+  assert.throws(()=>lab.createPersonalTestPlan({...plan,participant_ref:"test@example.test"}),/opaque/i);
   assert.throws(()=>lab.createPersonalTestPlan({...plan,owner_permitted_personal_testing:false}),/owner consent/);
   assert.throws(()=>lab.createPersonalTestPlan({...plan,provider:"unknown"}),/Unknown provider/);
 });
