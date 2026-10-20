@@ -110,6 +110,33 @@ export function assessRequiredCi(required, runs, headSha, prNumber) {
   return {verdict,checks};
 }
 
+
+/** Recent *observed* GitHub activity, reconstructable without new storage.
+ * An updated_at value is a GitHub PR timestamp, NOT proof of an accepted change.
+ */
+export function sourceActivity(pr, runs, headSha) {
+  const events=[];
+  const validDate=(value)=>{
+    if(typeof value!=="string"||!value.trim())return null;
+    const dt=new Date(value);
+    return Number.isFinite(dt.getTime())?dt.toISOString():null;
+  };
+  const validUrl=(value)=>typeof value==="string" &&
+    /^https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/(?:pull\/\d+|actions\/runs\/\d+)$/i.test(value);
+  const prAt=validDate(pr?.updated_at);
+  if(prAt&&validUrl(pr.html_url))
+    events.push({kind:"pr_updated",at:prAt,label:"PR last updated",url:pr.html_url});
+  for(const run of (Array.isArray(runs)?runs:[])){
+    if(run?.head_sha!==headSha)continue;
+    const at=validDate(run.created_at);
+    if(!at||!validUrl(run.html_url))continue;
+    const name=typeof run.name==="string"?run.name.slice(0,120):"Workflow";
+    const outcome=run.status==="completed"?(run.conclusion||"unknown"):(run.status||"unknown");
+    events.push({kind:"ci_run",at,label:name+" · "+outcome,url:run.html_url});
+  }
+  return events.sort((a,b)=>b.at.localeCompare(a.at)).slice(0,8);
+}
+
 export async function refreshGithub(project, { fetchImpl = fetch, now = new Date(), token = process.env.GITHUB_TOKEN } = {}) {
   if (!project.github?.repository) return null;
   const repo = project.github.repository;
@@ -181,6 +208,7 @@ export async function refreshGithub(project, { fetchImpl = fetch, now = new Date
         commitStatus: checkResult.status === "fulfilled"
       },
       requiredCi,
+      sourceActivity: sourceActivity(pr, workflows, sha),
       workflows: workflows.map((run) => ({ name: run.name, status: run.status, conclusion: run.conclusion, runId: run.id, url: run.html_url, sha: run.head_sha }))
     };
   } catch {
