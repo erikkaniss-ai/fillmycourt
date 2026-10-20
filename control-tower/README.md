@@ -41,6 +41,26 @@ node control-tower/server.mjs
 
 Then open `http://127.0.0.1:4173`. The server binds to loopback only, sends no-store/CSP headers and accepts only `GET` requests. It has no write endpoint.
 
+## Closure of the first Control Tower delivery
+
+The protected dashboard is the **single canonical operational preview**. An earlier
+experimental module under GetACourt Draft PR #5 is not the hosted source and must
+not be merged or published as a competing dashboard.
+
+The dashboard provides live source-backed current GitHub PR/CI, exact SHA,
+release boundaries, NOW/NEXT/GO, responsive UI, and a recent activity list with
+linkable PR update and CI run timestamps. These activity events are reconstructed
+from durable GitHub records; no new data store or paid resource is required.
+They are **not** longitudinal historical acceptance percentages or proof of
+completed milestones. The dated manual acceptance history in config remains
+separate. Persistent snapshots/time-series and automatic Netlify/Railway/Drive
+evidence are deliberately excluded from this minimal-cost release until
+authorised source contracts, persistence budget and review criteria exist.
+
+The weighted progress fields remain UNKNOWN while owner-reviewed milestone
+baselines are false. Do not infer a percentage from GitHub activity. No
+production launch, provider authorization or payment readiness is implied.
+
 ## Live source freshness
 
 The browser receives a same-origin `/api/snapshot` response. Private repository reads require `CONTROL_TOWER_GITHUB_READ_TOKEN` in the Netlify Functions environment; no personal CLI token or deployment credential is reused. Public repository requests receive no credential. Missing access and API errors produce UNKNOWN, not stale green evidence.
