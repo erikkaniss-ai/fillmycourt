@@ -146,6 +146,43 @@
       reason:"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED"
     });
   }
+
+  // Dry-run contract for future *authorized* provider readers.
+  // Never returns available slots or permits a provider request.
+  function syntheticReadPreflight(connection,input={}){
+    requireIssuedConnection(connection);
+    assertNoCredential(input);
+    const now=asIso(input.now);
+    const current=Date.parse(now);
+    const min=input.min_interval_ms===undefined?60000:input.min_interval_ms;
+    if(!Number.isSafeInteger(min)||min<60000||min>86400000)
+      throw Error("A conservative minimum interval of 60000..86400000ms is required.");
+    let rateState="no_prior_attempt";
+    let nextEligible=null;
+    if(input.last_attempt_at!==undefined){
+      const previous=Date.parse(asIso(input.last_attempt_at));
+      if(previous>current)throw Error("Last attempt must not be in the future.");
+      nextEligible=new Date(previous+min).toISOString();
+      rateState=current<previous+min?"cooldown":"eligible_in_simulation";
+    }
+    let freshness="not_observed";
+    if(input.last_fixture_observed_at!==undefined){
+      const last=Date.parse(asIso(input.last_fixture_observed_at));
+      if(last>current)throw Error("Fixture observation must not be in the future.");
+      const ttl=input.fixture_ttl_ms===undefined?60000:input.fixture_ttl_ms;
+      if(!Number.isSafeInteger(ttl)||ttl<1000||ttl>86400000)
+        throw Error("Fixture TTL must be 1000..86400000ms.");
+      freshness=current-last<=ttl?"fresh_fixture_only":"stale";
+    }
+    return Object.freeze({
+      mode:"simulation_only",status:"blocked",reason:"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED",
+      authorized:false,request_allowed:false,can_display_slots:false,
+      slots:Object.freeze([]),rate_state:rateState,
+      next_eligible_simulation_at:nextEligible,fixture_freshness:freshness,
+      live_provider_observation:false,provider_write:false
+    });
+  }
+
   function disconnect(connection,at){
     requireIssuedConnection(connection);
     const timestamp=asIso(at);
@@ -176,7 +213,7 @@
 
   const api=Object.freeze({
     capability_names:CAPABILITIES,registry,consent,createSyntheticConnection,
-    authorizationPlan,availabilityStatus,disconnect,canBeginDelegatedAuthorization,validateRegistry
+    authorizationPlan,availabilityStatus,syntheticReadPreflight,disconnect,canBeginDelegatedAuthorization,validateRegistry
   });
   root.GACProviderConnectionFoundation=api;
   if(typeof module!=="undefined"&&module.exports)module.exports=api;
