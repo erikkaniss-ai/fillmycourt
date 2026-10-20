@@ -26,6 +26,21 @@ Source: `getacourt/assets/provider-account-test-lab.js`.
 
 Unit contracts: `platform/tests/getacourt_provider_account_lab.test.mjs`, registered in fast/full Platform CI. Tests use synthetic values only; no user login, external request, API credential or provider session is handled. The existing Provider Connection Foundation remains separate and read-only.
 
+## Server-side source authority boundary
+
+The platform backend now includes a separate Core contract at
+`platform/src/fmc/player_link_contract.py`, with regression tests at
+`platform/tests/test_player_link_contract.py`. The backend requires opaque
+consent references and UTC consent timestamps; it refuses OAuth initiation,
+private-session reuse, account-availability reads and booking writes in the
+absence of provider-issued rights. This is distinct from the existing
+club-authorized Playtomic adapter (`platform/src/fmc/playtomic.py`), which
+must never be repurposed as a player's API grant.
+
+No new API route, token vault, database migration or live provider connection
+is activated in this source-only slice. These components are intentionally
+gated until official endpoint rights and a separate owner activation approval.
+
 ## Next implementation when official provider grant exists
 
 1. Get the provider's public developer documentation and an authorization-code+PKCE capability (or documented alternative) with an explicitly registered callback, exact scopes, provider identity, expiry/revocation and test environment. If there is no supported player grant, remain blocked and pursue a club/Connect route instead.
