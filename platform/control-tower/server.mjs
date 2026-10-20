@@ -4,7 +4,7 @@ import {createServer} from "node:http";
 import {readFile} from "node:fs/promises";
 import {fileURLToPath} from "node:url";
 import {join,dirname} from "node:path";
-import {PROJECTS,portfolio} from "./model.mjs";
+import {PROJECTS,portfolio,classifyRequiredCI} from "./model.mjs";
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const FILES={"/": ["public/index.html","text/html; charset=utf-8"],
@@ -37,24 +37,36 @@ async function github(repo,path) {
   return response.json();
 }
 async function observe(c) {
+  let pr;
   try {
-    const pr=await github(c.repo,"/pulls/" + c.pr);
-    if(!pr || !pr.head || typeof pr.head.sha!=="string" || !/^[a-f0-9]{40}$/.test(pr.head.sha))
+    pr=await github(c.repo,"/pulls/" + c.pr);
+    if(!pr || !pr.head || !/^[a-f0-9]{40}$/.test(pr.head.sha) ||
+      pr.number!==c.pr || pr.state!=="open" && pr.state!=="closed")
       throw Error("Invalid PR response");
-    const result=await github(c.repo,"/actions/runs?head_sha=" + encodeURIComponent(pr.head.sha) + "&per_page=30");
-    const runs=(result.workflow_runs||[]).filter(w=>
-      w.head_sha===pr.head.sha && w.event==="pull_request")
-      .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
-    const latest=runs[0];
-    const ci=latest ? (latest.status==="completed" ?
-      (latest.conclusion==="success"?"success":"failed_or_other"):"running") : "unverified";
-    return {verified:true,checked_at:new Date().toISOString(),
-      head_sha:pr.head.sha,pr_state:pr.state,pr_draft:pr.draft,
-      ci,ci_url:latest?.html_url||null};
   } catch {
-    // A network/auth/API failure is NOT evidence that a project is broken.
+    // A failed PR read is not an engineering failure; mark GitHub unverified.
     return {verified:false};
   }
+  // Preserve the verified PR state when only Actions permission/network fails.
+  let classification={ci:"unverified",ci_url:null,ci_evidence:[]};
+  if(c.required_ci?.length) {
+    const queries=[
+      "/actions/runs?event=pull_request&head_sha="+encodeURIComponent(pr.head.sha)+"&per_page=100",
+      "/actions/runs?event=pull_request&branch="+encodeURIComponent(pr.head.ref)+"&per_page=100"
+    ];
+    const reads=await Promise.allSettled(queries.map(path=>github(c.repo,path)));
+    const runs=new Map();
+    for(const read of reads) {
+      if(read.status!=="fulfilled")continue;
+      for(const run of read.value.workflow_runs||[]) {
+        if(Number.isSafeInteger(run.id))runs.set(run.id,run);
+      }
+    }
+    classification=classifyRequiredCI(c.required_ci,[...runs.values()],pr.head.sha,c.pr);
+  }
+  return {verified:true,checked_at:new Date().toISOString(),
+    head_sha:pr.head.sha,pr_state:pr.state,pr_draft:pr.draft,
+    ...classification};
 }
 export async function readPortfolio() {
   const now=Date.now();
