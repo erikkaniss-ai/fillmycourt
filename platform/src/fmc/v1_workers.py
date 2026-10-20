@@ -17,6 +17,7 @@ from sqlalchemy import text
 
 from .common import DomainError
 from .playtomic import Deferred, Playtomic
+from .provider_read_gate import require_official_club_read
 from .supabase_v1 import V1Store, one, rows
 
 
@@ -102,6 +103,10 @@ def _sync_playtomic(db: V1Store, job: dict):
     connection = _connection(db, pc_id)
     if connection["provider"] != "playtomic":
         raise DomainError("PROVIDER", "Unsupported provider.", 422)
+    # A configured club connection or env credentials are NOT sufficient authority.
+    # This gate denies unless a separately approved named-club booking scope and
+    # explicit owner-enabled deployment flag exist, BEFORE credential access.
+    require_official_club_read(connection, stream)
     client_id, secret, tenant = _credential(connection)
     api = Playtomic(client_id, secret, tenant)
     now = datetime.now(timezone.utc)
