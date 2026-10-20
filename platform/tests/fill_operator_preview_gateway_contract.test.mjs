@@ -125,3 +125,33 @@ test("Private Fill root always redirects to Operator, even though GetACourt inde
   // This MUST only apply to the isolated private platform/netlify.toml, not public sites.
   assert.match(conf,/\[\[redirects\]\]\s+from = "\/"\s+to = "\/fill\/"\s+status = 302\s+force = true/);
 });
+
+
+test("Cross-tenant denial remains a 403 and cannot become visible operator data",async()=>{
+  const OTHER_ORG="33333333-3333-4333-8333-333333333333";
+  for(const path of [
+    "/api/fmc/"+OTHER_ORG+"/today?date=2026-10-16",
+    "/api/fmc/"+OTHER_ORG+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00"
+  ]){
+    const result=await harness(request(path),OPS,403);
+    assert.equal(result.status,403);
+    assert.equal(result.body.error,"PERMISSION_DENIED");
+    assert.equal(result.calls.length,1);
+    assert.equal(result.calls[0].method,"GET");
+    assert.match(result.calls[0].url,/\/api\/fmc\/33333333-3333-4333-8333-333333333333\//);
+    assert.equal(result.headers.get("access-control-allow-origin"),null);
+    assert.equal(result.headers.get("cache-control"),"no-store, private");
+  }
+});
+
+test("No bearer, malformed origin or wrong Netlify site cannot reach another org",async()=>{
+  const OTHER_ORG="33333333-3333-4333-8333-333333333333";
+  const path="/api/fmc/"+OTHER_ORG+"/today?date=2026-10-16";
+  const trials=[
+    await harness(request(path,{headers:{}})),
+    await harness(request(path,{headers:{authorization:"Bearer fixture-staging-user",origin:"https://attacker.test"}})),
+    await harness(request(path),OPS,200,OTHER_SITE_ID)
+  ];
+  assert.deepEqual(trials.map(x=>x.status),[401,403,503]);
+  assert.ok(trials.every(x=>x.calls.length===0));
+});
