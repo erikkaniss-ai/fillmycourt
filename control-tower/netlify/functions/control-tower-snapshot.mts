@@ -21,7 +21,9 @@ export default async (request: Request, context: { site: { id: string }; deploy:
     // Public-repository GETs only. No deployment credential or user bearer is read.
     pending ||= buildSnapshot(projects, { token: "" }).then((value: unknown) => {
       cached = value;
-      expires = Date.now() + 300_000;
+      // Nine public GitHub GETs per refresh: 15 minutes stays below the
+      // anonymous 60-requests/hour allowance for a warm instance.
+      expires = Date.now() + 900_000;
       return value;
     }).finally(() => { pending = null; });
     await pending;

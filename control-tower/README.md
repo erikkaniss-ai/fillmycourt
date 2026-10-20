@@ -14,6 +14,26 @@ The static `config/projects.json` is the human-owned decision layer. A green Git
 
 ## Local preview
 
+## Online access
+
+Stable address: https://control-tower--fillmycourt-preview.netlify.app/
+
+Sign in with the existing Netlify team account. This is an isolated branch
+deployment on the existing private `fillmycourt-preview` site. The operator
+preview at the primary site address is preserved. No laptop process is needed.
+
+GitHub Actions `Control Tower private online deployment` checks and publishes
+changes pushed to `cto/development-control-tower`. It reuses the existing
+`FILL_NETLIFY_AUTH_TOKEN` deployment secret in CI only. The hosted function
+uses public GitHub GETs without any credential, caches results for 15 minutes,
+and the browser checks for an updated snapshot every five minutes. Returned
+timestamps show the actual snapshot time. A rate limit/error is unverified.
+
+Milestone weights are proposed engineering models pending owner review;
+they must not be presented as owner-approved overall project completion.
+
+## Local preview
+
 Run with a current Node.js runtime:
 
 ```powershell
@@ -32,7 +52,10 @@ To add a project, copy a project entry in `config/projects.json`, define weighte
 
 This slice records the current Netlify/Railway state as dated human-reviewed evidence, because no safe server-side deployment credential or private dashboard host has been approved for this new surface. Google Drive remains the human decision source: update the project configuration only after the canonical Decision Register, Technical Specification, CTO Checkpoint and Work Inbox have been reviewed.
 
-Activation of a protected hosted Control Tower requires a separate owner decision for: the exact existing protected Netlify site or another private host; server-side credentials/scopes for any Netlify/Railway refresh; the ReBloom/Continuum repository mapping; and the preferred private-access boundary. It must remain read-only and must not transmit tokens to the client.
+The owner authorised online hosting on an existing resource on 20 October 2026.
+The private Fill preview site and its existing Team Login were selected.
+Automatic Netlify/Railway refresh and ReBloom/Continuum source mappings remain
+unconfigured. Those cards retain dated manual evidence or unverified state.
 
 ## Verification
 

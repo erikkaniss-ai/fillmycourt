@@ -83,7 +83,9 @@ function renderProject(project) {
 
 function render(snapshot) {
   const { rollup } = snapshot;
-  document.querySelector("#freshness").innerHTML = `${badge("actual_verified")} GitHub refresh: ${formatTime(snapshot.fetchedAt)}`;
+  const configured = snapshot.projects.filter((project) => project.github).length;
+  const verified = snapshot.projects.filter((project) => project.githubLive?.state === "actual_verified").length;
+  document.querySelector("#freshness").innerHTML = `${badge(verified === configured && configured > 0 ? "actual_verified" : "unverified")} GitHub ${verified}/${configured}: ${formatTime(snapshot.fetchedAt)}`;
   document.querySelector("#rollup").innerHTML = `
     <div class="rollup-number">${rollup.percent === null ? "—" : `${rollup.percent}%`}</div>
     <div><strong>Proposed milestone model · owner review pending</strong><p>${rollup.baselinedProjects} of ${rollup.totalProjects} projects have a draft model. ${rollup.completedWeight} of ${rollup.totalWeight} weighted points map to recorded evidence. Weights are engineering proposals and are not owner-approved project completion metrics.</p></div>`;
