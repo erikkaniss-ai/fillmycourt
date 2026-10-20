@@ -300,3 +300,38 @@ test("Get rollback 01:30 slots remain distinct AND visibly distinguishable, even
     }
   }
 });
+
+test("Get booking history distinguishes BOTH Lisbon fall-back 01:30 instants even when one is alone",async()=>{
+  // The same wall clock 01:30 exists twice on 2026-10-25 in Europe/Lisbon.
+  // This is an existing booking READ fixture: zero booking or cancel writes.
+  const candidates=[
+    {id:"synthetic-early",starts_at:"2026-10-25T01:30:00+01:00",offset:"UTC+1"},
+    {id:"synthetic-late",starts_at:"2026-10-25T01:30:00+00:00",offset:"UTC+0"}
+  ];
+  for(const batch of [candidates,[candidates[0]],[candidates[1]]]){
+    const r=await harness(bookingsHandler,(url,init)=>{
+      assert.equal(url.pathname,"/api/bookings");
+      assert.equal(init.method,"GET");
+      assert.equal(init.headers.get("authorization"),"Bearer player.fixture");
+      return {body:{items:batch.map(b=>({
+        id:b.id,starts_at:b.starts_at,
+        ends_at:new Date(Date.parse(b.starts_at)+60*60000).toISOString(),
+        status:"confirmed",venue_name:"SYNTHETIC Cascais Club",
+        venue_timezone:"Europe/Lisbon",currency:"EUR",
+        gross_amount_minor:3200,source:"fixture"
+      }))}};
+    },path("/api/gac/bookings","GET",undefined,"Bearer player.fixture"));
+    assert.equal(r.status,200);
+    assert.equal(r.calls.length,1,"Only one GET to synthetic Core");
+    assert.equal(r.body.bookings.length,batch.length);
+    for(const booking of r.body.bookings){
+      const source=candidates.find(x=>x.id===booking.bookingId);
+      assert.ok(source);
+      assert.equal(booking.slot.date,"2026-10-25");
+      assert.equal(booking.slot.time,"01:30","Keep legacy wall-clock API unchanged");
+      assert.equal(booking.slot.displayTime,"01:30 "+source.offset,
+        "Even one isolated repeated-hour booking must show its UTC offset");
+      assert.equal(booking.slot.duration,60);
+    }
+  }
+});
