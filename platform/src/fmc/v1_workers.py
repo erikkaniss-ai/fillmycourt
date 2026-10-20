@@ -111,8 +111,8 @@ def _sync_playtomic(db: V1Store, job: dict):
     # A single connection-level reservation is shared across all streams and
     # worker processes. This occurs BEFORE any provider credentials are read.
     now = datetime.now(timezone.utc)
-    start = payload.get("window_start") or (now - timedelta(days=30)).isoformat()
-    end = payload.get("window_end") or (now + timedelta(days=90)).isoformat()
+    start = payload.get("window_start") or (now - timedelta(days=30)).isoformat().replace("+00:00", "Z")
+    end = payload.get("window_end") or (now + timedelta(days=90)).isoformat().replace("+00:00", "Z")
     try:
         page_state = read_page_state(payload, start, end)
     except PageBudgetError as exc:
