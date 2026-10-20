@@ -3,7 +3,7 @@ from fmc.playtomic import capabilities
 
 
 def test_playtomic_adapter_is_not_a_write_adapter():
-    assert capabilities() == {'read_sync': True, 'handoff': True, 'authorized_native_write': False}
+    assert capabilities() == {'read_sync': True, 'handoff': False, 'availability_read': False, 'player_delegated_oauth': False, 'authorized_native_write': False}
 
 
 def test_queue_claim_filters_do_not_mix_reconciliation_and_sync(env):
