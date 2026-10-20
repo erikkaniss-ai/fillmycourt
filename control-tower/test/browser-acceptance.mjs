@@ -34,6 +34,11 @@ try {
         { id: 'M' + i, name: 'Synthetic acceptance', weight: 100, acceptance: ['First condition', 'Second condition'] }
       ] }))
   };
+  approvedModel.projectReviews = { p0: {
+    reviewedAt: '2026-01-01T00:00:00Z', reviewer: 'Fictional reviewer', scope: 'Synthetic decision review',
+    blocked: ['Reviewer: missing exact artifact acceptance; do not infer completion.'],
+    links: [{title: 'Untrusted protocol must not become a link', url: 'javascript:alert(1)'}]
+  }};
   const fixture = await buildSnapshot(config, { approvedModel });
   await page.route('**/api/snapshot', route => route.fulfill({ json: fixture }));
   for (const width of [320, 390, 1440]) {
@@ -44,6 +49,8 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.equal(await page.locator('.progress-label').first().innerText(), '0% confirmed · 100% UNKNOWN');
     assert.match(await page.locator('#rollup').innerText(), /Confirmed: 0%; UNKNOWN: 100%/);
+    assert.match(await page.locator('.project-card').first().innerText(), /Reviewer: missing exact artifact acceptance/);
+    assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
     assert.equal(await page.locator('.rollup-number').evaluate(e =>
       getComputedStyle(e).whiteSpace === 'nowrap'), true, 'UNKNOWN must remain readable on one line');
     console.log('Approved-model browser PASS: ' + width + 'px, six cards, UNKNOWN preserved');

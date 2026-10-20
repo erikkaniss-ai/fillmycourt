@@ -233,14 +233,27 @@ export async function buildSnapshot(config, options = {}) {
   if (model) for (const p of model.projects) if (!projectConfig.some(c => c.id === p.id)) projectConfig.push({ id: p.id, name: p.name, portfolio: 'Shared tooling', access: 'private-preview', now: [], next: [], blocked: [], milestones: [] });
   const projects = await Promise.all(projectConfig.map(async (project) => {
     const definition = model?.projects.find(p => p.id === project.id);
-    const policies = project.id === 'continuum' ? model?.continuumCiPolicy?.selectors : null;
-    const sourceProject = policies ? { ...project, github: { ...project.github, scopedPolicies: policies, policyRequired: true } } : project;
+    const policy = model?.projectCiPolicies?.[project.id] ||
+      (project.id === 'continuum' && model?.continuumCiPolicy ? { ...model.continuumCiPolicy, requireAuditedSelector: true } : null);
+    const sourceProject = policy ? { ...project, github: { ...project.github, scopedPolicies: policy.selectors,
+      policyRequired: policy.requireAuditedSelector === true } } : project;
     const token = project.github?.private ? options.privateToken || "" : options.token || "";
     const github = await refreshGithub(sourceProject, { ...options, now, token });
     if (definition) {
       const milestones = definition.milestones.map(m => assessMilestone(m, model.receipts?.[m.id], github, model.releaseSha, now));
       const progress = progressBreakdown(milestones, true);
-      return { ...publicProject(project), kind: definition.kind, portfolioWeight: definition.portfolioWeight,
+      // Decision review data can update human lanes, never weights, receipts or live observations.
+      const review = model.projectReviews?.[project.id];
+      const reviewTime = Date.parse(review?.reviewedAt);
+      const reviewed = Number.isFinite(reviewTime) && reviewTime <= +now && typeof review?.reviewer === 'string';
+      const lanes = {};
+      if (reviewed) for (const key of ['now', 'next', 'blocked'])
+        if (Array.isArray(review[key]) && review[key].every(v => typeof v === 'string')) lanes[key] = review[key];
+      return { ...publicProject(project), ...lanes, kind: definition.kind, portfolioWeight: definition.portfolioWeight,
+        evidenceReview: reviewed ? { reviewedAt: review.reviewedAt, reviewer: review.reviewer, scope: review.scope,
+          links: (Array.isArray(review.links) ? review.links : []).filter(l => typeof l?.title === 'string' && typeof l?.url === 'string')
+            .map(l => ({ title: l.title, url: l.url })) } : null,
+        history: reviewed && Array.isArray(review.history) ? [...(project.history || []), ...review.history] : project.history,
         baseline: true, approval: { id: model.proposalId, by: model.approvedBy, at: model.approvedAt },
         milestones, milestoneWeight: 100, progress: progress.overall, progressBreakdown: progress,
         owner: definition.owner, target: definition.target, githubLive: github };

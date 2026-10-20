@@ -95,3 +95,21 @@ test('approved model integrates six cards without treating absent evidence as co
   assert.equal(result.rollup.percent, null);
   assert.equal(JSON.stringify(result).includes('never-return-this'), false);
 });
+
+test('private decision review changes lanes but cannot change acceptance, weights or live facts', async () => {
+  const projects = Array.from({ length: 4 }, (_, i) => ({ id: 'p' + i, kind: 'product', portfolioWeight: 25,
+    milestones: [{ id: 'M' + i, weight: 100, acceptance: ['one', 'two'] }] }));
+  const review = { reviewedAt: receipt.verifiedAt, reviewer: 'Reviewer', scope: 'Source only',
+    now: ['Reviewed source'], next: ['Named reviewer: collect missing receipt'], blocked: ['Approval missing'],
+    progress: 100, baseline: true, milestones: [{ weight: 100, acceptance: 'ACCEPTED' }] };
+  const model = { status: 'APPROVED', proposalId: 'test', approvedBy: 'Owner', approvedAt: receipt.verifiedAt,
+    projects, projectReviews: { p0: review, p1: { ...review, reviewedAt: '2099-01-01T00:00:00Z' } } };
+  const result = await buildSnapshot({ projects: projects.map(p => ({ id: p.id, now: ['Original lane'] })) }, { approvedModel: model, now });
+  assert.deepEqual(result.projects[0].now, review.now);
+  assert.deepEqual(result.projects[0].blocked, review.blocked);
+  assert.equal(result.projects[0].evidenceReview.reviewer, 'Reviewer');
+  assert.equal(result.projects[0].progress, null);
+  assert.equal(result.projects[0].progressBreakdown.unknown, 100);
+  assert.deepEqual(result.projects[1].now, ['Original lane']);
+  assert.equal(result.projects[1].evidenceReview, null);
+});

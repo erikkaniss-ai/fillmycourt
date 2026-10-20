@@ -52,6 +52,13 @@ Missing, skipped, cancelled, truncated or unaudited evidence remains UNKNOWN.
 This dashboard policy does not modify repository branch protection or workflows
 in any monitored private repository.
 
+Reviewed private decision overlays may update NOW/NEXT/BLOCKED, reference links
+and explicitly manual review events without changing milestone weights, source
+facts or acceptance receipts. Each overlay has its own reviewer/time/scope.
+Additional audited exact-source CI selectors can coexist with a repository's
+canonical requirement; strict-policy repositories still fail closed for
+unmapped heads. These details remain in the server-only approved data bundle.
+
 ## Local preview
 
 Run with a current Node.js runtime:

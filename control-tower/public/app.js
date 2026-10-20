@@ -120,6 +120,8 @@ function renderProject(project) {
     root.querySelector(".progress-note").textContent = "Weighted engineering acceptance only. It is not a release, provider-authority or production-readiness percentage.";
   }
 
+  if (project.evidenceReview) root.querySelector('.progress-note').textContent +=
+    ' Decision evidence reviewed: ' + formatTime(project.evidenceReview.reviewedAt) + '. Scope: ' + (project.evidenceReview.scope || 'manual review') + '.';
   renderGithub(root.querySelector(".live-source"), project.githubLive);
   const milestoneList = root.querySelector(".milestones");
   milestoneList.innerHTML = (project.milestones || []).map((milestone) => `
@@ -137,6 +139,8 @@ function renderProject(project) {
   list(root.querySelector(".blocked"), project.blocked);
   root.querySelector(".environments").innerHTML = (project.environments || []).map((environment) => `
     <p class="environment">${badge("manual")} <strong>${escapeHtml(environment.name)}</strong> — ${environment.url ? safeLink(environment.url, environment.value) : escapeHtml(environment.value)}<br><span>Dated recorded snapshot: ${formatTime(environment.lastVerifiedAt)}. Current state: UNKNOWN; not a live deployment check.</span></p>`).join("") || "<p>Environment / hosted QA: UNKNOWN. No current verified environment input.</p>";
+  root.querySelector('.environments').innerHTML += (project.evidenceReview?.links || [])
+    .map(link => '<p>' + safeLink(link.url, link.title) + ' — recorded link, not hosted acceptance.</p>').join('');
   root.querySelector(".history").innerHTML = (project.history || []).map((entry) => `<li>${badge(entry.state)} <strong>${formatTime(entry.at)}</strong> — ${escapeHtml(entry.change)}</li>`).join("") || "<li>Persistent change history: UNKNOWN; not collected yet.</li>";
   return fragment;
 }

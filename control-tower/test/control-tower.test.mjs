@@ -249,3 +249,33 @@ test("invalid or absent dates never become invented timeline events",async()=>{
     created_at:"",html_url:"https://github.com/example/repo/actions/runs/71"}],sha);
   assert.deepEqual(events,[]);
 });
+
+test('audited branch policy can coexist with the existing canonical requirement in a private feed', async () => {
+  const sha = 'a'.repeat(40);
+  const selector = { pr: 2, sha, workflowPath: '.github/workflows/private-source.yml',
+    workflowName: 'Reviewed source lane', job: 'verify', requiredSteps: ['Full test', 'Git clean'], policyReviewed: true };
+  const fetchImpl = async url => {
+    if (url.includes('/pulls?')) return Response.json([{number: 2}, {number: 3}]);
+    if (/\/pulls\/[23]$/.test(url)) return Response.json({number: Number(url.at(-1)),
+      html_url: 'https://github.com/org/private/pull/' + url.at(-1), title: 'Synthetic source',
+      head: {sha, ref: 'feature'}, base: {ref: 'integration'}, state: 'open'});
+    if (url.endsWith('/status')) return Response.json({total_count: 0});
+    if (url.includes('/jobs?')) return Response.json({total_count: 1, jobs: [{
+      id: 1, name: 'verify', head_sha: sha, status: 'completed', conclusion: 'success',
+      steps: selector.requiredSteps.map(name => ({name, status: 'completed', conclusion: 'success'}))
+    }]});
+    return Response.json({workflow_runs: [
+      {id: 2, path: selector.workflowPath, name: selector.workflowName, head_sha: sha, event: 'push',
+        head_branch: 'feature', status: 'completed', conclusion: 'success'},
+      {id: 3, name: 'Canonical validation', head_sha: sha, event: 'pull_request', status: 'completed', conclusion: 'success'}
+    ]});
+  };
+  const result = await refreshGithub({github: {repository: 'org/private', private: true, mode: 'open-pulls',
+    requiredWorkflows: ['Canonical validation'], scopedPolicies: [selector], policyRequired: false}},
+    {fetchImpl, token: 'private-test-only'});
+  assert.equal(result.pullRequests[0].requiredCi.verdict, 'success');
+  assert.equal(result.pullRequests[0].requiredCi.checks.length, 3);
+  assert.equal(result.pullRequests[1].requiredCi.verdict, 'success');
+  assert.equal(result.pullRequests[1].requiredCi.checks[0].workflow, 'Canonical validation');
+  assert.equal(JSON.stringify(result).includes('private-test-only'), false);
+});
