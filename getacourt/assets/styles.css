@@ -315,8 +315,24 @@ main { overflow: hidden; }
 @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 
 @media (max-width: 920px) {
-  .site-header { grid-template-columns: 1fr auto; }
-  .nav { display: none; }
+  .site-header { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  /* Keep account and booking history reachable on mobile without a new menu. */
+  .nav {
+    display: flex;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+    overscroll-behavior-x: contain;
+  }
+  .nav a, .nav-button { flex: 0 0 auto; }
   .hero { grid-template-columns: minmax(0, 1fr); padding-top: 58px; }
   .hero-copy, .search-panel { min-width: 0; max-width: 100%; }
   .hero-copy { max-width: 760px; }
