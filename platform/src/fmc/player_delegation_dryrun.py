@@ -71,13 +71,13 @@ class PlayerDelegationDryRun:
         ).rstrip(b"=").decode("ascii")
         key = self._state_key(state)
         with self._lock:
-            expired = [k for k, record in self._pending.items() if record[3] <= timestamp]
+            expired = [k for k, record in self._pending.items() if record[4] <= timestamp]
             for k in expired:
                 del self._pending[k]
             if len(self._pending) >= _MAX_PENDING:
                 raise DryRunDenied("Synthetic test capacity reached.")
             # Verifier stays memory-only and is erased with the transaction.
-            self._pending[key] = (provider, subject_ref, consent_ref, timestamp + _TTL_SECONDS, verifier)
+            self._pending[key] = (provider, subject_ref, consent_ref, timestamp, timestamp + _TTL_SECONDS, verifier)
         return {
             "mode": "synthetic_only",
             "status": "provider_grant_not_verified",
@@ -102,7 +102,9 @@ class PlayerDelegationDryRun:
             record = self._pending.get(key)
             if record is None:
                 raise DryRunDenied("Unknown or replayed synthetic state.")
-            expected_provider, expected_subject, expected_consent, expires, _verifier = record
+            expected_provider, expected_subject, expected_consent, issued_at, expires, _verifier = record
+            if timestamp < issued_at:
+                raise DryRunDenied("Synthetic callback chronology invalid.")
             if timestamp >= expires:
                 del self._pending[key]
                 raise DryRunDenied("Synthetic state expired.")
@@ -133,9 +135,11 @@ class PlayerDelegationDryRun:
         key = self._state_key(state)
         with self._lock:
             record = self._pending.get(key)
-            if record is None or timestamp >= record[3]:
+            if record is None or timestamp >= record[4]:
                 self._pending.pop(key, None)
                 raise DryRunDenied("Unknown or expired synthetic state.")
+            if timestamp < record[3]:
+                raise DryRunDenied("Synthetic cancellation chronology invalid.")
             if not isinstance(subject_ref, str) or not hmac.compare_digest(subject_ref, record[1]):
                 raise DryRunDenied("Synthetic state owner mismatch.")
             del self._pending[key]
