@@ -23,7 +23,7 @@ if (!original) throw Error("Published preview baseline is unknown");
 const cli = join(process.env.RUNNER_TEMP, "control-tower-tools/node_modules/netlify-cli/bin/run.js");
 const output = execFileSync(process.execPath, [cli, "deploy", "--site", site,
   "--dir", "public", "--functions", "netlify/functions", "--alias", "control-tower",
-  "--context", "branch-deploy", "--no-build", "--json"], { encoding: "utf8", maxBuffer: 2_000_000 });
+  "--no-build", "--json"], { encoding: "utf8", maxBuffer: 2_000_000 });
 const deployment = JSON.parse(output);
 if (new URL(deployment.deploy_url).origin !== target) throw Error("Unexpected deploy destination");
 if (await publishedId() !== original) throw Error("Published operator preview unexpectedly changed");
