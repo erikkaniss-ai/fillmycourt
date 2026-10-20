@@ -1,4 +1,4 @@
-// Strict DOM-only rendering: no innerHTML, no client-side GitHub token.
+// Strict DOM-only rendering: never interpolate markup or read browser credentials.
 "use strict";
 const el=id=>document.getElementById(id);
 function node(tag,cls,text){
