@@ -6,13 +6,32 @@ function localParts(value, venueTimezone) {
   // Core may be on an older pin during controlled rollout, so UTC is an
   // explicit fallback instead of an assumed local timezone.
   const timeZone = venueTimezone || "UTC";
-  const fields = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone, year:"numeric", month:"2-digit", day:"2-digit",
     hour:"2-digit", minute:"2-digit", hour12:false, hourCycle:"h23",
-  }).formatToParts(d).filter(p => p.type !== "literal").map(p => [p.type,p.value]));
+  });
+  const fields = Object.fromEntries(formatter.formatToParts(d)
+    .filter(p => p.type !== "literal").map(p => [p.type,p.value]));
+  const time = fields.hour + ":" + fields.minute;
+  // A fall-back 01:30 exists twice. Detect ambiguity from the venue's own
+  // IANA timezone even when only one booking was returned by Core.
+  const wall = formatter.format(d);
+  const repeated = [-3600000,3600000].some(ms =>
+    formatter.format(new Date(d.getTime()+ms)) === wall);
+  let displayTime = time;
+  if (repeated) {
+    const shortOffset = new Intl.DateTimeFormat("en-GB", {
+      timeZone, timeZoneName:"shortOffset"
+    }).formatToParts(d).find(p=>p.type==="timeZoneName")?.value || "GMT";
+    const match = /^GMT(?:([+-])(\d{1,2})(?::(\d{2}))?)?$/.exec(shortOffset);
+    const offset = !match ? shortOffset.replace(/^GMT/,"UTC") :
+      !match[1] ? "UTC+0" :
+      "UTC"+match[1]+Number(match[2])+(match[3] ? ":"+match[3] : "");
+    displayTime = time + " " + offset;
+  }
   return {
     date: fields.year + "-" + fields.month + "-" + fields.day,
-    time: fields.hour + ":" + fields.minute,
+    time, displayTime,
   };
 }
 
@@ -29,7 +48,7 @@ export default async (req) => {
         reference:String(item.id || "").slice(0,8).toUpperCase(),
         status:item.status,
         venue:{ name:item.venue_name || "Court booking", timezone:item.venue_timezone || "UTC" },
-        slot:{ date:p.date, time:p.time, duration },
+        slot:{ date:p.date, time:p.time, displayTime:p.displayTime, duration },
         currency:item.currency,
         grossAmountMinor:item.gross_amount_minor,
         source:item.source,
