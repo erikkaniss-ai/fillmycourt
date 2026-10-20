@@ -29,6 +29,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Control Tower source-only read-only contracts
+        run: |
+          node --check platform/control-tower/model.mjs
+          node --check platform/control-tower/server.mjs
+          node --check platform/control-tower/public/app.js
+          node --test platform/control-tower/test/control_tower.test.mjs
       - name: Fast Get JS syntax and authorization boundaries
         run: |
           node --check getacourt/assets/app.js
