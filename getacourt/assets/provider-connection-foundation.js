@@ -183,6 +183,32 @@
     });
   }
 
+
+  // Classification-only gate: a provider's booking event feed cannot prove
+  // court availability or account-link rights, even when fixture data is fresh.
+  // No HTTP, provider read, account ID or real venue data enters this contract.
+  function inspectSyntheticObservation(connection,input={}){
+    requireIssuedConnection(connection);
+    assertNoCredential(input);
+    if(input.kind!=="booking_events" && input.kind!=="availability_snapshot")
+      throw Error("Unknown synthetic observation kind.");
+    if(!isOpaqueRef(input.source_ref))
+      throw Error("Use an opaque fixture source_ref.");
+    const when=asIso(input.observed_at);
+    const count=input.fixture_records_count===undefined?0:input.fixture_records_count;
+    if(!Number.isSafeInteger(count)||count<0||count>100000)
+      throw Error("Invalid fixture count.");
+    return Object.freeze({
+      mode:"simulation_only",kind:input.kind,
+      source_ref:input.source_ref,fixture_observed_at:when,
+      fixture_records_count:count,
+      status:"not_authorized",provider_authorized:false,
+      provider_read_occurred:false,can_link_player_account:false,
+      booking_events_are_availability:false,can_display_availability:false,
+      slots:Object.freeze([]),reason:"OFFICIAL_PROVIDER_AUTHORIZATION_REQUIRED"
+    });
+  }
+
   function disconnect(connection,at){
     requireIssuedConnection(connection);
     const timestamp=asIso(at);
@@ -213,7 +239,7 @@
 
   const api=Object.freeze({
     capability_names:CAPABILITIES,registry,consent,createSyntheticConnection,
-    authorizationPlan,availabilityStatus,syntheticReadPreflight,disconnect,canBeginDelegatedAuthorization,validateRegistry
+    authorizationPlan,availabilityStatus,syntheticReadPreflight,inspectSyntheticObservation,disconnect,canBeginDelegatedAuthorization,validateRegistry
   });
   root.GACProviderConnectionFoundation=api;
   if(typeof module!=="undefined"&&module.exports)module.exports=api;
