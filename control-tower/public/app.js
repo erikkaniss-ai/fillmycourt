@@ -57,6 +57,12 @@ function renderGithub(target, github) {
     }
     return;
   }
+  const coverage = github.sourceCoverage || {pr:true,actions:false,commitStatus:false};
+  const incomplete = [];
+  if (coverage.actions === false) incomplete.push("Actions unavailable — CI UNKNOWN");
+  if (coverage.commitStatus === false) incomplete.push("Commit statuses unavailable");
+  const evidenceWarning = incomplete.length ?
+    `<p><strong>Partial source evidence:</strong> ${escapeHtml(incomplete.join("; "))}. PR head independently verified.</p>` : "";
   const required = github.requiredCi || { verdict: "unverified", checks: [] };
   const names = {success:"PASS",running:"RUNNING",failed_or_other:"FAIL/BLOCKED",unverified:"UNKNOWN"};
   const requiredState = Object.hasOwn(names,required.verdict) ? required.verdict : "unverified";
@@ -73,6 +79,7 @@ function renderGithub(target, github) {
     <div class="live-source-top">${badge("actual_verified")} <strong>GitHub live refresh</strong><span>${formatTime(github.fetchedAt)}</span></div>
     <p>${safeLink(pr.url, `PR #${pr.number}`)} · ${pr.draft ? "draft" : escapeHtml(pr.state)} · <code>${escapeHtml(pr.sha.slice(0, 12))}</code></p>
     <p>${escapeHtml(pr.title)}</p>
+    ${evidenceWarning}
     <p>${requiredBadge} <strong>Required CI: ${escapeHtml(names[requiredState])}</strong></p>
     <ul>${requiredRows}</ul>
     <p>Other workflow observation: ${ci?.url ? safeLink(ci.url, `${ci.name}: ${ci.conclusion || ci.status} (#${ci.runId})`) : ciText || "UNKNOWN"} · commit status: ${escapeHtml(github.commitStatus)}</p>
