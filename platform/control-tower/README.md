@@ -6,6 +6,9 @@ One read-only, mobile-first engineering portfolio view for **GetACourt**, **Fill
 
 - The /api/status endpoint reads allowlisted GitHub pull requests and latest PR-triggered Actions runs on each SHA. Observations show their source-specific checked_at; failed/missing/private reads stay **unverified** rather than green or red.
 - Product cards show source SHA, PR/CI evidence links, NOW/NEXT/OWNER GO and manual-checkpoint provenance.
+- CI is green only when all per-product mandatory workflows succeeded for the current PR/source HEAD. This rejects an unrelated green preview workflow masking failed Platform CI. GetACourt requires Platform CI; FillMyCourt requires Platform CI and the private draft preview workflow; ReBloom requires canonical Linux validation; Continuum has no reviewed required workflow baseline yet, therefore remains CI UNVERIFIED.
+- pull_request workflows may have a synthetic merge SHA. The matcher accepts it only when the GitHub run also reports the same PR number and exact source HEAD in its PR association. Missing association or skipped/neutral results fail closed to UNVERIFIED. When Actions fails, the PR HEAD can remain verified independently, but CI stays UNVERIFIED.
+
 - A progress percentage is **null/unbaselined** until milestone acceptance criteria, weights and acceptance evidence are approved. Commit count, green CI and elapsed time do not indicate completion. Portfolio percentage stays null until a reviewed cross-product baseline exists.
 - Netlify, Railway, Supabase, Google Docs decision feed and hosted browser QA are **not integrated** and must not be implied by GitHub success.
 - The local read server has a fixed allowlist; token environment variable is server-side only; no client-side credentials, writes, scheduling, production control or provider access.
