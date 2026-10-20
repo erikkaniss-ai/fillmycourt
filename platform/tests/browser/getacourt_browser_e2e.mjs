@@ -439,3 +439,38 @@ test("real Chromium: fallback 01:30 slots show offset on cards, venue detail and
     await context.close();
   }
 });
+
+test("real Chromium: My bookings distinguishes repeated Lisbon 01:30 with UTC offsets",async()=>{
+  // Signed-in synthetic player and GET-only Core-shaped booking-history result.
+  const {context,page}=await pageFixture({mobile:true});
+  const items=[
+    {bookingId:"synthetic-early",reference:"QA-EARLY",status:"confirmed",
+      venue:{name:"SYNTHETIC DST Club",timezone:"Europe/Lisbon"},
+      slot:{date:"2026-10-25",time:"01:30",displayTime:"01:30 UTC+1",duration:60}},
+    {bookingId:"synthetic-late",reference:"QA-LATE",status:"confirmed",
+      venue:{name:"SYNTHETIC DST Club",timezone:"Europe/Lisbon"},
+      slot:{date:"2026-10-25",time:"01:30",displayTime:"01:30 UTC+0",duration:60}}
+  ];
+  let requests=0;
+  try{
+    await context.addInitScript(jwt=>localStorage.setItem("gac.session",JSON.stringify({
+      accessToken:jwt,refreshToken:"fixture-only-refresh",expiresAt:Date.now()+3600000
+    })),fakeJwt);
+    await page.route("**/api/gac/bookings",route=>{
+      assert.equal(route.request().method(),"GET");
+      requests++;
+      return route.fulfill({status:200,contentType:"application/json",
+        body:JSON.stringify({bookings:items})});
+    });
+    await ready(page);
+    const before=forbiddenWrites.length;
+    await page.locator("#my-bookings").click();
+    await page.locator("#bookingsDialog[open]").waitFor({timeout:10000});
+    assert.equal(requests,1);
+    const rows=await page.locator("#bookingsList .booking-item").allInnerTexts();
+    assert.equal(rows.length,2);
+    assert.match(rows[0],/2026-10-25 · 01:30 UTC\+1 · 60 min/);
+    assert.match(rows[1],/2026-10-25 · 01:30 UTC\+0 · 60 min/);
+    assert.equal(forbiddenWrites.length,before,"No Core/provider/payment writes");
+  }finally{await context.close();}
+});
