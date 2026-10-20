@@ -109,3 +109,47 @@ def test_owner_test_lab_does_not_accept_codes_sessions_or_tokens():
                   consented=True,now=NOW,callback=DRY_RUN_CALLBACK,
                   access_token="never")
     assert lab.active_count()==1
+
+
+def test_callback_and_cancellation_cannot_predate_issuance():
+    lab=PlayerDelegationDryRun()
+    receipt=start(lab)
+    with pytest.raises(DryRunDenied,match="chronology"):
+        lab.consume(state=receipt["state"],provider="playtomic",
+            subject_ref="player-fixture-01",consent_ref="consent-fixture-01",now=NOW-1)
+    with pytest.raises(DryRunDenied,match="chronology"):
+        lab.cancel(state=receipt["state"],subject_ref="player-fixture-01",now=NOW-1)
+    assert lab.active_count()==1
+    correct=lab.consume(state=receipt["state"],provider="playtomic",
+        subject_ref="player-fixture-01",consent_ref="consent-fixture-01",now=NOW+2)
+    assert correct["status"]=="blocked"
+    assert lab.active_count()==0
+
+
+def test_callback_single_use_is_thread_safe_under_replay_race():
+    from concurrent.futures import ThreadPoolExecutor
+    lab=PlayerDelegationDryRun()
+    receipt=start(lab)
+    def race(_):
+        try:
+            return lab.consume(state=receipt["state"],provider="playtomic",
+                subject_ref="player-fixture-01",consent_ref="consent-fixture-01",now=NOW+4)["status"]
+        except DryRunDenied:
+            return "rejected"
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes=list(pool.map(race,range(8)))
+    assert outcomes.count("blocked")==1
+    assert outcomes.count("rejected")==7
+    assert lab.active_count()==0
+
+
+def test_status_never_leaks_state_nonce_verifier_or_subject():
+    lab=PlayerDelegationDryRun()
+    receipt=start(lab)
+    status=lab.public_status()
+    assert status=={"mode":"synthetic_only","active_pending":1,
+                    "provider_authorized":False,"external_connections":0}
+    serialized=repr(status)
+    for forbidden in [receipt["state"], receipt["challenge"],
+                      "player-fixture-01","consent-fixture-01"]:
+        assert forbidden not in serialized
