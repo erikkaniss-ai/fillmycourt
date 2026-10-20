@@ -39,7 +39,13 @@ class Playtomic:
         if not self.client_id or not self.secret or not self.tenant:raise DomainError('PROVIDER_CONFIG','Club credentials are not configured.',503)
         if not force_refresh and self.token_usable(0):return self.token
         try:
-            r=self.http.post(BASE+'/api/v1/oauth/token',json={'client_id':self.client_id,'secret':self.secret});r.raise_for_status();j=r.json()
+            r=self.http.post(BASE+'/api/v1/oauth/token',json={'client_id':self.client_id,'secret':self.secret})
+            if r.status_code in (202,429):
+                raw=r.headers.get('Retry-After','60')
+                seconds=int(raw) if raw.isdigit() else 60
+                raise Deferred('PROVIDER_PROCESSING' if r.status_code==202 else 'PROVIDER_RATE',seconds)
+            r.raise_for_status()
+            j=r.json()
             token=j['token'];duration=int(j['expires_in'])
             # A separate 60s reservation follows OAuth token acquisition.
             # Short-lived tokens cannot safely survive that pacing window.
