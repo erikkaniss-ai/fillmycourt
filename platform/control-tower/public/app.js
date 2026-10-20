@@ -20,14 +20,25 @@ function card(p){
   const box=node("article","card");
   const head=node("div","cardhead");
   appendText(head,"h3","",p.name);
-  appendText(head,"span","pill "+(p.ci==="success"?"good":p.ci==="running"?"warn":""),
-    p.ci==="success"?"CI passed":p.ci==="running"?"CI running":"CI unverified");
+  appendText(head,"span","pill "+(p.ci==="success"?"good":p.ci==="running"||p.ci==="failed_or_other"?"warn":""),
+    p.ci==="success"?"CI passed":p.ci==="running"?"CI running":
+    p.ci==="failed_or_other"?"CI failed/blocked":"CI unverified");
   box.append(head);
   const evidence=node("div","evidence");
   appendText(evidence,"span","",p.verified?"GitHub verified":"GitHub not verified");
   appendText(evidence,"span","",p.head_sha?"SHA "+p.head_sha.slice(0,10):"SHA unknown");
   appendText(evidence,"span","",p.pr_state==="open"?(p.pr_draft?"Draft PR #":"PR #")+p.pr:"PR unverified");
   box.append(evidence);
+  const checks=node("div","checks");
+  for(const run of p.ci_evidence||[]){
+    const line=node("div","checkline");
+    appendText(line,"span","",run.workflow);
+    appendText(line,"strong","",run.state==="success"?"PASS":
+      run.state==="failed_or_other"?"FAIL/BLOCKED":
+      run.state==="running"?"RUNNING":"UNVERIFIED");
+    checks.append(line);
+  }
+  box.append(checks);
   const progress=node("div","progress"),line=node("div","progress-row");
   appendText(line,"span","","Milestone acceptance");
   appendText(line,"strong","",p.progress_pct===null?"Not baselined":p.progress_pct+"%");
