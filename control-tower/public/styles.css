@@ -31,7 +31,7 @@ h4 { margin-bottom: 8px; font-size: .82rem; letter-spacing: .06em; text-transfor
 .subhead { max-width: 700px; margin-bottom: 0; color: var(--muted); }
 .freshness { max-width: 290px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: .86rem; }
 .rollup { margin: 28px 0 38px; padding: 22px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
-.rollup-number { color: var(--blue); font-size: 3rem; font-weight: 750; letter-spacing: -.06em; line-height: 1; }
+.rollup-number { flex-shrink: 0; white-space: nowrap; color: var(--blue); font-size: clamp(1.5rem, 3vw, 2.4rem); font-weight: 750; letter-spacing: -.06em; line-height: 1; }
 .rollup p { margin: 4px 0 0; color: var(--muted); }
 .section-heading { align-items: end; margin-bottom: 16px; }
 .legend { margin: 0; color: var(--muted); font-size: .78rem; }

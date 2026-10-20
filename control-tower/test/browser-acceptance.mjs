@@ -44,6 +44,8 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.equal(await page.locator('.progress-label').first().innerText(), '0% confirmed · 100% UNKNOWN');
     assert.match(await page.locator('#rollup').innerText(), /Confirmed: 0%; UNKNOWN: 100%/);
+    assert.equal(await page.locator('.rollup-number').evaluate(e =>
+      getComputedStyle(e).whiteSpace === 'nowrap'), true, 'UNKNOWN must remain readable on one line');
     console.log('Approved-model browser PASS: ' + width + 'px, six cards, UNKNOWN preserved');
   }
   assert.deepEqual(errors, []);
