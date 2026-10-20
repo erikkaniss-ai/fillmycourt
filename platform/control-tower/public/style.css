@@ -24,6 +24,9 @@ h2{font-size:21px;margin:0 0 7px}
 .cardhead h3{font-size:23px;line-height:1.2;margin:0}
 .evidence{display:flex;gap:10px;flex-wrap:wrap;margin:15px 0;color:#cbdced;font-size:13px}
 .evidence span{background:#173c5c;border-radius:7px;padding:5px 8px}
+.checks{margin:7px 0 16px;display:grid;gap:6px}
+.checkline{display:flex;gap:8px;justify-content:space-between;align-items:baseline;color:#b7cee4;font-size:12px}
+.checkline strong{font-size:11px;white-space:nowrap}
 .progress{margin:18px 0 8px}
 .progress-row{display:flex;justify-content:space-between;color:#a9c6df}
 .track{height:9px;border-radius:99px;background:#294961;margin-top:8px;overflow:hidden}
