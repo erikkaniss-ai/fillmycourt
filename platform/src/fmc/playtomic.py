@@ -29,13 +29,22 @@ class Playtomic:
     def __init__(self,client_id,secret,tenant,http=None):
         self.client_id,self.secret,self.tenant=client_id,secret,tenant
         self.http=http or httpx.Client(timeout=20,follow_redirects=False);self.token=None;self.expires=0
-    def get_token(self):
+    def token_usable(self, min_remaining_seconds=120):
+        """Remaining token lifetime check with no network activity."""
+        if type(min_remaining_seconds) is not int or not 0 <= min_remaining_seconds <= 3600:
+            raise ValueError("Invalid token margin.")
+        return bool(self.token) and self.expires > time.time() + min_remaining_seconds
+
+    def get_token(self, force_refresh=False):
         if not self.client_id or not self.secret or not self.tenant:raise DomainError('PROVIDER_CONFIG','Club credentials are not configured.',503)
-        if self.token and self.expires>time.time():return self.token
+        if not force_refresh and self.token_usable(0):return self.token
         try:
             r=self.http.post(BASE+'/api/v1/oauth/token',json={'client_id':self.client_id,'secret':self.secret});r.raise_for_status();j=r.json()
             token=j['token'];duration=int(j['expires_in'])
-            if not isinstance(token,str) or not token or not 60<=duration<=86400:raise ValueError()
+            # A separate 60s reservation follows OAuth token acquisition.
+            # Short-lived tokens cannot safely survive that pacing window.
+            if not isinstance(token,str) or not token or not 300<=duration<=86400:
+                raise DomainError('PROVIDER_AUTH_TTL','Token lifetime is too short for safe paced reads.',503)
             self.token=token;self.expires=time.time()+duration-30;return token
         except (httpx.HTTPError,ValueError,KeyError,TypeError):raise DomainError('PROVIDER_AUTH','Playtomic authentication failed.',502) from None
     @staticmethod
