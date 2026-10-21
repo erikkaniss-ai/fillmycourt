@@ -174,7 +174,13 @@ try{
 
 
     assert.deepEqual(errors,[],width+" JS page errors");
-    if(artifactDir)await page.screenshot({path:join(artifactDir,`get-integrated-${width}-FIXTURE-ONLY.png`),fullPage:true});
+    if(artifactDir){
+      // Modal/skip-link tests may leave the page scrolled with restored focus.
+      // Capture the stable entry layout, not full-page sticky-header artifacts.
+      await page.evaluate(()=>{document.activeElement?.blur();window.scrollTo(0,0);});
+      await page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
+      await page.screenshot({path:join(artifactDir,`get-integrated-${width}-FIXTURE-ONLY.png`),fullPage:true});
+    }
     // External CDN assets are deliberately denied; they are not part of source UAT.
     assert.ok(blocked.every(host=>host==="unpkg.com"),width+" unexpected external origins "+blocked);
     completed++;
