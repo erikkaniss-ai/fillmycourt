@@ -29,13 +29,20 @@ class Playtomic:
     def __init__(self,client_id,secret,tenant,http=None):
         self.client_id,self.secret,self.tenant=client_id,secret,tenant
         self.http=http or httpx.Client(timeout=20,follow_redirects=False);self.token=None;self.expires=0
+        self.retired=False
+    def _require_active(self):
+        # A retained client reference cannot reauthenticate after local revocation.
+        if self.retired:
+            raise DomainError('PROVIDER_SESSION_RETIRED',
+                              'Provider session was retired; a fresh authorized session is required.',503)
     def token_usable(self, min_remaining_seconds=120):
         """Remaining token lifetime check with no network activity."""
         if type(min_remaining_seconds) is not int or not 0 <= min_remaining_seconds <= 3600:
             raise ValueError("Invalid token margin.")
-        return bool(self.token) and self.expires > time.time() + min_remaining_seconds
+        return not self.retired and bool(self.token) and self.expires > time.time() + min_remaining_seconds
 
     def get_token(self, force_refresh=False):
+        self._require_active()
         if not self.client_id or not self.secret or not self.tenant:raise DomainError('PROVIDER_CONFIG','Club credentials are not configured.',503)
         if not force_refresh and self.token_usable(0):return self.token
         try:
@@ -51,6 +58,7 @@ class Playtomic:
             # Short-lived tokens cannot safely survive that pacing window.
             if not isinstance(token,str) or not token or not 300<=duration<=86400:
                 raise DomainError('PROVIDER_AUTH_TTL','Token lifetime is too short for safe paced reads.',503)
+            self._require_active()  # Reject an OAuth response arriving after local retirement.
             self.token=token;self.expires=time.time()+duration-30;return token
         except (httpx.HTTPError,ValueError,KeyError,TypeError):raise DomainError('PROVIDER_AUTH','Playtomic authentication failed.',502) from None
     @staticmethod
@@ -61,6 +69,7 @@ class Playtomic:
             return dt.astimezone(timezone.utc).isoformat()
         except (TypeError,ValueError,AttributeError):raise DomainError('PROVIDER_DATE','Unrecognized provider timestamp.',502) from None
     def page(self,kind,start,end,cursor=None,page=0):
+        self._require_active()
         if kind=='bookings':
             path='/api/v1/bookings';params={'tenant_id':self.tenant,'start_booking_date':self.iso(start)[:19],'end_booking_date':self.iso(end)[:19],'page':page,'size':200}
         elif kind=='players':
@@ -72,7 +81,10 @@ class Playtomic:
             path='/api/v1/payments';params={'tenant_id':self.tenant,'start_payment_date':self.iso(start),'end_payment_date':self.iso(end),'limit':100}
             if cursor:params['cursor_id']=cursor
         else:raise DomainError('PROVIDER_KIND','Unsupported read operation.',422)
-        try:r=self.http.get(BASE+path,params=params,headers={'Authorization':'Bearer '+self.get_token()})
+        try:
+            token=self.get_token()
+            self._require_active()  # Recheck before transport, even with cached OAuth.
+            r=self.http.get(BASE+path,params=params,headers={'Authorization':'Bearer '+token})
         except httpx.HTTPError:raise DomainError('PROVIDER_TIMEOUT','Provider did not respond.',502) from None
         if r.status_code in (202,429):
             delay=r.headers.get('Retry-After','60');raise Deferred('PROVIDER_PROCESSING' if r.status_code==202 else 'PROVIDER_RATE',int(delay) if delay.isdigit() else 60)
