@@ -152,7 +152,7 @@
   }
 
   function loading(){el.grid.setAttribute("aria-busy","true");el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
-  async function search(){
+  async function search({initial=false}={}){
     const p={sport:state.sport,location:el.location.value.trim()||"Cascais",date:el.date.value,from:el.from.value,to:el.to.value};
     if(state.geo){p.lat=String(state.geo.lat);p.lon=String(state.geo.lon);}
     loading();
@@ -180,7 +180,7 @@
     render();
     renderWatchPrompt();
     const reduceMotion=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    q("#resultsSection").scrollIntoView({behavior:reduceMotion?"auto":"smooth",block:"start"});
+    if(!initial) q("#resultsSection").scrollIntoView({behavior:reduceMotion?"auto":"smooth",block:"start"});
   }
 
   function useCurrentLocation(){
@@ -679,5 +679,5 @@
   el.closeVenue?.addEventListener("click",()=>el.venueDialog.close());
 
   updateAuthUI();
-  loadPlatform().then(async()=>{if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}search();});
+  loadPlatform().then(async()=>{if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}search({initial:true});});
 })();
