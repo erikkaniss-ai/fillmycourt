@@ -68,6 +68,94 @@ def test_rotation_and_capacity_eviction_scrub_retained_token_references():
     assert sessions.get(**params(connection="pc-overflow")).token is None
 
 
+def test_retired_club_client_cannot_reauthenticate_or_request_after_rotation_discard_or_capacity():
+    """Local client retirement is permanent even for retained references."""
+    from time import time
+    from fmc.common import DomainError
+    calls = []
+    def respond(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json={"token": "fixture-token", "expires_in": 3600})
+    def factory(client_id, secret, tenant):
+        return Playtomic(client_id, secret, tenant,
+                        http=httpx.Client(transport=httpx.MockTransport(respond)))
+    sessions = ProviderTokenSessions(factory=factory)
+    original = sessions.get(**params())
+    original.token, original.expires = "fixture-cached", time() + 3600
+    replacement = sessions.get(**params(secret="rotated-fixture-secret"))
+    assert replacement is not original
+    assert original.retired is True
+    assert original.token is None and original.expires == 0
+    assert not original.token_usable()
+    assert replacement.retired is False
+    # Even accidentally reinstating a bearer token on a retained reference is inert.
+    original.token, original.expires = "synthetic-retained", time() + 3600
+    for request in (lambda: original.get_token(force_refresh=True),
+                    lambda: original.page("bookings", "2026-10-20T00:00:00Z",
+                                          "2026-10-21T00:00:00Z")):
+        with pytest.raises(DomainError) as exc:
+            request()
+        assert exc.value.code == "PROVIDER_SESSION_RETIRED"
+    sessions.discard(connection_id="pc-1")
+    assert replacement.retired is True
+    with pytest.raises(DomainError, match="retired"):
+        replacement.get_token(force_refresh=True)
+
+    capacity = ProviderTokenSessions(factory=factory)
+    first = capacity.get(**params())
+    for index in range(63):
+        capacity.get(**params(connection=f"overflow-{index}"))
+    assert capacity.size() == 64
+    capacity.get(**params(connection="overflow-last"))
+    assert first.retired is True
+    with pytest.raises(DomainError, match="retired"):
+        first.get_token(force_refresh=True)
+    assert calls == [], "Retired clients must never make a provider HTTP request"
+
+
+def test_rotation_factory_failure_does_not_leave_unusable_client_cached():
+    from fmc.common import DomainError
+    calls = 0
+    def factory(client_id, secret, tenant):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("Synthetic constructor failure")
+        return Playtomic(client_id, secret, tenant,
+                        http=httpx.Client(transport=httpx.MockTransport(
+                            lambda req: httpx.Response(500))))
+    sessions = ProviderTokenSessions(factory=factory)
+    original = sessions.get(**params())
+    with pytest.raises(RuntimeError, match="Synthetic constructor failure"):
+        sessions.get(**params(secret="new-secret"))
+    assert original.retired is True
+    assert sessions.size() == 0, "Retired entry must not survive a failed replacement"
+    recovered = sessions.get(**params())
+    assert recovered is not original and not recovered.retired
+    assert sessions.size() == 1
+
+
+def test_retirement_during_oauth_response_prevents_token_repopulation():
+    """Deterministically retire from MockTransport before token response is parsed."""
+    from fmc.common import DomainError
+    requests = []
+    sessions = None
+    def respond(req):
+        requests.append(req.url.path)
+        sessions.discard(connection_id="pc-1")
+        return httpx.Response(200, json={"token": "fixture-arrived-late", "expires_in": 3600})
+    sessions = ProviderTokenSessions(factory=lambda cid, secret, tenant:
+        Playtomic(cid, secret, tenant,
+                 http=httpx.Client(transport=httpx.MockTransport(respond))))
+    previous = sessions.get(**params())
+    with pytest.raises(DomainError) as exc:
+        previous.get_token(force_refresh=True)
+    assert exc.value.code == "PROVIDER_SESSION_RETIRED"
+    assert previous.retired and previous.token is None and previous.expires == 0
+    assert requests == ["/api/v1/oauth/token"]
+    assert sessions.size() == 0
+
+
 def test_cache_is_in_memory_not_a_persistent_token_store():
     sessions=ProviderTokenSessions()
     old=sessions.get(**params())
