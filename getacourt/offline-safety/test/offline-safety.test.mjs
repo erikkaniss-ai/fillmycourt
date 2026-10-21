@@ -41,7 +41,7 @@ test("cache namespace is isolated and no dynamic responses or credentials can be
   assert.doesNotMatch(source,/localStorage|sessionStorage|indexedDB|authorization\s*:/i);
   assert.match(source,/credentials:\s*"omit"/);
   assert.match(source,/cache:\s*"no-store"/);
-  assert.match(source,/event\.request\.mode\s*!==\s*"navigate"/);
+  assert.match(source,/request\.mode\s*!==\s*"navigate"/);
 });
 
 test("offline page is static, informative, and does not imply real availability or payments",()=>{
