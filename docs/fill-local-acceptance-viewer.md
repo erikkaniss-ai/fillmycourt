@@ -1,5 +1,38 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Preparation snapshots — continuation from Fill21f53fd
+
+Each separate club/Get preparation panel now starts with a labelled read-only
+**Preparation snapshot** of its existing local notes. Only current validated
+MISSING/UNKNOWN rows contribute: note count, distinct state counts and fixed review
+themes (authority/source; existing runtime/isolation; tester/device/state-change
+consent; evidence/allowlist/stop). Each component belongs to one theme; themes with
+no unresolved notes are omitted. No PRESENT row contributes a preparation step.
+
+The club snapshot retains selected organisation and exact Operations SHA, not pilot
+or Get GO. Get retains exact Get SHA and one explicitly selected check, never club
+UAT or pilot GO. Counts describe local declarations, not work completed, verified
+evidence, completeness of original records or readiness. UNKNOWN is unresolved,
+not proven absence. Zero notes still requires independent original-evidence and
+authority review; verified GO stays none, execution NOT_RUN, blockers stay open.
+
+Snapshots reuse the same local result and summary scope/expiry/reset paths as the
+existing detailed notes, without a new state model, parser/schema, file/API/document
+read, storage, transport, controls, collection, assignment, execution or GO decision.
+No context/review, loading/rejection/expiry and changed club/auth/source/check/file/
+tab context cannot retain counts or identities. Late results cannot restore an old
+snapshot or erase a newer one. Existing read/render-triggered expiry is unchanged.
+
+Node checks exact per-theme totals across club and all seven Get catalogs, mixed
+states, all-declared without GO, scope separation, denial/unsafe/expiry/late-result
+clearing and no extra reads/side effects. Actual CI loopback Chromium checks club
+12-note and mixed Get 3-note summaries, all-declared-without-authority, unchanged
+opposite domain/blockers, no extra network/storage/controls, desktop and320px
+screenshots `fill-go-package-preparation-summary-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`.
+These are fictional source/CI checks, not hosted/device/OAuth acceptance. The
+existing exact-SHA owner-GO deployment gate is unchanged; old GO cannot approve
+this later source. No sending, deployment, production or real provider requests.
+
 ## Missing-part preparation notes — continuation from Fill072c1f3
 
 Separate **Missing-part preparation** regions now sit beside each domain's summary

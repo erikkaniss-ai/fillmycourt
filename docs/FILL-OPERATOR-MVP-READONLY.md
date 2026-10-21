@@ -416,3 +416,17 @@ Tests cover all Get catalogs, exact states, isolation, denied/stale/late results
 no new network/storage, desktop/320px fictional Chromium screenshots. Source/CI
 checks do not change hosted UAT NOT_RUN or pilot GO NOT_GRANTED. Full behaviour
 and limitations: `docs/fill-local-acceptance-viewer.md`.
+
+### Preparation snapshots — continued from 21f53fd
+
+Club and Get preparation regions each have a separate read-only snapshot: exact
+organisation/Operations SHA or Get SHA/single check, number of existing local notes,
+distinct MISSING/UNKNOWN counts and fixed review themes. No PRESENT steps, joined
+authority, progress/readiness score or inference that UNKNOWN is proven absence.
+No notes is not approval: original-evidence/authority review remains required,
+verified GO none, execution NOT_RUN, blockers open. Existing guarded local result
+and reset/expiry paths are reused without new reads, state, storage, collection,
+controls, sending or execution. Source/CI tests include all seven Get catalogs,
+scope/late-result/denied/stale clearing, exact totals and fictional desktop/320px
+Chromium snapshots. Hosted/device/OAuth acceptance remains NOT_RUN; pilot GO
+NOT_GRANTED. Existing deployment gate and Control Tower are not changed.

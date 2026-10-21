@@ -1107,6 +1107,7 @@
     summary: q("#" + domain + "PackageSummary"),
     missing: q("#" + domain + "PackageMissing"),
     steps: q("#" + domain + "PackageSteps"),
+    stepsSummary: q("#" + domain + "PackageStepsSummary"),
   }]));
   const goPackageCheck = q("#getPackageCheck");
   const goPackageState = {club: {epoch: 0, key: null}, get: {epoch: 0, key: null}};
@@ -1200,16 +1201,42 @@
       '<ul class="go-package-items go-package-preparation">' + unresolved.map(row =>
         `<li data-package-step="${esc(row.id)}" data-package-step-state="${esc(row.status)}"><strong>${esc(goPackagePartLabels[row.id] || row.id)} — ${esc(row.status)}</strong><p>${row.status === "UNKNOWN" ? "Uncertainty is unresolved; independent review is needed, not a declaration of absence or permission to mark PRESENT. " : "Declared missing in this manifest only; original evidence has not been assessed. "}${esc(notes[row.id] || "Keep unresolved for independent review; no preparation action inferred.")}</p></li>`).join("") + "</ul>";
   }
+  // Summary of the existing preparation notes only, not work completed/readiness.
+  // Each known component belongs to exactly one fixed theme, in its own domain.
+  function goPackageStepsSummaryHTML(rows, domain, ctx, organisation) {
+    const themes = [
+      ["authority-source", "Original authority and source scope", ["original-authority", "source-binding"]],
+      ["runtime-isolation", "Existing protected runtime and isolation", ["protected-deploy", "independent-runtime", "isolation", "two-synthetic-orgs", "perimeter"]],
+      ["consent-device", "Tester, device and state-change consent", ["tester-consent", "ios-device", "android-device", "location-consent", "oauth-consent", "assistive-device", "separate-state-change-go"]],
+      ["evidence-scope-stop", "Evidence, allowlist and stop conditions", ["scope-allowlist", "current-evidence", "unresolved-blockers", "expiry-revocation-stop", "connection-freshness", "club-wide-coverage", "source-ci", "oauth-config"]],
+    ];
+    const unresolved = rows.filter(row => ["MISSING", "UNKNOWN"].includes(row.status));
+    const scope = domain === "club"
+      ? `<p>Club preparation only · organisation <code>${esc(organisation)}</code><br>Operations SHA: <code>${esc(ctx.sha)}</code>. Not pilot or GetACourt GO.</p>`
+      : `<p>GetACourt preparation only · check ${esc(ctx.check)}<br>Get SHA: <code>${esc(ctx.sha)}</code>. Not club UAT or pilot GO.</p>`;
+    const limits = "<p>Local declarations only, not work completed, verified evidence or readiness. Independent original-evidence and authority review still required. Verified GO: none. Execution NOT_RUN. Existing blockers stay open; do not execute.</p>";
+    if (!unresolved.length) return scope + "<p>No missing-part preparation notes inferred from this manifest. Absence of notes is not approval.</p>" + limits;
+    const missing = unresolved.filter(row => row.status === "MISSING").length;
+    const unknown = unresolved.filter(row => row.status === "UNKNOWN").length;
+    return scope + `<p>Preparation notes: <strong>${unresolved.length}</strong>; ${missing} MISSING; ${unknown} UNKNOWN. UNKNOWN remains unresolved, not proven absence.</p>` +
+      "<p>Themes only — not an execution order, assignment or evidence collection:</p>" +
+      '<ul class="go-package-items">' + themes.map(([id, label, ids]) => {
+        const items = unresolved.filter(row => ids.includes(row.id));
+        return items.length ? `<li data-package-preparation-group="${id}">${esc(label)}: ${items.filter(row => row.status === "MISSING").length} MISSING; ${items.filter(row => row.status === "UNKNOWN").length} UNKNOWN.</li>` : "";
+      }).join("") + "</ul>" + limits;
+  }
   // Presentation only of one domain's existing local result, never a GO decision.
   function renderGoPackageSummary(domain, ctx = packageContext(domain)) {
     const target = goPackageUI[domain].summary;
     if (!target) return;
     const missingTarget = goPackageUI[domain].missing;
     const stepsTarget = goPackageUI[domain].steps;
+    const stepsSummaryTarget = goPackageUI[domain].stepsSummary;
     const empty = message => {
       target.textContent = message;
       if (missingTarget) missingTarget.textContent = message ? message + " No missing-part list inferred." : "";
       if (stepsTarget) stepsTarget.textContent = message ? message + " No missing-part preparation notes inferred." : "";
+      if (stepsSummaryTarget) stepsSummaryTarget.textContent = message ? message + " No preparation summary inferred." : "";
     };
     empty("");
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) return;
@@ -1250,6 +1277,7 @@
       "<p>Verified GO: none. Execution NOT_RUN. Declared presence is not document or authority validation. Existing blockers stay open; club UAT/pilot, Get checks, provider rights and deploy permissions stay separate.</p>";
     if (missingTarget) missingTarget.innerHTML = goPackageMissingHTML(r.rows);
     if (stepsTarget) stepsTarget.innerHTML = goPackageStepsHTML(r.rows, domain);
+    if (stepsSummaryTarget) stepsSummaryTarget.innerHTML = goPackageStepsSummaryHTML(r.rows, domain, ctx, state.org);
   }
   function clearGoPackage(domain, key = null, clearFile = true, status = "not_reviewed") {
     const previous = goPackageState[domain];
