@@ -29,7 +29,9 @@ test("deny all auth, token, provider, API, booking, payment and personal paths",
     "./login","./logout","./session","./token","./player-profile",
     "./my-bookings","./book","./hold","./checkout","./payment",
     "./provider/playtomic","./account","./private/invoice",
-    "./search?token=secret","./home?authorization=Bearer"
+    "./search?token=secret","./home?authorization=Bearer",
+    "./%61pi/private","./%62ook","./%70ayment","./%73earch",
+    "./misc?access_token=fake"
   ];
   for(const target of denied)assert.equal(worker.shouldHandle(navigation(target),scope),false,target);
 });
