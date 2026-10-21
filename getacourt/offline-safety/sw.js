@@ -15,8 +15,17 @@
   const BLOCKED_QUERY_KEYS=new Set([
     "access_token","refresh_token","token","authorization","code",
     "session","secret","apikey","api_key","email","hold","booking",
-    "payment","checkout","player","customer","user"
+    "payment","checkout","player","customer","user","auth"
   ]);
+  function isSensitive(value,blocked){
+    const normalized=value.toLowerCase();
+    for(const segment of blocked){
+      if(normalized===segment||
+         normalized.startsWith(segment+"-")||
+         normalized.startsWith(segment+"_"))return true;
+    }
+    return false;
+  }
 
   function shouldHandle(request,scope){
     if(!request||request.method!=="GET"||request.mode!=="navigate")return false;
@@ -26,9 +35,9 @@
     // Encoded path separators / escapes are ambiguous. Never take over these.
     if(url.pathname.includes("%")||url.pathname.includes("\\"))return false;
     const parts=url.pathname.slice(base.pathname.length).split("/").filter(Boolean);
-    if(parts.some(x=>BLOCKED_SEGMENTS.has(x.toLowerCase())))return false;
+    if(parts.some(x=>isSensitive(x,BLOCKED_SEGMENTS)))return false;
     for(const key of url.searchParams.keys())
-      if(BLOCKED_QUERY_KEYS.has(key.toLowerCase()))return false;
+      if(isSensitive(key,BLOCKED_QUERY_KEYS))return false;
     return true;
   }
 
