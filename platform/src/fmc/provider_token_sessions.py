@@ -16,6 +16,18 @@ from .playtomic import Playtomic
 _MAX_SESSIONS = 64
 
 
+def _retire(client):
+    """Permanently disable an evicted client object, including retained references."""
+    client.retired = True
+    client.token = None
+    client.expires = 0
+    # Clear credentials from client objects still referenced by a caller.
+    if hasattr(client, "client_id"):
+        client.client_id = None
+    if hasattr(client, "secret"):
+        client.secret = None
+
+
 def _identity(organization_id, connection_id, client_id, secret, tenant):
     values=(organization_id,connection_id,client_id,secret,tenant)
     if any(not isinstance(v,str) or not v for v in values):
@@ -48,13 +60,13 @@ class ProviderTokenSessions:
             # Invalidate retained client references when a credential changes.
             # Removing a cache entry alone does not clear the old bearer token.
             if old is not None:
-                old[1].token = None
-                old[1].expires = 0
+                _retire(old[1])
+                # A failed new factory call must not leave a retired client cached.
+                self._sessions.pop(key, None)
             if len(self._sessions)>=_MAX_SESSIONS:
                 # Capacity eviction must clear tokens held by other references.
                 for _, client in self._sessions.values():
-                    client.token = None
-                    client.expires = 0
+                    _retire(client)
                 self._sessions.clear()
             instance=self._factory(client_id,secret,tenant)
             self._sessions[key]=(fingerprint,instance)
@@ -71,8 +83,7 @@ class ProviderTokenSessions:
             for key in list(self._sessions):
                 if key[1] == connection_id:
                     _, client = self._sessions.pop(key)
-                    client.token = None
-                    client.expires = 0
+                    _retire(client)
 
     def size(self):
         with self._lock:
