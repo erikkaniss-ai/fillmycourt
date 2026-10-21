@@ -11,6 +11,13 @@
 
 ### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
 
+Continuation from Fill `0654e84`: club and GetACourt now have separate read-only
+next-GO preparation lists. They describe missing evidence, approval/delegation,
+exact source/deploy scope, consent/expiry and stop conditions, never execution.
+Club UAT/pilot GO remains unverified after successful reads; zero candidate
+missing-record flags still needs independent GO review. Neither list grants or
+transfers authority, starts requests, collects credentials or changes blockers.
+
 Continuation from Fill `12506dd`: a separately labelled candidate-wide snapshot
 now sits beside club UAT blockers (stacked on mobile). It shows reviewed Get
 SHA/time, seven check statuses and missing-GO flags without joining club evidence

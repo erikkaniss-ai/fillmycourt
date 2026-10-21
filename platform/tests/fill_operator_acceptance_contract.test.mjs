@@ -49,6 +49,8 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
   };
   const review=()=>get("#acceptanceForm").run("submit");
   return {get,nav,storage,calls,controls,open,select,review,setNow:value=>{clockNow=value;},
+    clubSteps:()=>get("#clubNextSteps").innerHTML||get("#clubNextSteps").textContent,
+    candidateSteps:()=>get("#candidateNextSteps").innerHTML||get("#candidateNextSteps").textContent,
     summary:()=>get("#acceptanceSummary").innerHTML||get("#acceptanceSummary").textContent,
     report:()=>get("#acceptanceReport").innerHTML,message:()=>get("#acceptanceMessage").textContent};
 }
@@ -98,6 +100,7 @@ test("Unsafe, stale, foreign, contradictory, secret-bearing or malformed reports
     assert.equal(h.report(),"");assert.match(h.message(),/unavailable, incompatible, stale or for another SHA/);
     assert.doesNotMatch(h.message(),/SECRET|<img/);
     assert.match(h.summary(),/rejected or unavailable/);assert.doesNotMatch(h.summary(),/SECRET|<img|7 checks:/);
+    assert.doesNotMatch(h.candidateSteps(),/SECRET|<img|data-candidate-go=/);
   }
   for(const bad of ["{", "null", "[]", "{}"]){await h.select(bad);await h.review();assert.equal(h.report(),"");}
   for(const value of [null, " ".repeat(65537)]){
@@ -119,6 +122,7 @@ test(`No file read without owner/admin authenticated scope: ${JSON.stringify(opt
   assert.equal(h.get("#acceptanceReview").disabled,true);await h.review();
   assert.equal(reads,0);assert.equal(h.report(),"");
   assert.doesNotMatch(h.summary(),new RegExp(SHA));assert.doesNotMatch(h.summary(),/7 checks:/);
+  assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
 });
 for(const action of ["club","tab","logout","sha","file","refresh","401"])
 test(`Late file completion after ${action} cannot restore stale scope`,async()=>{
@@ -134,6 +138,7 @@ test(`Late file completion after ${action} cannot restore stale scope`,async()=>
   pending.resolve(JSON.stringify(golden));await running;
   assert.equal(h.report(),"");assert.equal(h.message(),"");
   assert.doesNotMatch(h.summary(),new RegExp(SHA));assert.doesNotMatch(h.summary(),/7 checks:/);
+  assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
   if(["club","tab","logout","refresh","401"].includes(action)){
     assert.equal(h.get("#acceptanceSha").value,"");assert.equal(h.get("#acceptanceFile").files.length,0);
   }
@@ -142,9 +147,10 @@ test(`Late file completion after ${action} cannot restore stale scope`,async()=>
 test("Late failure cannot erase a newer valid local report; current failure is redacted",async()=>{
   const h=await harness();await h.open();const old=deferred();
   await h.select(golden,SHA,{size:100,text:()=>old.promise});const running=h.review();await settle();
-  await h.select();await h.review();const current=h.report(),summary=h.summary();old.reject(Error("SECRET"));await running;
+  await h.select();await h.review();const current=h.report(),summary=h.summary(),steps=h.candidateSteps();old.reject(Error("SECRET"));await running;
   assert.equal(h.report(),current);
   assert.equal(h.summary(),summary);
+  assert.equal(h.candidateSteps(),steps);
   await h.select(golden,SHA,{size:100,text:async()=>{throw Error("SECRET");}});await h.review();
   assert.equal(h.report(),"");assert.doesNotMatch(h.message(),/SECRET/);
   assert.match(h.summary(),/rejected or unavailable/);
@@ -180,6 +186,7 @@ test("Operations parameter edits leave candidate snapshot independent; expiry is
   assert.equal(h.summary(),summary);assert.equal(h.calls.length,calls);
   h.setNow(NOW+25*60*60*1000);await h.get("#operationsSha").run("input");
   assert.match(h.summary(),/report expired/);assert.doesNotMatch(h.summary(),/7 checks:|7 of 7/);
+  assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
   assert.match(h.get("#clubUatBlockers").innerHTML,/Owner UAT GO/);
 });
 test("New club summary starts unreviewed; reimport cannot reuse the previous club's counts",async()=>{
@@ -202,6 +209,59 @@ test("Adjacent candidate scope has its own accessible region and never writes cl
   const css=readFileSync("platform/public/fill/styles.css","utf8");
   assert.match(css,/\.review-gate-columns \{ display:grid;/);
 });
+test("Separate GO next-step lists start as unverified planning, never initiate reads or expose a plan from a selected file",async()=>{
+  const h=await harness();await h.open();const calls=h.calls.length;
+  assert.match(h.clubSteps(),/Club-only planning scope/);assert.match(h.clubSteps(),new RegExp(ORG));
+  assert.match(h.clubSteps(),/data-club-next="club-uat-go"/);assert.match(h.clubSteps(),/data-club-next="club-pilot-go"/);
+  assert.match(h.candidateSteps(),/No current candidate-specific plan/);
+  assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
+  await h.select();assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
+  assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
+test("Only candidate missing flags select exact Get GO scopes; club planning is unchanged",async()=>{
+  const h=await harness();await h.open();const club=h.clubSteps(),blockers=h.get("#clubUatBlockers").innerHTML;
+  const data=structuredClone(golden);data.checks.slice(2).forEach(c=>{c.blockers=[];c.preflight="READY_FOR_MANUAL_GO_REVIEW";});
+  await h.select(data);await h.review();
+  assert.deepEqual([...h.candidateSteps().matchAll(/data-candidate-go="([^"]+)"/g)].map(m=>m[1]),["hosted-perimeter","hosted-ui"]);
+  assert.match(h.candidateSteps(),/anonymous-preview-root-get-no-redirect-no-body/);
+  assert.match(h.candidateSteps(),/exact SHA\/deploy\/action scope/);
+  assert.match(h.candidateSteps(),/separate deployment GO first; do not deploy/);
+  assert.match(h.candidateSteps(),/OAuth and device-location permissions need separate explicit state-change GO/);
+  assert.equal(h.clubSteps(),club);assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);
+  assert.doesNotMatch(h.clubSteps(),new RegExp(SHA));assert.doesNotMatch(h.clubSteps(),/data-candidate-go=/);
+});
+test("Complete records with no missing flags still require independent Get GO review and club/pilot GO",async()=>{
+  const h=await harness();await h.open();const data=structuredClone(golden);
+  data.checks.forEach(c=>{c.blockers=[];c.preflight="READY_FOR_MANUAL_GO_REVIEW";});
+  await h.select(data);await h.review();assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
+  assert.match(h.candidateSteps(),/data-candidate-next="candidate-unverified-go"/);
+  assert.match(h.candidateSteps(),/no GO is verified/);assert.match(h.candidateSteps(),/do not execute/);
+  assert.match(h.clubSteps(),/separate club UAT GO/);assert.match(h.clubSteps(),/separate pilot GO/);
+  for(const html of [h.clubSteps(),h.candidateSteps()])assert.doesNotMatch(html,/<(?:button|input|form|a)\b|GO granted|approved for execution/);
+});
+test("Loading and stale-file failure cannot keep old GO steps; a new club starts without candidate-specific actions",async()=>{
+  const h=await harness();await h.open();await h.select();await h.review();const old=deferred();
+  await h.select(golden,SHA,{size:100,text:()=>old.promise});const running=h.review();await settle();
+  assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));
+  h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();
+  old.reject(Error("SECRET"));await running;
+  assert.match(h.clubSteps(),new RegExp(OTHER));assert.doesNotMatch(h.clubSteps(),new RegExp(ORG));
+  assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=|SECRET/);
+  await h.get("#signOut").run("click");assert.equal(h.clubSteps(),"");assert.equal(h.candidateSteps(),"");
+});
+test("GO planning has distinct accessible sections, fixed role labels and no shared authorization state",()=>{
+  const html=readFileSync("platform/public/fill/index.html","utf8");
+  for(const [heading,id] of [["clubNextHeading","clubNextSteps"],["candidateNextHeading","candidateNextSteps"]]){
+    assert.match(html,new RegExp('aria-labelledby="'+heading+'"'));
+    assert.match(html,new RegExp('id="'+id+'" role="status" aria-live="polite" aria-atomic="true"'));
+  }
+  const club=source.slice(source.indexOf("  function renderClubNextSteps("),source.indexOf("  function setReviewSummary("));
+  const candidate=source.slice(source.indexOf("  function renderCandidateNextSteps("),source.indexOf("  // Independent candidate-wide presentation"));
+  assert.doesNotMatch(club,/acceptanceSnapshot|acceptanceCatalog|candidateNextSteps|\bapi\(|\bfetch\(/);
+  assert.doesNotMatch(candidate,/state\.reviewSummary|clubNextSteps|uatBlockers|\bapi\(|\bfetch\(/);
+  for(const segment of [club,candidate])assert.doesNotMatch(segment,/Storage|setInterval|setTimeout|\.addEventListener|\.submit\(|<button|<form|<input/);
+});
+
 test("Local viewer has labels/no transport/storage/runner, remains in both mandatory CI jobs",()=>{
   const html=readFileSync("platform/public/fill/index.html","utf8");
   assert.match(html,/aria-labelledby="acceptanceHeading"/);assert.match(html,/id="acceptanceMessage" role="status" aria-live="polite"/);

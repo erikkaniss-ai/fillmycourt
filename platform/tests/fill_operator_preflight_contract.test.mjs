@@ -75,6 +75,35 @@ async function harness(demo=false,clubName="SYNTHETIC A") {
   return {get,nav,storage,calls,controls,open,check,review,summary,blockers};
 }
 
+test("Club next steps keep UAT/pilot GO open after passed Operations and a consistent page",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});await h.open();
+  assert.match(h.get("#clubNextSteps").innerHTML,/data-club-next="club-operations"/);
+  await h.check();
+  h.controls.report=()=>ok(receipt({status:"page_consistent",items:[{...receipt().items[0],status:"consistent_internal_evidence"}]}));
+  await h.review();
+  const steps=h.get("#clubNextSteps").innerHTML;
+  assert.doesNotMatch(steps,/data-club-next="club-operations"/);
+  assert.match(steps,/data-club-next="club-provenance"/);assert.match(steps,/club-wide provenance coverage/);
+  assert.match(steps,/data-club-next="club-uat-go"/);assert.match(steps,/data-club-next="club-pilot-go"/);
+  assert.match(steps,/exact Operations SHA/);assert.match(steps,/two authorised synthetic organisations/);
+  assert.match(steps,/existing protected deploy ID\/origin/);assert.doesNotMatch(steps,/data-candidate-go=|GO granted/);
+});
+test("Denied and incompatible club reads produce preparation notes without raw details or action controls",async()=>{
+  const h=await harness(false,"PRIVATE<img>");await h.open();const calls=h.calls.length;
+  h.controls.preflight=()=>denied(403);await h.check();
+  assert.match(h.get("#clubNextSteps").innerHTML,/data-club-next="club-operations"/);
+  assert.doesNotMatch(h.get("#clubNextSteps").innerHTML,/PRIVATE|<img|<button|<input|<form/);
+  h.controls.preflight=()=>ok(result({private_extra:"PRIVATE"}));await h.check();
+  assert.doesNotMatch(h.get("#clubNextSteps").innerHTML,/PRIVATE/);
+  assert.equal(h.calls.length,calls+2);assert.ok(h.calls.every(c=>c.method==="GET"));
+  h.get("#signOut").run("click");assert.equal(h.get("#clubNextSteps").innerHTML,"");assert.equal(h.get("#clubNextSteps").textContent,"");
+});
+test("Demo preparation notes never invent real club GO",async()=>{
+  const h=await harness(true);await h.open();
+  assert.match(h.get("#clubNextSteps").textContent,/Synthetic demo has no club GO/);
+  assert.equal(h.get("#clubNextSteps").innerHTML,"");assert.equal(h.calls.length,0);
+});
+
 test("Explicit Operations SHA and click only; no default, remembered revision, or automatic preflight",async()=>{
   const h=await harness();await h.open();
   assert.equal(h.get("#operationsSha").value,"");

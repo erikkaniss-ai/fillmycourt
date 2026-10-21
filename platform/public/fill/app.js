@@ -36,6 +36,7 @@
     acceptanceFile: q("#acceptanceFile"), acceptanceReview: q("#acceptanceReview"),
     acceptanceMessage: q("#acceptanceMessage"), acceptanceReport: q("#acceptanceReport"),
     acceptanceSummary: q("#acceptanceSummary"),
+    clubNextSteps: q("#clubNextSteps"), candidateNextSteps: q("#candidateNextSteps"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -450,6 +451,7 @@
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.reviewSummary.textContent = "";
       if (el.uatBlockers) el.uatBlockers.textContent = "";
+      if (el.clubNextSteps) el.clubNextSteps.textContent = "";
       return;
     }
     const scoped = key => {
@@ -495,6 +497,7 @@
   }
 
   function renderUatBlockers(preflight, provenance) {
+    renderClubNextSteps(preflight, provenance);
     if (!el.uatBlockers) return;
     const observed = [];
     const incomplete = {
@@ -533,6 +536,32 @@
       Object.entries(preflightNotAssessed).map(([key, label]) =>
         `<li data-unassessed="${esc(key)}">${esc(label)} — not assessed here.</li>`).join("") +
       '<li data-unassessed="club_provenance_coverage">Club-wide provenance coverage — not assessed by a single-page viewer.</li></ul>';
+  }
+
+  // Club-only planning from the two scoped reads; no candidate GO enters this list.
+  function renderClubNextSteps(preflight, provenance) {
+    if (!el.clubNextSteps) return;
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
+      el.clubNextSteps.textContent = "";
+      return;
+    }
+    if (state.demo) {
+      el.clubNextSteps.textContent = "Synthetic demo has no club GO or real evidence. No club-specific next step or permission is established.";
+      return;
+    }
+    const steps = [];
+    if (preflight?.status !== "passed") steps.push(["club-operations",
+      "Operations reviewer: document the selected club, exact approved Operations SHA and independent isolated-runtime evidence for the unread or blocked prerequisites. Do not repair, provision or run hosted checks here."]);
+    steps.push(["club-provenance", provenance?.status === "reviewed"
+      ? "Evidence reviewer: document approved freshness policy and club-wide provenance coverage. The reviewed page is not complete club evidence; unresolved receipts stay unresolved without provider fetch, privileged access or repair."
+      : "Evidence reviewer: prepare an authorised existing-record provenance review with explicit connection, freshness policy and club-wide coverage. No evidence is established by this list; do not fetch a provider or repair receipts."]);
+    steps.push(["club-uat-go",
+      "Club release authority: prepare and independently verify a separate club UAT GO with organisation scope, exact Operations SHA, independent runtime identity, existing protected deploy ID/origin, fixture/isolation evidence, consenting testers/roles, two authorised synthetic organisations, read-only routes, access-denial cases, expiry and stop conditions. Unknown evidence or authority means stop; this screen grants nothing."]);
+    steps.push(["club-pilot-go",
+      "Pilot owner: document named club consent and provider-specific API rights from already authorised records, then obtain separate pilot GO. A UAT GO or GetACourt report cannot authorise pilot execution, live provider access, bookings or payments. No outreach or credential collection here."]);
+    el.clubNextSteps.innerHTML = `<p>Club-only planning scope: <code>${esc(state.org)}</code>. Club GO is not verified here.</p>` +
+      '<ol class="go-next-list">' + steps.map(([id, text]) =>
+        `<li data-club-next="${id}">${esc(text)}</li>`).join("") + "</ol>";
   }
 
   function setReviewSummary(key, status, details = {}) {
@@ -702,15 +731,53 @@
     return !state.demo && Boolean(state.token) && state.view === "provenance" &&
       state.orgs.some(org => org.id === state.org && ["owner", "admin"].includes(org.role));
   }
+  // Candidate-only planning, not an execution queue or a grant of authority.
+  function renderCandidateNextSteps(snapshot = null, status = "not_reviewed") {
+    if (!el.candidateNextSteps) return;
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
+      el.candidateNextSteps.textContent = "";
+      return;
+    }
+    if (!acceptanceAllowed()) {
+      el.candidateNextSteps.textContent = "Signed-in owner/admin local review is required. No candidate-specific GO step or authority is established in this scope.";
+      return;
+    }
+    const reviewed = status === "reviewed" && snapshot;
+    const steps = [];
+    if (!reviewed) steps.push(["candidate-report",
+      "Get release reviewer: explicitly review a fresh, bounded, nonsecret local preflight report for the intended full Get SHA. No current reviewed candidate snapshot means no missing-GO selection can be inferred. No automatic download or check."]);
+    steps.push(["candidate-deploy-evidence",
+      "Hosting owner: document an existing protected non-production deploy ID/origin bound to the exact Get source SHA, with isolation and access receipts. Unknown or mismatched deployment means stop. A new deploy needs separate deployment GO first; do not deploy from this list."]);
+    steps.push(["candidate-authority",
+      "Get release authority: independently verify original approval/delegation, exact SHA/deploy/action scope, consenting testers/accounts/devices, approval time, expiry/revocation and stop conditions. A local JSON record or green CI is not authority."]);
+    let specific = "";
+    if (reviewed) {
+      specific = snapshot.rows.map((row, index) => row.missingGo
+        ? `<li data-candidate-go="${acceptanceCatalog[index][0]}">Prepare or revalidate separate Get GO: <strong>${esc(acceptanceCatalog[index][1])}</strong>. Exact action scope: ${esc(acceptanceCatalog[index][3].join(", "))}. NOT_RUN.</li>` : "").join("");
+      if (snapshot.rows.some(row => row.blocked)) steps.push(["candidate-blocked-evidence",
+        "Evidence reviewer: record unresolved candidate checks using authorised existing receipts only; no live provider request, repair or configuration change is authorised. A missing GO flag and missing evidence are separate conditions."]);
+      if (!specific) steps.push(["candidate-unverified-go",
+        "No missing-record flag in this snapshot, but no GO is verified. Original scoped approvals and current evidence still require independent human review; do not execute."]);
+    }
+    steps.push(["candidate-state-change-go",
+      "OAuth and device-location permissions need separate explicit state-change GO. Worker activation, club/pilot GO and provider rights are not included. No auth/provider request, credential handling, booking or payment is permitted by this list."]);
+    el.candidateNextSteps.innerHTML = (reviewed
+      ? `<p>Get-only planning scope: <code>${esc(snapshot.sha)}</code>. No club GO or verified execution permission.</p>`
+      : "<p>No current candidate-specific plan from a reviewed snapshot. Planning only; no verified Get GO.</p>") +
+      '<ol class="go-next-list">' + steps.map(([id, text]) =>
+        `<li data-candidate-next="${id}">${esc(text)}</li>`).join("") + specific + "</ol>";
+  }
   // Independent candidate-wide presentation; never feeds club UAT/Operations state.
   function renderAcceptanceSummary() {
     if (!el.acceptanceSummary) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.acceptanceSummary.textContent = "";
+      renderCandidateNextSteps();
       return;
     }
     if (!acceptanceAllowed()) {
       el.acceptanceSummary.textContent = "No local candidate report in this scope. Signed-in owner/admin review is required; demo has no real evidence. No verified GO.";
+      renderCandidateNextSteps();
       return;
     }
     const snapshot = acceptanceSnapshot?.org === state.org && acceptanceSnapshot.auth === state.authEpoch
@@ -722,12 +789,14 @@
     };
     if (snapshot?.status !== "reviewed") {
       el.acceptanceSummary.textContent = labels[snapshot?.status] || labels.not_reviewed;
+      renderCandidateNextSteps();
       return;
     }
     const observed = Date.parse(snapshot.asOf), now = Date.now();
     if (snapshot.sha !== el.acceptanceSha.value || !Number.isFinite(now) ||
         observed > now || now - observed > 24 * 60 * 60 * 1000) {
       el.acceptanceSummary.textContent = "No current local candidate snapshot: SHA changed or report expired. Review the file again; no verified GO.";
+      renderCandidateNextSteps();
       return;
     }
     const blocked = snapshot.rows.filter(row => row.blocked).length;
@@ -740,6 +809,7 @@
         `<li>${esc(acceptanceCatalog[index][1])}: ${row.blocked ? "blocked" : "manual GO review only"}; ` +
         `${row.missingGo ? "GO record missing / invalid" : "GO not verified"}. NOT_RUN.</li>`).join("") + "</ul>" +
       "<p>Counts describe this candidate report only, not club readiness. Club UAT/pilot GO, provider rights and deployment authority stay separate.</p>";
+    renderCandidateNextSteps(snapshot, "reviewed");
   }
   function setAcceptanceSnapshot(status, details = {}) {
     acceptanceSnapshot = {...details, status, org: state.org, auth: state.authEpoch};

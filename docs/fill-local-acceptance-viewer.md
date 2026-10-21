@@ -1,5 +1,42 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Separate next-GO preparation lists — continuation from Fill0654e84
+
+The two existing scope columns now each have a labelled **Next steps** list.
+These are read-only planning notes, not an execution queue, approval checklist,
+authority register, assigned people, outreach request or permission to proceed.
+Role names are suggested review responsibilities, not a statement of delegation.
+No controls, action links, writes, extra API/file read, storage or transport.
+
+Club-only notes use the two existing scoped Operations/provenance snapshots.
+Unread/blocked Operations suggests documenting the exact approved Operations
+revision and independent isolated-runtime evidence, not remediation. Provenance
+always needs an approved age policy and club-wide coverage; one internally
+consistent page is not enough. Separate club UAT GO preparation remains visible
+after successful reads: organisation, exact Operations SHA, existing protected
+deploy ID/origin, consenting testers/roles, two authorised synthetic organisations,
+read-only route/negative-access scope, expiry and stop conditions. Separate pilot
+GO, named club consent and provider-specific API rights are never inherited.
+
+GetACourt-only notes use only the currently valid reviewed local candidate
+snapshot. Actual missing/invalid GO flags select per-check preparation notes with
+the exact existing action lists; no missing flag still means original GO is
+unverified. Common prerequisites remain independent approval/delegation review,
+exact Get SHA / existing protected nonproduction deploy evidence, scope, consent,
+expiry/revocation and stop conditions. No matching existing deploy means stop:
+a new deploy would require separate deployment GO, not invented receipt data.
+OAuth/location state-change GO, worker activation, club/pilot GO and provider
+rights remain distinct. Nothing can run or be approved from either list.
+
+No local report, denied/demo scope, loading, rejection, SHA/file edits, expiry or
+club/session/tab changes remove candidate-specific GO selections and old SHA;
+only generic stop/preparation guidance remains where eligible. Logout clears
+both lists. Late file results cannot rehydrate an old scope or overwrite new
+notes. Neither list consumes the other domain's snapshot or changes its blockers.
+Node suites cover these states plus mixed/no-missing reports and club passes
+without GO. Loopback Chromium asserts distinct lists, no action controls, no
+extra requests/storage and desktop/320px `fill-go-next-*-FIXTURE-ONLY.png` images.
+
 ## Adjacent summary — continuation from Fill12506dd
 
 A separate candidate-wide summary now sits **beside** the selected-club UAT

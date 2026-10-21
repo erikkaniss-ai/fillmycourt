@@ -162,4 +162,7 @@
 .acceptance-summary { margin-top:20px; border-top:1px solid var(--line); overflow-wrap:anywhere; }
 .acceptance-summary-list { padding-left:20px; }
 .acceptance-summary-list li { margin:8px 0; }
+.go-next-panel { border-top:1px solid var(--line); margin-top:20px; padding-top:4px; overflow-wrap:anywhere; }
+.go-next-list { padding-left:22px; }
+.go-next-list li { margin:12px 0; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }
