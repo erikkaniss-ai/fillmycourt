@@ -440,3 +440,126 @@ def test_two_org_browser_uses_real_rls_and_discards_late_scope(two_org_uat, tmp_
     assert calls and all("/providers" not in path for path in calls)
     if late_status == 200:
         assert scoped_snapshot(uat) == before
+
+
+@pytest.mark.parametrize("late_status", [200, 401, 403])
+def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkeypatch, tmp_path, late_status):
+    """Source-only UI rehearsal, with real scoped API/RLS and no hosted traffic."""
+    from playwright.sync_api import expect, sync_playwright
+    from test_fill_operator_e2e import QuietHandler
+
+    uat = two_org_uat
+    before = scoped_snapshot(uat)
+    sha_a, sha_b = "a" * 40, "b" * 40
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", sha_a)
+    monkeypatch.setenv("FMC_OFFICIAL_PROVIDER_READS_ENABLED", "false")
+    directory = Path(os.getenv("FILL_QA_ARTIFACT_DIR") or tmp_path)
+    directory.mkdir(parents=True, exist_ok=True)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    pending, calls = [], []
+    hold = [False]
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            page.add_init_script("if(!sessionStorage.getItem('fill.access')) "
+                f"sessionStorage.setItem('fill.access', {json.dumps(uat.tokens['dual_admin'])});")
+
+            def forward(route):
+                req, url = route.request, urlparse(route.request.url)
+                assert url.netloc == f"127.0.0.1:{server.server_port}", "External traffic forbidden"
+                if not url.path.startswith("/api/"):
+                    return route.continue_()
+                assert req.method == "GET", "Preflight UI cannot send writes"
+                calls.append(url.path)
+                if hold[0] and url.path == root(uat, 0) + "/preflight":
+                    pending.append(route)
+                    return
+                response = uat.client.get(url.path + ("?" + url.query if url.query else ""),
+                    headers={"Authorization": req.headers.get("authorization", "")})
+                route.fulfill(status=response.status_code, content_type="application/json", body=response.text)
+
+            page.route("**/*", forward)
+            page.goto(f"http://127.0.0.1:{server.server_port}/fill/", wait_until="networkidle")
+            page.get_by_role("button", name="Provider evidence", exact=True).click()
+            page.locator("#orgSelect").select_option(uat.orgs[0])
+            expect(page.locator("#operationsSha")).to_have_value("")
+            assert not any(path.endswith("/preflight") for path in calls), "No automatic preflight"
+
+            def check(sha):
+                page.get_by_label("Expected Operations SHA", exact=True).fill(sha)
+                page.get_by_role("button", name="Check Operations preflight", exact=True).click()
+
+            check(sha_a)
+            expect(page.locator("#preflightMessage")).to_contain_text("checks passed — not UAT or pilot approval")
+            expect(page.locator("#preflightReport")).to_contain_text("not independent identity attestation")
+            expect(page.locator("#preflightReport")).to_contain_text("Owner UAT GO")
+            # A receipt review and its request epoch must remain independent.
+            page.locator("#provenanceConnection").select_option(uat.connections[0])
+            page.locator("#provenanceAge").fill("60")
+            page.get_by_role("button", name="Review stored evidence", exact=True).click()
+            expect(page.locator("#provenanceReport")).to_contain_text(uat.booking_ids[0][0])
+            expect(page.locator("#preflightReport")).to_contain_text(sha_a)
+            hold[0] = True
+            page.get_by_role("button", name="Check Operations preflight", exact=True).click()
+            expect(page.locator("#preflightMessage")).to_contain_text("Checking scoped Operations")
+            page.wait_for_timeout(50)
+            assert len(pending) == 1
+            monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", sha_b)
+            page.locator("#orgSelect").select_option(uat.orgs[1])
+            expect(page.locator("#preflightReport")).to_be_empty()
+            expect(page.locator("#operationsSha")).to_have_value("")
+            check(sha_b)
+            expect(page.locator("#preflightMessage")).to_contain_text("checks passed")
+            expect(page.locator("#preflightReport")).to_contain_text(sha_b)
+
+            if late_status == 403:
+                # Synthetic setup only: demonstrate that a revoked A role does
+                # not affect the valid B scope or permit a trusted retry.
+                with uat.db.trusted() as c:
+                    c.execute(text("""update public.organization_members set role='manager'
+                        where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)"""),
+                        {"org": uat.orgs[0], "uid": uat.users["dual_admin"]})
+            monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", sha_a)
+            old = uat.client.get(root(uat, 0) + "/preflight",
+                headers=headers(uat, "dual_admin") if late_status != 401
+                    else {"Authorization": "Bearer invalid-ci-fixture"},
+                params={"expected_operations_sha": sha_a})
+            assert old.status_code == late_status
+            monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", sha_b)
+            with page.expect_response(lambda response: response.url.endswith(
+                    "/preflight?expected_operations_sha=" + sha_a)):
+                pending[0].fulfill(status=old.status_code, content_type="application/json", body=old.text)
+            expect(page.locator("#preflightMessage")).to_contain_text("checks passed")
+            expect(page.locator("#preflightReport")).to_contain_text(sha_b)
+            expect(page.locator("#workspace")).to_be_visible()
+            assert sha_a not in page.content(), "Former revision leaked into hidden DOM"
+            assert all(bid not in page.content() for bid in uat.booking_ids[0])
+
+            # HTTP 200 with a revision mismatch must visibly remain blocked.
+            check("c" * 40)
+            expect(page.locator("#preflightMessage")).to_contain_text("checks blocked")
+            expect(page.locator("#preflightReport")).to_contain_text("Blocked")
+            page.set_viewport_size({"width": 320, "height": 800})
+            assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+            page.screenshot(path=str(directory / f"fill-operations-preflight-{late_status}-FIXTURE-ONLY.png"),
+                            full_page=True)
+            page.get_by_role("button", name="Sign out", exact=True).click()
+            expect(page.locator("#workspace")).to_be_hidden()
+            expect(page.locator("#preflightReport")).to_be_empty()
+            expect(page.locator("#operationsSha")).to_have_value("")
+            assert sha_b not in page.content()
+            page.evaluate("(token) => sessionStorage.setItem('fill.access', token)", uat.tokens["manager"])
+            page.reload(wait_until="networkidle")
+            page.get_by_role("button", name="Provider evidence", exact=True).click()
+            check(sha_b)
+            expect(page.locator("#preflightMessage")).to_contain_text("do not have permission")
+            expect(page.locator("#preflightReport")).to_be_empty()
+            browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+    assert calls and all("/providers" not in path for path in calls)
+    if late_status != 403:
+        assert scoped_snapshot(uat) == before

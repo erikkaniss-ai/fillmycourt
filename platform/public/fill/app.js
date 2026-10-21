@@ -1,7 +1,7 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0, provenanceEpoch: 0, provenancePage: null };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0, provenanceEpoch: 0, provenancePage: null, preflightEpoch: 0 };
   // Synthetic demo is opt-in and restricted to the separate private-preview host
   // and loopback dev. This NEVER activates on public fillmycourt.com.
   // Also accept the CI's non-production manual draft aliases and immutable
@@ -27,6 +27,9 @@
     age: q("#provenanceAge"), review: q("#provenanceReview"),
     provenanceMessage: q("#provenanceMessage"), report: q("#provenanceReport"),
     next: q("#provenanceNext"),
+    preflightForm: q("#preflightForm"), operationsSha: q("#operationsSha"),
+    preflightCheck: q("#preflightCheck"), preflightMessage: q("#preflightMessage"),
+    preflightReport: q("#preflightReport"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -84,7 +87,7 @@
     return typeof sessionStorage !== "undefined" ? sessionStorage.getItem("fill.access") : null;
   }
 
-  async function api(path, expectedCalendarEpoch = null, expectedProvenanceEpoch = null) {
+  async function api(path, expectedCalendarEpoch = null, expectedProvenanceEpoch = null, expectedPreflightEpoch = null) {
     // Demo calls never touch a backend or persist/forward any token.
     if (state.demo) {
       if (!window.FillDemo?.get) throw Error("Synthetic demo dataset unavailable.");
@@ -99,6 +102,8 @@
     if (epoch !== state.authEpoch || token !== state.token) throw Error("STALE_SESSION");
     // An older tenant/date read must never revoke the session after navigation.
     if (readEpoch !== state.readEpoch ||
+        (expectedPreflightEpoch !== null &&
+          (expectedPreflightEpoch !== state.preflightEpoch || state.view !== "provenance")) ||
         (expectedProvenanceEpoch !== null &&
           (expectedProvenanceEpoch !== state.provenanceEpoch || state.view !== "provenance")) ||
         (expectedCalendarEpoch !== null &&
@@ -439,6 +444,7 @@
     if (el.next) { el.next.hidden = true; el.next.disabled = false; }
     if (el.review) el.review.disabled = connections;
     if (connections) {
+      resetPreflight(true);
       if (el.connection) el.connection.innerHTML = '<option value="">Choose connection</option>';
       if (el.age) el.age.value = "";
     }
@@ -547,6 +553,109 @@
   });
   el.connection?.addEventListener("change", () => resetProvenance());
   el.age?.addEventListener("input", () => resetProvenance());
+
+  const operationsSHA = /^[0-9a-f]{40}$/;
+  const preflightChecks = {
+    operations_service: "Operations service",
+    non_production_runtime: "Non-production runtime",
+    runtime_revision_matches: "Runtime revision matches the expected SHA",
+    provider_reads_disabled_in_this_api: "Provider reads disabled in this API only",
+    owner_admin_scope: "Owner or admin scope",
+    authenticated_rls_context: "Authenticated row-level security context",
+    repeatable_read_only: "Repeatable read-only transaction",
+    schema_rls_select: "Reader tables have row-level security and SELECT access",
+    reader_columns_present: "Reader columns present",
+    get_routes_present: "Read-only routes present",
+  };
+  const preflightNotAssessed = {
+    external_runtime_identity: "Independent runtime identity",
+    protected_host: "Protected-host access",
+    two_org_hosted_uat: "Two-organisation hosted UAT",
+    worker_provider_read_state: "Separate worker provider-read state",
+    fixture_provisioning: "Fixture provisioning",
+    owner_uat_go: "Owner UAT GO",
+  };
+  const preflightFlags = ["hosted_uat_ready", "uat_accepted", "pilot_ready",
+    "provider_requests_allowed", "can_display_available_slots", "deploy_allowed"];
+
+  function resetPreflight(clearExpected = false) {
+    state.preflightEpoch++;
+    if (el.preflightReport) el.preflightReport.textContent = "";
+    if (el.preflightMessage) el.preflightMessage.textContent = "";
+    if (el.preflightCheck) el.preflightCheck.disabled = false;
+    if (clearExpected && el.operationsSha) el.operationsSha.value = "";
+  }
+
+  function validPreflight(data, expected) {
+    const sameKeys = (value, keys) => value && typeof value === "object" &&
+      !Array.isArray(value) && Object.keys(value).length === keys.length &&
+      keys.every(key => Object.hasOwn(value, key));
+    const keys = ["mode", "contract_version", "as_of", "operations_runtime_sha",
+      "runtime_identity_source", "status", "checks", "not_assessed", ...preflightFlags];
+    if (!sameKeys(data, keys) || data.mode !== "read_only_operations_preflight" ||
+        data.contract_version !== "provider-provenance-operations-preflight/v1" ||
+        data.runtime_identity_source !== "railway_build_environment_not_independent_attestation" ||
+        !preflightFlags.every(flag => data[flag] === false) ||
+        typeof data.as_of !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(data.as_of) ||
+        !Number.isFinite(Date.parse(data.as_of)) ||
+        !(data.operations_runtime_sha === null ||
+          (typeof data.operations_runtime_sha === "string" && operationsSHA.test(data.operations_runtime_sha))) ||
+        !sameKeys(data.checks, Object.keys(preflightChecks)) ||
+        !Object.values(data.checks).every(value => ["pass", "blocked"].includes(value)) ||
+        !Array.isArray(data.not_assessed) || data.not_assessed.length !== Object.keys(preflightNotAssessed).length ||
+        new Set(data.not_assessed).size !== data.not_assessed.length ||
+        !data.not_assessed.every(key => Object.hasOwn(preflightNotAssessed, key))) return false;
+    const allPass = Object.values(data.checks).every(value => value === "pass");
+    return data.status === (allPass ? "operations_checks_passed" : "blocked") &&
+      (data.checks.runtime_revision_matches === "pass") === (data.operations_runtime_sha === expected);
+  }
+
+  async function loadPreflight() {
+    if (!state.org || state.view !== "provenance") return;
+    resetPreflight();
+    if (state.demo) {
+      el.preflightMessage.textContent = "This synthetic demo has no Operations preflight. No API request was sent.";
+      return;
+    }
+    const expected = el.operationsSha.value;
+    if (!operationsSHA.test(expected)) {
+      el.preflightMessage.textContent = "Enter the exact 40-character lowercase Operations SHA. No revision is inferred.";
+      return;
+    }
+    const epoch = state.preflightEpoch, auth = state.authEpoch, org = state.org;
+    const current = () => epoch === state.preflightEpoch && auth === state.authEpoch &&
+      org === state.org && state.view === "provenance" && el.operationsSha.value === expected;
+    el.preflightCheck.disabled = true;
+    el.preflightMessage.textContent = "Checking scoped Operations prerequisites…";
+    try {
+      const data = await api(`/api/fmc/${encodeURIComponent(org)}/provider-provenance/preflight?expected_operations_sha=${expected}`,
+        null, null, epoch);
+      if (!current()) return;
+      if (!validPreflight(data, expected)) throw Error("INVALID_PREFLIGHT");
+      el.preflightMessage.textContent = data.status === "operations_checks_passed"
+        ? "Operations checks passed — not UAT or pilot approval."
+        : "Operations checks blocked — UAT and pilot remain unapproved.";
+      el.preflightReport.innerHTML = `<p>Snapshot: ${esc(data.as_of)}. Re-check after any scope or runtime change.</p>` +
+        `<p>Expected Operations SHA: <code>${esc(expected)}</code></p>` +
+        `<p>Reported runtime SHA: <code>${esc(data.operations_runtime_sha || "Not reported")}</code></p>` +
+        "<p>Runtime revision is self-reported build metadata, not independent identity attestation.</p>" +
+        '<ul class="preflight-checks">' + Object.entries(preflightChecks).map(([key, label]) =>
+          `<li>${esc(label)}: <strong>${data.checks[key] === "pass" ? "Pass" : "Blocked"}</strong></li>`).join("") + "</ul>" +
+        "<h3>Not assessed</h3><ul>" + Object.values(preflightNotAssessed).map(label => `<li>${esc(label)}</li>`).join("") + "</ul>";
+    } catch (error) {
+      if (current() && state.token && !["STALE_SESSION", "STALE_REQUEST"].includes(error?.message)) {
+        el.preflightMessage.textContent = error?.status === 403
+          ? "You do not have permission to check Operations preflight for this organisation."
+          : "Operations preflight unavailable or incompatible. No readiness is inferred; UAT and pilot remain unapproved.";
+      }
+    } finally { if (current()) el.preflightCheck.disabled = false; }
+  }
+
+  el.preflightForm?.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!el.preflightCheck.disabled) return loadPreflight();
+  });
+  el.operationsSha?.addEventListener("input", () => resetPreflight());
 
   async function load() {
     if (!state.org) return;

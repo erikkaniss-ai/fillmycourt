@@ -74,6 +74,19 @@
           <button id="provenanceNext" class="button secondary" type="button" hidden>Review next page</button>
           <p class="muted">Each page is a separate snapshot, not a complete pilot assessment. A receipt from another organisation is hidden and shown as unavailable, never fetched through privileged access.</p>
         </section>
+        <section class="panel preflight-panel" aria-labelledby="preflightHeading">
+          <p class="eyebrow">OPERATIONS PREREQUISITES · READ ONLY</p>
+          <h2 id="preflightHeading">Operations preflight</h2>
+          <p>Owner or admin only. Check the selected organisation against an explicitly chosen Operations revision, not the operator interface revision.</p>
+          <p class="read-only-notice"><strong>No UAT or pilot approval.</strong> A pass does not authorise hosted UAT, provider requests, available slots, bookings, payments or deployment. This check does not provision fixtures or change runtime settings.</p>
+          <form id="preflightForm" class="provenance-controls">
+            <label>Expected Operations SHA<input id="operationsSha" type="text" minlength="40" maxlength="40" pattern="[0-9a-f]{40}" spellcheck="false" autocapitalize="none" autocomplete="off" required aria-describedby="operationsShaHelp"></label>
+            <button id="preflightCheck" type="submit" class="button secondary">Check Operations preflight</button>
+          </form>
+          <p id="operationsShaHelp" class="muted">Enter the exact 40-character lowercase SHA from the authorised Operations candidate record. Nothing is inferred or remembered; this input is not deployment GO.</p>
+          <p id="preflightMessage" role="status" aria-live="polite"></p>
+          <div id="preflightReport"></div>
+        </section>
       </section>
 
       <section id="todayView">

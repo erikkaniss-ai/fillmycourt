@@ -141,4 +141,8 @@
 .provenance-items li { padding:14px 0; border-bottom:1px solid #d7e1e8; overflow-wrap:anywhere; }
 .provenance-items small { display:block; margin-top:5px; }
 #provenanceReport { overflow-wrap:anywhere; }
+.preflight-panel { margin-top:24px; }
+#preflightReport { overflow-wrap:anywhere; }
+.preflight-checks { padding-left:20px; }
+.preflight-checks li { margin:8px 0; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }

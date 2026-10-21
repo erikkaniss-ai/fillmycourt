@@ -60,6 +60,44 @@ The workspace contains no UI action or request for a price change, message, CRM 
 
 ## Acceptance gates
 
+### Operations preflight viewer — continued from 97bf92a; Draft source only
+
+The existing **Provider evidence** tab now also contains an **Operations preflight**
+panel. The operator explicitly enters the full lowercase 40-character SHA of the
+authorised Operations candidate and presses **Check Operations preflight**. There
+is no default revision, automatic preflight, saved SHA, provisioning or approval
+action. The UI revision is not assumed to identify the separate Operations runtime.
+Hosted use still requires the separate entry GO below; this source change does
+not grant authority to run a live check.
+
+- Only the existing scoped GET is called. Owner/admin authorisation remains in
+  the backend for each organisation; no role, RLS, schema or gateway change.
+- Snapshot time, explicit expected SHA, self-reported runtime SHA (or **Not
+  reported**), all ten fixed checks and all six unassessed gates are displayed.
+  **Operations checks passed** is explicitly not UAT or pilot approval. An HTTP
+  200 with any blocked check stays blocked. Build metadata is not independent
+  runtime identity and an API flag does not attest a separate worker.
+- The v1 shape, fixed check/gate sets, six explicitly false authority flags,
+  revision-match consistency and aggregate status must all validate before any
+  result is rendered. Unknown/incomplete/contradictory responses fail closed.
+  Raw backend messages and unrecognised fields are never rendered. Auth 401
+  clears the session; 403 shows denied access; 404/422/503, network/JSON errors
+  or an incompatible contract remain unavailable, not ready.
+- Changing club, tab or session clears both the result and expected SHA. Editing
+  SHA clears the result. Independent receipt/preflight request epochs reject late
+  200/401/403/errors before they can restore data or revoke a newer scope.
+  Demo mode explicitly contains no preflight and sends no API request.
+- Both CI jobs run the new Node contract suite. The mandatory protected-UAT phase
+  also runs Chromium against the actual local Operations API and PostgreSQL16
+  RLS for two synthetic organisations: pass, blocked revision, manager denial,
+  independent receipt review, late 200/401/403, 320px layout and logout erasure.
+  Its loopback-only fixture guard and unchanged-record checks remain in force.
+
+These are source/fictional-CI checks, **not hosted UAT, provider rights, deployment
+or pilot GO**. Keep the existing unconditional no-deploy job guard and
+`[skip netlify]` markers frozen. No new preview or Operations deployment is part
+of this step.
+
 ### Operations read-only preflight — continued from 00b43d1; NO DEPLOY
 
 The authenticated Operations-only GET
@@ -68,7 +106,8 @@ checks local runtime prerequisites for the later protected UAT. Owner/admin
 membership is required separately in each requested organisation; no cross-tenant
 or role elevation is introduced. The private Operations gateway allowlists exactly
 this GET/query shape, retaining site binding, bearer forwarding, response limits,
-no-store and rejected redirects. No new frontend view or automatic request is added.
+no-store and rejected redirects. The manual viewer above reuses this contract;
+there is no automatic preflight request.
 
 The preflight checks:
 
