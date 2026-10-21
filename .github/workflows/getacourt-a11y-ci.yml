@@ -1,0 +1,32 @@
+name: GetACourt independent accessibility contracts
+
+on:
+  push:
+    branches: [cto/getacourt-a11y-source-20261021]
+    paths:
+      - "getacourt/**"
+      - ".github/workflows/getacourt-a11y-ci.yml"
+  pull_request:
+    branches: [getacourt-staging]
+    paths:
+      - "getacourt/**"
+      - ".github/workflows/getacourt-a11y-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  source-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax and accessible interaction contracts
+        run: |
+          node --check getacourt/assets/app.js
+          node --test getacourt/tests/accessibility-contract.test.mjs
+      - name: Diff whitespace check
+        run: git diff --check
