@@ -496,12 +496,20 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(page.locator("#preflightMessage")).to_contain_text("checks passed — not UAT or pilot approval")
             expect(page.locator("#preflightReport")).to_contain_text("not independent identity attestation")
             expect(page.locator("#preflightReport")).to_contain_text("Owner UAT GO")
+            summary = page.locator("#clubReviewSummary")
+            expect(summary).to_contain_text("SYNTHETIC UAT A")
+            expect(summary).to_contain_text("Operations checks passed — not UAT approval")
             # A receipt review and its request epoch must remain independent.
             page.locator("#provenanceConnection").select_option(uat.connections[0])
             page.locator("#provenanceAge").fill("60")
             page.get_by_role("button", name="Review stored evidence", exact=True).click()
             expect(page.locator("#provenanceReport")).to_contain_text(uat.booking_ids[0][0])
             expect(page.locator("#preflightReport")).to_contain_text(sha_a)
+            expect(summary).to_contain_text("Reviewed bookings on this page: 4; internally consistent: 1; need review: 3")
+            expect(summary).to_contain_text(uat.connections[0])
+            expect(summary).to_contain_text("First page only")
+            expect(summary).to_contain_text("Not a complete club report")
+            assert all(bid not in summary.inner_text() for bid in uat.booking_ids[0])
             hold[0] = True
             page.get_by_role("button", name="Check Operations preflight", exact=True).click()
             expect(page.locator("#preflightMessage")).to_contain_text("Checking scoped Operations")
@@ -511,9 +519,18 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             page.locator("#orgSelect").select_option(uat.orgs[1])
             expect(page.locator("#preflightReport")).to_be_empty()
             expect(page.locator("#operationsSha")).to_have_value("")
+            expect(summary).to_contain_text("SYNTHETIC UAT B")
+            expect(summary).not_to_contain_text("SYNTHETIC UAT A")
+            expect(summary).not_to_contain_text(sha_a)
+            expect(summary).not_to_contain_text(uat.connections[0])
             check(sha_b)
             expect(page.locator("#preflightMessage")).to_contain_text("checks passed")
             expect(page.locator("#preflightReport")).to_contain_text(sha_b)
+            page.locator("#provenanceConnection").select_option(uat.connections[1])
+            page.locator("#provenanceAge").fill("60")
+            page.get_by_role("button", name="Review stored evidence", exact=True).click()
+            expect(summary).to_contain_text(uat.connections[1])
+            expect(summary).to_contain_text("Reviewed bookings on this page: 4")
 
             if late_status == 403:
                 # Synthetic setup only: demonstrate that a revoked A role does
@@ -537,19 +554,28 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(page.locator("#workspace")).to_be_visible()
             assert sha_a not in page.content(), "Former revision leaked into hidden DOM"
             assert all(bid not in page.content() for bid in uat.booking_ids[0])
+            expect(summary).to_contain_text(sha_b)
+            expect(summary).to_contain_text(uat.connections[1])
+            page.locator(".review-summary-panel").screenshot(path=str(directory /
+                f"fill-club-summary-desktop-{late_status}-FIXTURE-ONLY.png"))
 
             # HTTP 200 with a revision mismatch must visibly remain blocked.
             check("c" * 40)
             expect(page.locator("#preflightMessage")).to_contain_text("checks blocked")
             expect(page.locator("#preflightReport")).to_contain_text("Blocked")
+            expect(summary).to_contain_text("Operations checks blocked")
+            expect(summary).to_contain_text("1 of 10 checks blocked; 6 gates not assessed")
             page.set_viewport_size({"width": 320, "height": 800})
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             page.screenshot(path=str(directory / f"fill-operations-preflight-{late_status}-FIXTURE-ONLY.png"),
                             full_page=True)
+            page.locator(".review-summary-panel").screenshot(path=str(directory /
+                f"fill-club-summary-mobile-{late_status}-FIXTURE-ONLY.png"))
             page.get_by_role("button", name="Sign out", exact=True).click()
             expect(page.locator("#workspace")).to_be_hidden()
             expect(page.locator("#preflightReport")).to_be_empty()
             expect(page.locator("#operationsSha")).to_have_value("")
+            expect(summary).to_be_empty()
             assert sha_b not in page.content()
             page.evaluate("(token) => sessionStorage.setItem('fill.access', token)", uat.tokens["manager"])
             page.reload(wait_until="networkidle")
@@ -557,6 +583,9 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             check(sha_b)
             expect(page.locator("#preflightMessage")).to_contain_text("do not have permission")
             expect(page.locator("#preflightReport")).to_be_empty()
+            expect(summary.locator("p").filter(has_text="Access denied for this read")).to_have_count(2)
+            expect(summary).not_to_contain_text("Reviewed bookings on this page")
+            expect(summary).not_to_contain_text("Operations checks passed")
             browser.close()
     finally:
         server.shutdown()

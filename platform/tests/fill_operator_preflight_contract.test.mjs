@@ -6,6 +6,8 @@ import vm from "node:vm";
 const source=readFileSync("platform/public/fill/app.js","utf8");
 const ORG="11111111-1111-4111-8111-111111111111", OTHER="22222222-2222-4222-8222-222222222222";
 const SHA="a".repeat(40), NEXT="b".repeat(40);
+const PC="33333333-3333-4333-8333-333333333333", OTHER_PC="55555555-5555-4555-8555-555555555555";
+const BOOK="44444444-4444-4444-8444-444444444444";
 const checks=["operations_service","non_production_runtime","runtime_revision_matches",
   "provider_reads_disabled_in_this_api","owner_admin_scope","authenticated_rls_context",
   "repeatable_read_only","schema_rls_select","reader_columns_present","get_routes_present"];
@@ -24,6 +26,12 @@ function result(extra={}) {
       "worker_provider_read_state","fixture_provisioning","owner_uat_go"],
     ...Object.fromEntries(flags.map(k=>[k,false])),...extra};
 }
+function receipt(extra={}) {
+  const authority={pilot_ready:false,provider_requests_allowed:false,can_display_available_slots:false};
+  return {mode:"read_only_source_review",as_of:"2026-10-21T04:00:00Z",max_age_seconds:60,
+    status:"needs_review",...authority,items:[{booking_id:BOOK,status:"missing_receipt_reference",...authority}],
+    has_more:false,next_after_booking_id:null,...extra};
+}
 function node(dataset={}) {
   const handlers=new Map();let html="",content="";
   return {dataset,hidden:false,disabled:false,value:"",classList:{toggle(){}},
@@ -32,13 +40,13 @@ function node(dataset={}) {
     addEventListener:(event,fn)=>handlers.set(event,fn),
     run:event=>handlers.get(event)?.({preventDefault(){}})};
 }
-async function harness(demo=false) {
+async function harness(demo=false,clubName="SYNTHETIC A") {
   const el=new Map(),nav=["today","calendar","revenue","provenance"].map(view=>node({view}));
   const get=id=>{if(!el.has(id))el.set(id,node());return el.get(id);};
   const storage=new Map([["fill.access","fixture-session-only"]]),calls=[];
-  const controls={preflight:()=>ok(result())};
+  const controls={preflight:()=>ok(result()),connections:()=>ok({items:[]}),report:()=>ok(receipt())};
   const fixture=path=>path==="/api/me"?{user:{email:"fixture@example.invalid"}}:
-    path==="/api/fmc/organizations"?{items:[{id:ORG,name:"SYNTHETIC A",role:"owner"},
+    path==="/api/fmc/organizations"?{items:[{id:ORG,name:clubName,role:"owner"},
       {id:OTHER,name:"SYNTHETIC B",role:"owner"}]}:
     path.includes("/today?")?{summary:{},courts:[],empty_windows:[]}:
     path.endsWith("/connections")?{items:[]}:null;
@@ -51,6 +59,8 @@ async function harness(demo=false) {
     fetch:async(path,options={})=>{
       calls.push({path,method:options.method||"GET"});
       if(path.includes("/preflight?"))return controls.preflight(path);
+      if(path.endsWith("/connections"))return controls.connections(path);
+      if(path.includes("/provider-provenance/"))return controls.report(path);
       const data=fixture(path);if(data)return ok(data);
       throw Error("Unexpected fixture request");
     }};
@@ -58,7 +68,10 @@ async function harness(demo=false) {
   const open=()=>nav[3].run("click");
   const check=async(sha=SHA)=>{get("#operationsSha").value=sha;
     await get("#operationsSha").run("input");return get("#preflightForm").run("submit");};
-  return {get,nav,storage,calls,controls,open,check};
+  const review=async(connection=PC)=>{get("#provenanceConnection").value=connection;
+    get("#provenanceAge").value="60";return get("#provenanceForm").run("submit");};
+  const summary=()=>get("#clubReviewSummary").innerHTML;
+  return {get,nav,storage,calls,controls,open,check,review,summary};
 }
 
 test("Explicit Operations SHA and click only; no default, remembered revision, or automatic preflight",async()=>{
@@ -184,4 +197,133 @@ test("Preflight controls have labels and permanent no-GO wording; CI runs this s
   assert.match(html,/No UAT or pilot approval/);
   const ci=readFileSync(".github/workflows/platform-ci.yml","utf8");
   assert.equal(ci.match(/node --test platform\/tests\/fill_operator_preflight_contract.test.mjs/g)?.length,2);
+});
+
+test("Club summary is local presentation only, scoped and escaped, with no automatic preflight/report",async()=>{
+  const h=await harness(false,"SYNTHETIC <img src=x onerror=alert(1)>");
+  assert.equal(h.summary(),"");await h.open();
+  assert.equal(h.calls.length,4,"Only existing identity, Today and connection-list reads");
+  assert.match(h.summary(),/No supported connections returned/);
+  assert.match(h.summary(),/Not checked or reviewed/);
+  assert.match(h.summary(),/SYNTHETIC &lt;img/);
+  assert.doesNotMatch(h.summary(),/<img|checks passed|internally consistent/);
+  assert.equal(h.storage.size,1);
+  const html=readFileSync("platform/public/fill/index.html","utf8");
+  assert.match(html,/id="clubReviewSummary" role="status" aria-live="polite" aria-atomic="true"/);
+  assert.match(html,/UAT and pilot not approved/);
+  assert.match(html,/Separate snapshots, not a combined assessment or live state/);
+  const render=source.slice(source.indexOf("  function renderReviewSummary()"),source.indexOf("  function setReviewSummary("));
+  assert.doesNotMatch(render,/\bfetch\(|\bapi\(|Storage|setInterval|setTimeout/);
+});
+
+test("Summary preserves two independent snapshots, explicit parameters and latest-page-only counts",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});
+  await h.open();await h.check();
+  h.controls.report=()=>ok(receipt({has_more:true,next_after_booking_id:BOOK}));
+  await h.review();
+  assert.match(h.summary(),/Operations checks passed — not UAT approval/);
+  assert.match(h.summary(),/2026-10-21T05:00:00Z/);assert.match(h.summary(),/2026-10-21T04:00:00Z/);
+  assert.match(h.summary(),/bookings on this page: 1; internally consistent: 0; need review: 1/);
+  assert.match(h.summary(),/First page only. More pages remain. Not a complete club report/);
+  assert.match(h.summary(),/Maximum receipt age: 60 seconds/);
+  assert.match(h.summary(),new RegExp(PC));assert.doesNotMatch(h.summary(),new RegExp(BOOK));
+  const consistent={...receipt().items[0],status:"consistent_internal_evidence"};
+  h.controls.report=()=>ok(receipt({status:"page_consistent",items:[consistent]}));
+  await h.get("#provenanceNext").run("click");
+  assert.match(h.summary(),/Continuation page only. No more pages after this snapshot/);
+  assert.match(h.summary(),/bookings on this page: 1; internally consistent: 1; need review: 0/);
+  assert.doesNotMatch(h.summary(),/bookings on this page: 2|First page|internally consistent: 0; need review: 1/);
+  await h.check();assert.match(h.summary(),/Page internally consistent — not pilot approval/);
+  assert.ok(h.calls.every(c=>c.method==="GET"));
+});
+
+test("Blocked Operations and empty receipt page do not create a readiness result",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});await h.open();
+  h.controls.preflight=()=>ok(result({operations_runtime_sha:null,status:"blocked",
+    checks:{...result().checks,runtime_revision_matches:"blocked"}}));
+  await h.check();
+  h.controls.report=()=>ok(receipt({status:"no_shadow_bookings",items:[]}));await h.review();
+  assert.match(h.summary(),/Operations checks blocked/);assert.match(h.summary(),/1 of 10 checks blocked; 6 gates not assessed/);
+  assert.match(h.summary(),/Not reported/);assert.match(h.summary(),/No stored shadow bookings on this page/);
+  assert.match(h.summary(),/bookings on this page: 0/);assert.match(h.summary(),/Not a complete club report/);
+  assert.doesNotMatch(h.summary(),/checks passed|Page internally consistent/);
+});
+
+test("Repeated reads drop old summary immediately; concurrent components update independently",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});
+  await h.open();await h.check();await h.review();
+  const preflight=pending(),page=pending();
+  h.controls.preflight=()=>preflight.promise;h.controls.report=()=>page.promise;
+  const checking=h.check(),reviewing=h.review();await settle();
+  assert.doesNotMatch(h.summary(),/Snapshot:|bookings on this page|Reported runtime SHA/);
+  assert.equal((h.summary().match(/Read in progress/g)||[]).length,2);
+  page.resolve(ok(receipt()));await reviewing;
+  assert.match(h.summary(),/bookings on this page/);assert.match(h.summary(),/Read in progress/);
+  preflight.resolve(ok(result()));await checking;
+  assert.match(h.summary(),/Operations checks passed/);assert.match(h.summary(),/bookings on this page/);
+});
+
+test("Current denied, unavailable and malformed reads replace, never reuse, prior component summaries",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});await h.open();
+  for(const bad of [()=>denied(403),()=>denied(404),()=>denied(503),
+    ()=>{throw Error("PRIVATE_INTERNAL_DETAILS");},()=>ok({pilot_ready:true,PRIVATE_INTERNAL_DETAILS:"x"})]) {
+    h.controls.preflight=()=>ok(result());h.controls.report=()=>ok(receipt());await h.check();await h.review();
+    h.controls.preflight=bad;await h.check();
+    assert.doesNotMatch(h.summary(),/Operations checks passed|Reported runtime SHA|PRIVATE_INTERNAL/);
+    assert.match(h.summary(),/bookings on this page/);
+    h.controls.report=bad;await h.review();
+    assert.doesNotMatch(h.summary(),/Snapshot:|bookings on this page|PRIVATE_INTERNAL/);
+    assert.match(h.summary(),/Access denied|Unavailable or incompatible/);
+  }
+});
+
+test("Editing one set of review parameters clears only that summary; leaving the tab clears hidden summary DOM",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});
+  await h.open();await h.check();await h.review();
+  h.get("#operationsSha").value=NEXT;h.get("#operationsSha").run("input");
+  assert.doesNotMatch(h.summary(),/Reported runtime SHA/);assert.match(h.summary(),/bookings on this page/);
+  await h.check();h.get("#provenanceAge").value="61";h.get("#provenanceAge").run("input");
+  assert.doesNotMatch(h.summary(),/bookings on this page/);assert.match(h.summary(),/Operations checks passed/);
+  await h.review();h.get("#provenanceConnection").run("change");
+  assert.doesNotMatch(h.summary(),/bookings on this page/);assert.match(h.summary(),/Operations checks passed/);
+  await h.nav[0].run("click");assert.equal(h.summary(),"");
+  await h.open();assert.doesNotMatch(h.summary(),/Operations checks passed|Snapshot:/);
+  h.get("#orgSelect").value="";h.get("#orgSelect").run("change");await settle();assert.equal(h.summary(),"");
+});
+
+for(const outcome of [200,401,403,"network"]) test(`Late ${outcome} for both reads cannot contaminate the next club summary`,async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});await h.open();
+  const preflight=pending(),page=pending();h.controls.preflight=()=>preflight.promise;h.controls.report=()=>page.promise;
+  const checking=h.check(),reviewing=h.review();await settle();
+  h.controls.connections=()=>ok({items:[{id:OTHER_PC,provider:"playtomic"}]});
+  h.get("#orgSelect").value=OTHER;h.get("#orgSelect").run("change");await settle();
+  assert.match(h.summary(),/SYNTHETIC B/);assert.doesNotMatch(h.summary(),/SYNTHETIC A|Snapshot:/);
+  h.controls.preflight=()=>ok(result({operations_runtime_sha:NEXT}));h.controls.report=()=>ok(receipt());
+  await h.check(NEXT);await h.review(OTHER_PC);
+  if(outcome==="network") {preflight.reject(Error("PRIVATE"));page.reject(Error("PRIVATE"));}
+  else {preflight.resolve(outcome===200?ok(result()):denied(outcome));page.resolve(outcome===200?ok(receipt()):denied(outcome));}
+  await Promise.all([checking,reviewing]);
+  assert.match(h.summary(),/SYNTHETIC B/);assert.match(h.summary(),new RegExp(NEXT));
+  assert.match(h.summary(),new RegExp(OTHER_PC));
+  for(const former of [ORG,PC,SHA,"SYNTHETIC A","PRIVATE"])assert.doesNotMatch(h.summary(),new RegExp(former));
+  assert.equal(h.get("#workspace").hidden,false);assert.equal(h.storage.size,1);
+});
+
+for(const component of ["preflight","provenance"]) test(`Current ${component} 401 erases the complete summary, not just one card`,async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});
+  await h.open();await h.check();await h.review();
+  if(component==="preflight") {h.controls.preflight=()=>denied(401);await h.check();}
+  else {h.controls.report=()=>denied(401);await h.review();}
+  assert.equal(h.summary(),"");assert.equal(h.storage.size,0);assert.equal(h.get("#workspace").hidden,true);
+});
+
+test("Logout cannot be followed by late summary rehydration; demo never fabricates component results",async()=>{
+  const h=await harness();h.controls.connections=()=>ok({items:[{id:PC,provider:"playtomic"}]});await h.open();
+  const preflight=pending(),page=pending();h.controls.preflight=()=>preflight.promise;h.controls.report=()=>page.promise;
+  const checking=h.check(),reviewing=h.review();await settle();h.get("#signOut").run("click");
+  preflight.resolve(ok(result()));page.resolve(ok(receipt()));await Promise.all([checking,reviewing]);
+  assert.equal(h.summary(),"");assert.equal(h.storage.size,0);
+  const demo=await harness(true);await demo.open();await demo.check();
+  assert.equal(demo.calls.length,0);assert.equal((demo.summary().match(/Absent in the synthetic demo/g)||[]).length,2);
+  assert.doesNotMatch(demo.summary(),/Snapshot:|checks passed|bookings on this page/);
 });

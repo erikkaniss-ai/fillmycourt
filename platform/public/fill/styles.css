@@ -145,4 +145,8 @@
 #preflightReport { overflow-wrap:anywhere; }
 .preflight-checks { padding-left:20px; }
 .preflight-checks li { margin:8px 0; }
+.review-summary-panel { margin-bottom:24px; }
+#clubReviewSummary { overflow-wrap:anywhere; }
+.review-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:20px; }
+.review-summary-grid section { min-width:0; border-top:1px solid var(--line); }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }

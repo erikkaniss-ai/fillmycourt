@@ -1,7 +1,7 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0, provenanceEpoch: 0, provenancePage: null, preflightEpoch: 0 };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0, provenanceEpoch: 0, provenancePage: null, preflightEpoch: 0, reviewSummary: {preflight: null, provenance: null} };
   // Synthetic demo is opt-in and restricted to the separate private-preview host
   // and loopback dev. This NEVER activates on public fillmycourt.com.
   // Also accept the CI's non-production manual draft aliases and immutable
@@ -30,6 +30,7 @@
     preflightForm: q("#preflightForm"), operationsSha: q("#operationsSha"),
     preflightCheck: q("#preflightCheck"), preflightMessage: q("#preflightMessage"),
     preflightReport: q("#preflightReport"),
+    reviewSummary: q("#clubReviewSummary"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -436,6 +437,60 @@
   };
   const evidenceUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+  // Presentation of the two existing manual reads only. No request, combined
+  // readiness decision, page accumulation, storage or inferred freshness here.
+  function renderReviewSummary() {
+    if (!el.reviewSummary) return;
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
+      el.reviewSummary.textContent = "";
+      return;
+    }
+    const scoped = key => {
+      const item = state.reviewSummary[key];
+      return item?.org === state.org && item.auth === state.authEpoch ? item : null;
+    };
+    const preflight = scoped("preflight"), provenance = scoped("provenance");
+    const club = state.orgs.find(item => item.id === state.org);
+    const labels = {
+      not_requested: "Not checked or reviewed. Use the explicit controls below.",
+      loading: "Read in progress. No previous result is retained.",
+      loading_connections: "Loading accessible connections; receipts have not been reviewed.",
+      select_parameters: "Not reviewed. Choose a connection and enter a receipt-age threshold below.",
+      no_connections: "No supported connections returned. No readiness is inferred.",
+      denied: "Access denied for this read. No evidence or readiness is inferred.",
+      unavailable: "Unavailable or incompatible. No evidence or readiness is inferred.",
+      demo: "Absent in the synthetic demo. No API request was sent.",
+    };
+    let operations = `<p>${esc(labels[preflight?.status] || labels.not_requested)}</p>`;
+    if (preflight?.status === "passed" || preflight?.status === "blocked") {
+      operations = `<p><strong>${preflight.status === "passed" ? "Operations checks passed — not UAT approval" : "Operations checks blocked"}</strong></p>` +
+        `<p>${preflight.blocked} of 10 checks blocked; 6 gates not assessed.</p>` +
+        `<p>Snapshot: ${esc(preflight.asOf)}</p><p>Expected Operations SHA: <code>${esc(preflight.expected)}</code></p>` +
+        `<p>Reported runtime SHA: <code>${esc(preflight.runtime || "Not reported")}</code></p>` +
+        "<p>Self-reported build metadata, not independent runtime identity.</p>";
+    }
+    let receipts = `<p>${esc(labels[provenance?.status] || labels.not_requested)}</p>`;
+    if (provenance?.status === "reviewed") {
+      const title = provenance.result === "page_consistent" ? "Page internally consistent — not pilot approval"
+        : provenance.result === "no_shadow_bookings" ? "No stored shadow bookings on this page"
+        : "Page needs review or is incomplete";
+      receipts = `<p><strong>${title}</strong></p><p>Snapshot: ${esc(provenance.asOf)}</p>` +
+        `<p>Playtomic connection: <code>${esc(provenance.connection)}</code></p>` +
+        `<p>Maximum receipt age: ${provenance.age} seconds.</p>` +
+        `<p>Reviewed bookings on this page: ${provenance.count}; internally consistent: ${provenance.consistent}; need review: ${provenance.count - provenance.consistent}.</p>` +
+        `<p>${provenance.continuation ? "Continuation page" : "First page"} only. ${provenance.hasMore ? "More pages remain." : "No more pages after this snapshot."} Not a complete club report.</p>`;
+    }
+    el.reviewSummary.innerHTML = `<p>Selected club: <strong>${esc(club?.name || "Selected organisation")}</strong></p>` +
+      `<p class="muted">Organisation ID: ${esc(state.org)}</p>` +
+      '<div class="review-summary-grid"><section><h3>Operations preflight</h3>' + operations +
+      '</section><section><h3>Provenance · latest page only</h3>' + receipts + '</section></div>';
+  }
+
+  function setReviewSummary(key, status, details = {}) {
+    state.reviewSummary[key] = { ...details, status, org: state.org, auth: state.authEpoch };
+    renderReviewSummary();
+  }
+
   function resetProvenance(connections = false) {
     state.provenanceEpoch++;
     state.provenancePage = null;
@@ -448,11 +503,13 @@
       if (el.connection) el.connection.innerHTML = '<option value="">Choose connection</option>';
       if (el.age) el.age.value = "";
     }
+    setReviewSummary("provenance", state.demo ? "demo" : "not_requested");
   }
 
   function evidenceError(error) {
     if (["STALE_SESSION", "STALE_REQUEST"].includes(error?.message)) return;
     if (!state.demo && !state.token) return;
+    setReviewSummary("provenance", error?.status === 403 ? "denied" : "unavailable");
     el.provenanceMessage.textContent = error?.status === 403
       ? "You do not have permission to review evidence for this organisation or connection."
       : "Stored evidence report unavailable. No provider request was made; pilot remains unapproved.";
@@ -465,10 +522,13 @@
     const current = () => epoch === state.provenanceEpoch && org === state.org &&
       auth === state.authEpoch && state.view === "provenance";
     if (state.demo) {
+      setReviewSummary("provenance", "demo");
+      setReviewSummary("preflight", "demo");
       el.provenanceMessage.textContent = "This synthetic demo contains no provider evidence. No API request was sent.";
       return;
     }
     el.provenanceMessage.textContent = "Loading accessible connections…";
+    setReviewSummary("provenance", "loading_connections");
     try {
       const data = await api(`/api/fmc/${encodeURIComponent(org)}/provider-provenance/connections`, null, epoch);
       if (!current()) return;
@@ -478,6 +538,7 @@
       el.connection.innerHTML = '<option value="">Choose connection</option>' +
         data.items.map((item, i) => `<option value="${esc(item.id)}">Playtomic · connection ${i + 1}</option>`).join("");
       el.review.disabled = data.items.length === 0;
+      setReviewSummary("provenance", data.items.length ? "select_parameters" : "no_connections");
       el.provenanceMessage.textContent = data.items.length
         ? "Choose a connection and enter the maximum receipt age to review stored evidence."
         : "No supported connection in this organisation. No evidence or pilot readiness is inferred.";
@@ -521,12 +582,17 @@
     el.review.disabled = true;
     el.next.disabled = true;
     el.provenanceMessage.textContent = "Reviewing stored evidence…";
+    setReviewSummary("provenance", "loading");
     try {
       const data = await api(`/api/fmc/${encodeURIComponent(org)}/provider-provenance/${encodeURIComponent(connection)}?max_age_seconds=${age}&limit=50` +
         (after ? `&after_booking_id=${encodeURIComponent(after)}` : ""), null, epoch);
       if (!current()) return;
       if (!validEvidencePage(data, age)) throw Error("INVALID_REPORT");
       state.provenancePage = data;
+      setReviewSummary("provenance", "reviewed", {result: data.status, asOf: data.as_of,
+        connection, age, count: data.items.length,
+        consistent: data.items.filter(item => item.status === "consistent_internal_evidence").length,
+        continuation: after !== null, hasMore: data.has_more});
       const counts = new Map();
       data.items.forEach(item => counts.set(item.status, (counts.get(item.status) || 0) + 1));
       const heading = data.status === "no_shadow_bookings" ? "No stored shadow bookings on this page."
@@ -584,6 +650,7 @@
     if (el.preflightMessage) el.preflightMessage.textContent = "";
     if (el.preflightCheck) el.preflightCheck.disabled = false;
     if (clearExpected && el.operationsSha) el.operationsSha.value = "";
+    setReviewSummary("preflight", state.demo ? "demo" : "not_requested");
   }
 
   function validPreflight(data, expected) {
@@ -614,6 +681,7 @@
     if (!state.org || state.view !== "provenance") return;
     resetPreflight();
     if (state.demo) {
+      setReviewSummary("preflight", "demo");
       el.preflightMessage.textContent = "This synthetic demo has no Operations preflight. No API request was sent.";
       return;
     }
@@ -627,11 +695,15 @@
       org === state.org && state.view === "provenance" && el.operationsSha.value === expected;
     el.preflightCheck.disabled = true;
     el.preflightMessage.textContent = "Checking scoped Operations prerequisites…";
+    setReviewSummary("preflight", "loading");
     try {
       const data = await api(`/api/fmc/${encodeURIComponent(org)}/provider-provenance/preflight?expected_operations_sha=${expected}`,
         null, null, epoch);
       if (!current()) return;
       if (!validPreflight(data, expected)) throw Error("INVALID_PREFLIGHT");
+      setReviewSummary("preflight", data.status === "operations_checks_passed" ? "passed" : "blocked",
+        {asOf: data.as_of, expected, runtime: data.operations_runtime_sha,
+          blocked: Object.values(data.checks).filter(value => value === "blocked").length});
       el.preflightMessage.textContent = data.status === "operations_checks_passed"
         ? "Operations checks passed — not UAT or pilot approval."
         : "Operations checks blocked — UAT and pilot remain unapproved.";
@@ -644,6 +716,7 @@
         "<h3>Not assessed</h3><ul>" + Object.values(preflightNotAssessed).map(label => `<li>${esc(label)}</li>`).join("") + "</ul>";
     } catch (error) {
       if (current() && state.token && !["STALE_SESSION", "STALE_REQUEST"].includes(error?.message)) {
+        setReviewSummary("preflight", error?.status === 403 ? "denied" : "unavailable");
         el.preflightMessage.textContent = error?.status === 403
           ? "You do not have permission to check Operations preflight for this organisation."
           : "Operations preflight unavailable or incompatible. No readiness is inferred; UAT and pilot remain unapproved.";
@@ -658,8 +731,8 @@
   el.operationsSha?.addEventListener("input", () => resetPreflight());
 
   async function load() {
-    if (!state.org) return;
     resetProvenance(true);
+    if (!state.org) return;
     const org = state.org, date = el.date.value;
     const authEpoch = state.authEpoch, readEpoch = ++state.readEpoch;
     state.calendarEpoch++;
@@ -717,6 +790,7 @@
     clearError();
     if (button.dataset.view !== "calendar") state.calendarEpoch++;
     state.view = button.dataset.view;
+    renderReviewSummary();
     qa(".nav-item").forEach((item) => item.classList.toggle("active", item === button));
     el.pageTitle.textContent = state.view === "today" ? "Today" : state.view === "calendar" ? "Calendar" : state.view === "provenance" ? "Provider evidence" : "Revenue & Capacity";
     el.today.hidden = state.view !== "today";

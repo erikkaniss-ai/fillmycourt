@@ -60,6 +60,40 @@ The workspace contains no UI action or request for a price change, message, CRM 
 
 ## Acceptance gates
 
+### Selected-club review summary — continued from be37341; Draft source only
+
+The existing **Provider evidence** tab now starts with a read-only summary for
+the selected club. It presents the existing manual Operations preflight and
+latest reviewed provenance page side by side. It makes no requests of its own,
+does not persist results, and has no combined readiness score or GO action.
+
+- Each component has its own state: not requested, loading, denied, unavailable,
+  absent in demo, or a validated result. A connection list alone is not a
+  provenance review. Re-reading clears the old component result immediately.
+- Preflight includes its snapshot, explicit expected Operations SHA,
+  self-reported runtime SHA, blocked-check count and six unassessed gates.
+  A pass is still not UAT approval or independently attested runtime identity.
+- Provenance includes its separate snapshot, selected Playtomic connection,
+  explicit maximum receipt age, page-local reviewed/consistent/needs-review
+  counts, first/continuation-page label and whether more pages remain. Counts
+  are never accumulated across pages or connections. Even an empty or
+  internally consistent final page is not a complete club report or pilot GO.
+- Editing one component's parameters clears only its result. Club/tab/session
+  changes clear both summaries, including hidden DOM; current 401 clears the
+  session. Scope/epoch checks reject late 200/401/403/network responses before
+  updating a newer club. Only previously validated fixed fields are summarised;
+  no raw error, private receipt payload or booking ID is added to the summary.
+- The existing Node suite runs in both CI jobs. The mandatory two-org Chromium
+  rehearsal now asserts the summary against the real local Operations API and
+  authenticated RLS, including denied manager reads, late old-club replies,
+  logout erasure and desktop/320px fixture-only screenshots.
+
+These are independent last-read snapshots, **not live state or a combined
+assessment**. Permanent wording retains UAT/pilot not approved and no authority
+for provider requests, slots, bookings, payments or deployment. Backend routes,
+roles, RLS, schema and the no-deploy freeze remain unchanged. Hosted UAT and
+pilot GO still require separate documented authority.
+
 ### Operations preflight viewer — continued from 97bf92a; Draft source only
 
 The existing **Provider evidence** tab now also contains an **Operations preflight**
