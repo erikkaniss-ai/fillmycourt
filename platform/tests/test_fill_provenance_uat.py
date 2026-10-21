@@ -497,8 +497,11 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(page.locator("#preflightReport")).to_contain_text("not independent identity attestation")
             expect(page.locator("#preflightReport")).to_contain_text("Owner UAT GO")
             summary = page.locator("#clubReviewSummary")
+            blockers = page.locator("#clubUatBlockers")
             expect(summary).to_contain_text("SYNTHETIC UAT A")
             expect(summary).to_contain_text("Operations checks passed — not UAT approval")
+            expect(blockers.locator("[data-unassessed]")).to_have_count(7)
+            expect(blockers.locator('[data-blocker^="operations-"]')).to_have_count(0)
             # A receipt review and its request epoch must remain independent.
             page.locator("#provenanceConnection").select_option(uat.connections[0])
             page.locator("#provenanceAge").fill("60")
@@ -510,6 +513,11 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(summary).to_contain_text("First page only")
             expect(summary).to_contain_text("Not a complete club report")
             assert all(bid not in summary.inner_text() for bid in uat.booking_ids[0])
+            for issue in ("missing_receipt_reference", "stale_receipt", "receipt_unavailable"):
+                expect(blockers.locator(f'[data-blocker="provenance-{issue}"]')).to_contain_text(
+                    "1 on the latest page only")
+            expect(blockers.locator("[data-blocker]")).to_have_count(3)
+            assert all(bid not in blockers.inner_text() for bid in uat.booking_ids[0])
             hold[0] = True
             page.get_by_role("button", name="Check Operations preflight", exact=True).click()
             expect(page.locator("#preflightMessage")).to_contain_text("Checking scoped Operations")
@@ -523,6 +531,8 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(summary).not_to_contain_text("SYNTHETIC UAT A")
             expect(summary).not_to_contain_text(sha_a)
             expect(summary).not_to_contain_text(uat.connections[0])
+            expect(blockers.locator('[data-blocker="provenance-stale_receipt"]')).to_have_count(0)
+            expect(blockers.locator('[data-blocker="operations-read"]')).to_have_count(1)
             check(sha_b)
             expect(page.locator("#preflightMessage")).to_contain_text("checks passed")
             expect(page.locator("#preflightReport")).to_contain_text(sha_b)
@@ -531,6 +541,8 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             page.get_by_role("button", name="Review stored evidence", exact=True).click()
             expect(summary).to_contain_text(uat.connections[1])
             expect(summary).to_contain_text("Reviewed bookings on this page: 4")
+            expect(blockers.locator('[data-blocker="provenance-stale_receipt"]')).to_contain_text(
+                "1 on the latest page only")
 
             if late_status == 403:
                 # Synthetic setup only: demonstrate that a revoked A role does
@@ -558,6 +570,8 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(summary).to_contain_text(uat.connections[1])
             page.locator(".review-summary-panel").screenshot(path=str(directory /
                 f"fill-club-summary-desktop-{late_status}-FIXTURE-ONLY.png"))
+            page.locator(".uat-blockers").screenshot(path=str(directory /
+                f"fill-club-uat-blockers-desktop-{late_status}-FIXTURE-ONLY.png"))
 
             # HTTP 200 with a revision mismatch must visibly remain blocked.
             check("c" * 40)
@@ -565,17 +579,24 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(page.locator("#preflightReport")).to_contain_text("Blocked")
             expect(summary).to_contain_text("Operations checks blocked")
             expect(summary).to_contain_text("1 of 10 checks blocked; 6 gates not assessed")
+            expect(blockers.locator('[data-blocker="operations-runtime_revision_matches"]')).to_contain_text(
+                "blocked in the snapshot")
+            expect(blockers.locator("[data-unassessed]")).to_have_count(7)
+            expect(blockers.locator('[data-unassessed="owner_uat_go"]')).to_contain_text("not assessed here")
             page.set_viewport_size({"width": 320, "height": 800})
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             page.screenshot(path=str(directory / f"fill-operations-preflight-{late_status}-FIXTURE-ONLY.png"),
                             full_page=True)
             page.locator(".review-summary-panel").screenshot(path=str(directory /
                 f"fill-club-summary-mobile-{late_status}-FIXTURE-ONLY.png"))
+            page.locator(".uat-blockers").screenshot(path=str(directory /
+                f"fill-club-uat-blockers-mobile-{late_status}-FIXTURE-ONLY.png"))
             page.get_by_role("button", name="Sign out", exact=True).click()
             expect(page.locator("#workspace")).to_be_hidden()
             expect(page.locator("#preflightReport")).to_be_empty()
             expect(page.locator("#operationsSha")).to_have_value("")
             expect(summary).to_be_empty()
+            expect(blockers).to_be_empty()
             assert sha_b not in page.content()
             page.evaluate("(token) => sessionStorage.setItem('fill.access', token)", uat.tokens["manager"])
             page.reload(wait_until="networkidle")
@@ -586,6 +607,11 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
             expect(summary.locator("p").filter(has_text="Access denied for this read")).to_have_count(2)
             expect(summary).not_to_contain_text("Reviewed bookings on this page")
             expect(summary).not_to_contain_text("Operations checks passed")
+            expect(blockers.locator("[data-blocker]")).to_have_count(2)
+            expect(blockers).to_contain_text("Operations: Access denied for this read")
+            expect(blockers).to_contain_text("Provenance: Access denied for this read")
+            expect(blockers.locator('[data-blocker="operations-runtime_revision_matches"]')).to_have_count(0)
+            expect(blockers.locator('[data-blocker="provenance-stale_receipt"]')).to_have_count(0)
             browser.close()
     finally:
         server.shutdown()

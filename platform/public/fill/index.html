@@ -63,6 +63,11 @@
           <p class="read-only-notice"><strong>UAT and pilot not approved.</strong> This summary only reflects manual reads below. It does not refresh data, authorise provider requests or deployment, or confirm available slots, bookings or payments.</p>
           <p class="muted">Separate snapshots, not a combined assessment or live state. Receipt counts describe only the latest reviewed page of one connection, not every connection or booking in this club. Re-check after scope or runtime changes.</p>
           <div id="clubReviewSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+          <section class="uat-blockers" aria-labelledby="clubUatBlockerHeading">
+            <h3 id="clubUatBlockerHeading">UAT blockers and unverified gates</h3>
+            <p class="muted">Read-only, based on the separate summary snapshots above. This is not a complete UAT checklist, a live assessment or permission to start UAT. Unverified conditions stay unresolved; nothing can be approved or repaired here.</p>
+            <div id="clubUatBlockers" role="status" aria-live="polite" aria-atomic="true"></div>
+          </section>
         </section>
         <section class="panel">
           <p class="eyebrow">PILOT PREPARATION · READ ONLY</p>

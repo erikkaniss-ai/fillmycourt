@@ -149,4 +149,7 @@
 #clubReviewSummary { overflow-wrap:anywhere; }
 .review-summary-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:20px; }
 .review-summary-grid section { min-width:0; border-top:1px solid var(--line); }
+.uat-blockers { margin-top:20px; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.uat-blocker-list { padding-left:20px; }
+.uat-blocker-list li { margin:8px 0; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }

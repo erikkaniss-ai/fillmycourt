@@ -60,6 +60,42 @@ The workspace contains no UI action or request for a price change, message, CRM 
 
 ## Acceptance gates
 
+### Selected-club UAT blockers — continued from a9504da; Draft source only
+
+The existing selected-club review summary now contains a read-only **UAT blockers
+and unverified gates** list. It derives only from the two validated manual-read
+snapshots already held in the current club/session. It sends no request, stores
+no approval, and cannot start UAT, repair evidence or change configuration.
+
+- **Observed failures or incomplete reads** lists each failed Operations check
+  by fixed label, each provenance problem with its count on the latest page
+  only, and remaining pages or an empty reviewed page. Not requested, loading,
+  denied, unavailable/incompatible and demo-absent reads stay unresolved; they
+  are not presented as verified underlying service failures. A page still
+  labelled `needs_review` remains unresolved even if its counted issues are zero.
+- **Still unverified — not assessed here** always retains the six preflight
+  non-assessments: independent runtime identity, protected host, two-org hosted
+  UAT, separate worker state, fixture provisioning and owner UAT GO. Club-wide
+  provenance coverage is also explicitly unassessed by this single-page viewer.
+  This is not a complete UAT checklist or an assertion that these gates failed
+  elsewhere. Neither an internally consistent page nor passing Operations
+  clears these gates or supplies UAT/pilot authority.
+- Only fixed known check/status labels and bounded page-local counts are used.
+  No raw backend errors, receipt payloads, foreign identifiers or booking IDs
+  are added. Pagination replaces, never accumulates, previously displayed
+  issues. Parameter edits and re-reading clear that component's prior failures;
+  club/tab/session changes clear the entire list, including hidden DOM.
+  Existing scope/auth/request epochs reject late 200/401/403/network responses.
+- The existing Node suite (both CI jobs) checks all ten Operations failures,
+  nine receipt problem statuses, empty/incomplete/paginated reports, denied and
+  incompatible reads, parameter invalidation and retained unverified gates.
+  The mandatory two-org real-API/RLS Chromium rehearsal also verifies scoped
+  blockers, manager denial, logout erasure and desktop/320px fixture screenshots.
+
+No backend, gateway, role, RLS, schema, provider adapter or CI/deployment guard
+is changed. Source/fixture checks are not hosted UAT or pilot GO. Keep the
+unconditional no-deploy freeze and `[skip netlify]` markers in place.
+
 ### Selected-club review summary — continued from be37341; Draft source only
 
 The existing **Provider evidence** tab now starts with a read-only summary for

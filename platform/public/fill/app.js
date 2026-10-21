@@ -31,6 +31,7 @@
     preflightCheck: q("#preflightCheck"), preflightMessage: q("#preflightMessage"),
     preflightReport: q("#preflightReport"),
     reviewSummary: q("#clubReviewSummary"),
+    uatBlockers: q("#clubUatBlockers"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -443,6 +444,7 @@
     if (!el.reviewSummary) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.reviewSummary.textContent = "";
+      if (el.uatBlockers) el.uatBlockers.textContent = "";
       return;
     }
     const scoped = key => {
@@ -484,6 +486,48 @@
       `<p class="muted">Organisation ID: ${esc(state.org)}</p>` +
       '<div class="review-summary-grid"><section><h3>Operations preflight</h3>' + operations +
       '</section><section><h3>Provenance · latest page only</h3>' + receipts + '</section></div>';
+    renderUatBlockers(preflight, provenance);
+  }
+
+  function renderUatBlockers(preflight, provenance) {
+    if (!el.uatBlockers) return;
+    const observed = [];
+    const incomplete = {
+      not_requested: "Not read with explicit parameters.",
+      loading: "Read in progress; no completed result.",
+      loading_connections: "Connections loading; receipts have not been reviewed.",
+      select_parameters: "Connection and receipt-age threshold not yet reviewed.",
+      no_connections: "No supported connections returned; required evidence is not established.",
+      denied: "Access denied for this read; no evidence established.",
+      unavailable: "Read unavailable or incompatible; no evidence established.",
+      demo: "Absent in the synthetic demo; no real evidence established.",
+    };
+    const add = (id, label) => observed.push(`<li data-blocker="${esc(id)}">${esc(label)}</li>`);
+    if (!["passed", "blocked"].includes(preflight?.status)) {
+      add("operations-read", "Operations: " + (incomplete[preflight?.status] || incomplete.not_requested));
+    } else {
+      preflight.blockedChecks.forEach(key =>
+        add("operations-" + key, "Operations: " + preflightChecks[key] + " — blocked in the snapshot."));
+    }
+    if (provenance?.status !== "reviewed") {
+      add("provenance-read", "Provenance: " + (incomplete[provenance?.status] || incomplete.not_requested));
+    } else {
+      if (provenance.count === 0)
+        add("provenance-empty", "Provenance: empty reviewed page; no receipt evidence established on this page.");
+      provenance.issues.forEach(({status, count}) => add("provenance-" + status,
+        "Provenance: " + evidenceLabels[status] + " — " + count + " on the latest page only."));
+      if (provenance.hasMore)
+        add("provenance-more-pages", "Provenance: more pages remain; latest-page counts are not a complete report.");
+      if (provenance.result === "needs_review" && provenance.count > 0 && !provenance.issues.length && !provenance.hasMore)
+        add("provenance-unresolved", "Provenance: page still reports needs review; no clearance is inferred.");
+    }
+    el.uatBlockers.innerHTML = '<h4>Observed failures or incomplete reads</h4>' +
+      (observed.length ? '<ul class="uat-blocker-list">' + observed.join("") + '</ul>'
+        : '<p>No failing check or receipt issue in these two last-read snapshots. Unverified gates remain open; this is not UAT clearance.</p>') +
+      '<h4>Still unverified — not assessed here</h4><ul class="uat-blocker-list">' +
+      Object.entries(preflightNotAssessed).map(([key, label]) =>
+        `<li data-unassessed="${esc(key)}">${esc(label)} — not assessed here.</li>`).join("") +
+      '<li data-unassessed="club_provenance_coverage">Club-wide provenance coverage — not assessed by a single-page viewer.</li></ul>';
   }
 
   function setReviewSummary(key, status, details = {}) {
@@ -592,6 +636,9 @@
       setReviewSummary("provenance", "reviewed", {result: data.status, asOf: data.as_of,
         connection, age, count: data.items.length,
         consistent: data.items.filter(item => item.status === "consistent_internal_evidence").length,
+        issues: Object.keys(evidenceLabels).filter(status => status !== "consistent_internal_evidence")
+          .map(status => ({status, count: data.items.filter(item => item.status === status).length}))
+          .filter(item => item.count > 0),
         continuation: after !== null, hasMore: data.has_more});
       const counts = new Map();
       data.items.forEach(item => counts.set(item.status, (counts.get(item.status) || 0) + 1));
@@ -703,7 +750,8 @@
       if (!validPreflight(data, expected)) throw Error("INVALID_PREFLIGHT");
       setReviewSummary("preflight", data.status === "operations_checks_passed" ? "passed" : "blocked",
         {asOf: data.as_of, expected, runtime: data.operations_runtime_sha,
-          blocked: Object.values(data.checks).filter(value => value === "blocked").length});
+          blocked: Object.values(data.checks).filter(value => value === "blocked").length,
+          blockedChecks: Object.keys(preflightChecks).filter(key => data.checks[key] === "blocked")});
       el.preflightMessage.textContent = data.status === "operations_checks_passed"
         ? "Operations checks passed — not UAT or pilot approval."
         : "Operations checks blocked — UAT and pilot remain unapproved.";
