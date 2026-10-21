@@ -60,3 +60,28 @@ test("no GetACourt production/staging service worker registration is introduced"
   assert.doesNotMatch(app,/offline-safety\/sw\.js/);
   assert.doesNotMatch(html,/offline-safety\/sw\.js/);
 });
+
+
+test("prefixed sensitive routes and query keys cannot receive a misleading offline document",()=>{
+  const denied=[
+    "./booking-details","./booking-history/club","./bookings-export",
+    "./api-v1/discovery","./auth-callback","./oauth-session","./login-return",
+    "./provider-playtomic","./payment-history","./checkout-step",
+    "./search-history","./availability-feed","./slot-details",
+    "./player-profile-settings","./account-preferences","./token-refresh",
+    "./browse?booking_reference=secret","./browse?access_token_hint=secret",
+    "./browse?customer_id=secret","./browse?auth-code=secret"
+  ];
+  for(const path of denied)
+    assert.equal(worker.shouldHandle(navigation(path),scope),false,path);
+  for(const path of ["./public-info","./clubs-intro","./sports-guide"])
+    assert.equal(worker.shouldHandle(navigation(path),scope),true,path);
+});
+
+test("cache safety is structural: exact static cache write and network-only navigation",()=>{
+  const actualPutCalls=[...source.matchAll(/\b(?:cache|store)\.put\(/g)];
+  assert.equal(actualPutCalls.length,1,"Only one direct cache write operation is permitted");
+  assert.match(source,/await cache\.put\(fallback,response\)/);
+  assert.doesNotMatch(source,/fetch\(event\.request\)[\s\S]*\.put/);
+  assert.match(source,/const notice=await caches\.match\(fallback\)/);
+});
