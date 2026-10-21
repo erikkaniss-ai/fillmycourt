@@ -104,9 +104,11 @@ class V1Store:
             yield c
 
     @contextmanager
-    def user(self, user_id: str):
+    def user(self, user_id: str, *, readonly=False):
         """Run a transaction as Supabase's authenticated role so RLS applies."""
         with self.engine.begin() as c:
+            if readonly:
+                c.execute(text("set transaction isolation level repeatable read, read only"))
             c.execute(text("set local role authenticated"))
             c.execute(text("select set_config('request.jwt.claim.sub', :uid, true)"), {"uid": user_id})
             c.execute(text("select set_config('request.jwt.claim.role', 'authenticated', true)"))

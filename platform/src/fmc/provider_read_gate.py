@@ -39,18 +39,14 @@ def _opaque(value):
     return isinstance(value, str) and _REF.fullmatch(value) is not None
 
 
-def require_official_club_read(connection: dict, stream: str, *,
-                               env=None, now=None) -> dict:
-    """Review a named club scope BEFORE vault lookup or any provider request.
+def review_official_club_read(connection: dict, stream: str, *, now=None) -> dict:
+    """Review the internal grant snapshot only; this NEVER permits network IO.
 
     A DB grant record represents a reviewed internal authorization receipt;
     manual confirmation of the actual external provider agreement remains
     an additional operational prerequisite. Never treat this function alone
     as an independently verified provider entitlement.
     """
-    environment = os.environ if env is None else env
-    if environment.get("FMC_OFFICIAL_PROVIDER_READS_ENABLED") != "true":
-        _deny()
     if not isinstance(connection, dict):
         _deny()
     if connection.get("provider") != "playtomic" or connection.get("status") != "configured":
@@ -100,3 +96,11 @@ def require_official_club_read(connection: dict, stream: str, *,
         "player_oauth_authorized": False,
         "availability_feed_authorized": False,
     }
+
+
+def require_official_club_read(connection: dict, stream: str, *, env=None, now=None) -> dict:
+    """Mandatory outbound gate: deployment opt-in AND a valid scoped receipt."""
+    environment = os.environ if env is None else env
+    if environment.get("FMC_OFFICIAL_PROVIDER_READS_ENABLED") != "true":
+        _deny()
+    return review_official_club_read(connection, stream, now=now)
