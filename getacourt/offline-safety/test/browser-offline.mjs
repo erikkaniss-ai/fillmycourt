@@ -60,6 +60,16 @@ await page.route("**/*",route=>{
 });
 try{
   await page.goto(base,{waitUntil:"domcontentloaded"});
+  // Seed a previous Offline Safety release cache and an unrelated app cache.
+  // Activation may evict its own obsolete namespace, NEVER other app caches.
+  await page.evaluate(async()=>{
+    const old=await caches.open("gac-offline-shell-v0");
+    await old.put("./old-shell.html",new Response("<h1>OLD NOT SAFE</h1>",{
+      headers:{"content-type":"text/html"}}));
+    const other=await caches.open("other-app-static-v1");
+    await other.put("./unrelated-style.css",new Response("body{}",{
+      headers:{"content-type":"text/css"}}));
+  });
   await page.evaluate(async()=>{
     await navigator.serviceWorker.register("./sw.js",{scope:"./"});
     await navigator.serviceWorker.ready;
@@ -73,13 +83,19 @@ try{
   assert.equal(privateReads,1);
   const before=await page.evaluate(async()=>{
     const keys=await caches.keys();
-    const urls=[];
-    for(const name of keys){const cache=await caches.open(name);urls.push(...(await cache.keys()).map(r=>r.url));}
-    return {keys,urls};
+    const byCache={};
+    for(const name of keys){
+      const cache=await caches.open(name);
+      byCache[name]=(await cache.keys()).map(r=>r.url).sort();
+    }
+    return {keys:keys.sort(),byCache};
   });
-  assert.deepEqual(before.keys,["gac-offline-shell-v1"]);
-  assert.equal(before.urls.length,1,"only one public offline shell in cache");
-  assert.ok(before.urls[0].endsWith("/offline.html"),"only offline notice cached");
+  assert.deepEqual(before.keys,["gac-offline-shell-v1","other-app-static-v1"],
+    "Activation evicts only old own cache and preserves other application caches");
+  assert.deepEqual(before.byCache["gac-offline-shell-v1"],[base+"offline.html"],
+    "Only a single public offline notice may be cached by this module");
+  assert.deepEqual(before.byCache["other-app-static-v1"],[base+"unrelated-style.css"],
+    "Unrelated caches must not be deleted during activation");
 
   // Reject network to force an actual SW fallback from the cache.
   simulatedNetworkDown=true;
@@ -91,20 +107,27 @@ try{
   assert.doesNotMatch(fallbackText,/SYNTHETIC_PERSONAL_BOOKING_MUST_NOT_LEAK/);
   assert.doesNotMatch(fallbackText,/ONLINE DYNAMIC ONLY/);
 
-  // Authenticated/API paths MUST fail rather than being replaced with stale HTML.
-  for(const target of ["api/private","book","auth/callback","search?token=fake"]){
-    let failed=false;
-    try{await page.goto(base+target,{waitUntil:"domcontentloaded",timeout:7000});}
-    catch{failed=true;}
-    assert.equal(failed,true,target+" must fail closed under real offline network");
-  }
-  // Existing offline client can still read ONLY the cached notice.
+  // Use a separate page for denial probes; preserve the original controlled
+  // offline document as a trusted observer of CacheStorage after all failures.
+  const deniedPage=await context.newPage();
+  try{
+    for(const target of ["api/private","book","auth/callback","search?token=fake"]){
+      let failed=false;
+      try{await deniedPage.goto(base+target,{waitUntil:"domcontentloaded",timeout:7000});}
+      catch{failed=true;}
+      assert.equal(failed,true,target+" must fail closed under real offline network");
+    }
+  }finally{await deniedPage.close();}
   const after=await page.evaluate(async()=>{
     const keys=await caches.keys();
-    const cache=await caches.open(keys[0]);
-    return (await cache.keys()).map(r=>r.url);
-  }).catch(()=>before.urls);
-  assert.deepEqual(after,before.urls,"API and real online data are never cached");
+    const byCache={};
+    for(const name of keys){
+      const cache=await caches.open(name);
+      byCache[name]=(await cache.keys()).map(r=>r.url).sort();
+    }
+    return {keys:keys.sort(),byCache};
+  });
+  assert.deepEqual(after,before,"Even after failed sensitive navigations cache inventory must be unchanged");
   assert.deepEqual(errors,[],"no JavaScript errors");
   assert.deepEqual(external,[],"no external traffic");
   console.log("PASS offline shell: 1 static fallback cached; 0 dynamic/auth/provider/booking entries");
