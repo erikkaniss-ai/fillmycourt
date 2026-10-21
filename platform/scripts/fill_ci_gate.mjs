@@ -30,6 +30,13 @@ export function classifyFullCi(runs, expectedSha) {
   return {status:"READY", runId:run.id};
 }
 
+// One approved source SHA only. Future source changes do not inherit staging GO.
+export function hasExactOwnerApproval(body, expectedSha) {
+  if (typeof body !== "string" || !SHA_PATTERN.test(expectedSha)) return false;
+  const receipts = [...body.matchAll(/<!-- FILL_STAGING_UAT_APPROVED_SHA:([a-f0-9]{40}) -->/g)];
+  return receipts.length === 1 && receipts[0][1] === expectedSha;
+}
+
 export function matchesCurrentPr(pr, expectedSha) {
   return SHA_PATTERN.test(expectedSha) &&
     pr?.number === PR &&
@@ -62,10 +69,22 @@ async function assertHead(sha) {
   if (!matchesCurrentPr(pr,sha)) throw Error("PR_HEAD_CHANGED_OR_NOT_PRIVATE_DRAFT");
 }
 
+async function assertOwnerStagingGo(sha) {
+  const pr = await githubApi("/repos/" + OWNER_REPO + "/pulls/" + PR);
+  if (!matchesCurrentPr(pr, sha) || !hasExactOwnerApproval(pr.body, sha)) {
+    throw Error("OWNER_STAGING_UAT_GO_MISSING_OR_STALE");
+  }
+}
+
 async function main() {
   const sha = process.env.SOURCE_SHA;
   if (!SHA_PATTERN.test(sha || "")) throw Error("INVALID_SOURCE_SHA");
   await assertHead(sha);
+  if (process.argv.includes("--check-owner-go")) {
+    await assertOwnerStagingGo(sha);
+    console.log("Exact PR8 staging approval verified for reviewed SHA; no authority for future revisions.");
+    return;
+  }
   if (process.argv.includes("--check-head")) {
     console.log("Existing private PR #8 HEAD confirmed; no other repo or branch authorized.");
     return;
