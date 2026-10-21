@@ -11,6 +11,7 @@ const require=createRequire(import.meta.url);
 const toolsPath=process.env.GAC_A11Y_TOOLS;
 if(!toolsPath)throw Error("GAC_A11Y_TOOLS must resolve the CI's pinned browser tool installation");
 const {chromium}=require(join(toolsPath,"playwright-core"));
+const axeSource=await readFile(join(toolsPath,"axe-core","axe.min.js"),"utf8");
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const MIME={".js":"text/javascript; charset=utf-8",".html":"text/html; charset=utf-8",
   ".css":"text/css; charset=utf-8",".webmanifest":"application/manifest+json"};
@@ -132,6 +133,30 @@ try{
     assert.equal(await page.evaluate(()=>window.__scrollOptions.at(-1)?.behavior),"auto",
       width+" reduced-motion programmatic scroll");
     assert.equal(await page.locator("#resultCount").getAttribute("aria-live"),"polite");
+
+    // WCAG 2.2 A/AA axe-core audit on the rendered fixture. Rules cannot prove
+    // full conformance; open real-provider and assistive-tech UAT is separate.
+    await page.addScriptTag({content:axeSource});
+    const evaluateAxe=()=>page.evaluate(async()=>{
+      const report=await window.axe.run(document,{
+        runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21a","wcag21aa","wcag22a","wcag22aa"]}
+      });
+      return report.violations.map(v=>({
+        id:v.id,impact:v.impact,description:v.description,
+        nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary})).slice(0,8)
+      }));
+    });
+    const violations=await evaluateAxe();
+    if(violations.length)console.error("AXE violations "+width+"px "+JSON.stringify(violations));
+    assert.deepEqual(violations,[],width+" axe WCAG 2.2 A/AA audit");
+
+    // Modal focus and dialog labelling must also pass a second audit.
+    await page.locator("#authButton").click();
+    const dialogViolations=await evaluateAxe();
+    if(dialogViolations.length)console.error("AXE dialog violations "+width+"px "+JSON.stringify(dialogViolations));
+    assert.deepEqual(dialogViolations,[],width+" axe modal WCAG 2.2 A/AA audit");
+    await page.keyboard.press("Escape");
+
 
     assert.deepEqual(errors,[],width+" JS page errors");
     // External CDN assets are deliberately denied; they are not part of source UAT.
