@@ -18,7 +18,7 @@ permissions:
 jobs:
   source-contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,5 +28,13 @@ jobs:
         run: |
           node --check getacourt/assets/app.js
           node --test getacourt/tests/accessibility-contract.test.mjs
+      - name: Install pinned browser runner (ephemeral CI only)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/gac-a11y-tools" --no-save --no-package-lock --no-audit --no-fund playwright-core@1.56.1
+          node "$RUNNER_TEMP/gac-a11y-tools/node_modules/playwright-core/cli.js" install --with-deps chromium
+      - name: Offline Chromium UAT (320, 390, 768, 1440)
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-a11y-tools/node_modules
+        run: node getacourt/tests/browser-accessibility.mjs
       - name: Diff whitespace check
         run: git diff --check
