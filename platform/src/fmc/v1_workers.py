@@ -75,11 +75,22 @@ def _connection(db: V1Store, connection_id: str):
 
 
 def _mapping(db: V1Store, c, connection_id: str, external_court: str):
+    # Trusted sync runs outside tenant RLS. A provider_mappings.local_id UUID
+    # alone does not enforce tenant equality: require owner parity across the
+    # connection, mapping row, court and court's venue BEFORE shadow writes.
     return one(c.execute(text("""
-        select pm.local_id::text as court_id,v.id::text as venue_id,v.organization_id::text
+        select pm.local_id::text as court_id,
+               v.id::text as venue_id,
+               v.organization_id::text as organization_id
         from public.provider_mappings pm
+        join public.provider_connections pc
+          on pc.id=pm.provider_connection_id
+         and pc.organization_id=pm.organization_id
+         and pc.status='configured'
         join public.courts ct on ct.id=pm.local_id
-        join public.venues v on v.id=ct.venue_id
+        join public.venues v
+          on v.id=ct.venue_id
+         and v.organization_id=pc.organization_id
         where pm.provider_connection_id=cast(:pc as uuid)
           and pm.entity_type='court' and pm.external_id=:external
     """), {"pc": connection_id, "external": external_court}))
