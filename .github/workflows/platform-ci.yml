@@ -100,7 +100,12 @@ jobs:
       - name: Test
         env:
           FILL_QA_ARTIFACT_DIR: platform/qa-artifacts
-        run: pytest -q platform/tests
+        run: pytest -q platform/tests --ignore=platform/tests/test_fill_provenance_uat.py
+      - name: Protected provenance UAT rehearsal (two synthetic organizations, no hosted access)
+        env:
+          FILL_PROVENANCE_UAT_FIXTURES: ci-local-only
+          FILL_QA_ARTIFACT_DIR: platform/qa-artifacts
+        run: pytest -v -o addopts='' platform/tests/test_fill_provenance_uat.py
       - name: Publish clearly marked synthetic Fill operator browser screenshots
         if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4

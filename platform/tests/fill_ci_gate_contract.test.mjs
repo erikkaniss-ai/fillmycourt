@@ -66,3 +66,17 @@ test("Deployment is gated BEFORE Netlify upload, and original privacy perimeter 
   assert.doesNotMatch(workflow,/^\s*--prod(?:\s|$)/m);
   assert.doesNotMatch(workflow,/^\s*--prod-if-unlocked(?:\s|$)/m);
 });
+
+test("Full Platform CI cannot omit the two-org provenance rehearsal or silently accept a skipped fixture run",()=>{
+  const workflow=readFileSync(".github/workflows/platform-ci.yml","utf8");
+  const step=workflow.match(/- name: Protected provenance UAT rehearsal[^\n]*\n([\s\S]*?)(?=\n      - name:|$)/)?.[0];
+  assert.ok(step,"Distinct protected UAT step is mandatory before full CI can pass");
+  assert.match(step,/FILL_PROVENANCE_UAT_FIXTURES: ci-local-only/);
+  assert.match(step,/run: pytest -v -o addopts='' platform\/tests\/test_fill_provenance_uat\.py/);
+  assert.doesNotMatch(step,/continue-on-error|if:|\|\| true/);
+  assert.match(workflow,/pytest -q platform\/tests --ignore=platform\/tests\/test_fill_provenance_uat\.py/);
+  const suite=readFileSync("platform/tests/test_fill_provenance_uat.py","utf8");
+  assert.match(suite,/fixture_database\(url, os\.getenv\("FILL_PROVENANCE_UAT_FIXTURES"\)\)/);
+  assert.match(suite,/httpx\.MockTransport\(auth_response\)/);
+  assert.match(suite,/test_two_org_browser_uses_real_rls_and_discards_late_scope/);
+});
