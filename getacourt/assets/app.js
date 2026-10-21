@@ -179,7 +179,8 @@
     el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
     renderWatchPrompt();
-    q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
+    const reduceMotion=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    q("#resultsSection").scrollIntoView({behavior:reduceMotion?"auto":"smooth",block:"start"});
   }
 
   function useCurrentLocation(){
