@@ -200,7 +200,7 @@ main { overflow: hidden; }
   width: 100%;
   border: 0;
   border-radius: 18px;
-  background: var(--coral);
+  background: #c93819;
   color: #fff;
   padding: 17px 20px;
   margin-top: 12px;
@@ -211,7 +211,7 @@ main { overflow: hidden; }
   cursor: pointer;
   box-shadow: 0 12px 24px rgba(255, 90, 54, .22);
 }
-.search-cta:hover, .confirm-button:hover { background: var(--coral-dark); }
+.search-cta:hover, .confirm-button:hover { background: #a92e16; }
 .search-note, .payment-note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 12px 3px 0; }
 
 .results-shell {
