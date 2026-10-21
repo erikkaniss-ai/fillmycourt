@@ -1,5 +1,36 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Missing-part preparation notes — continuation from Fill072c1f3
+
+Separate **Missing-part preparation** regions now sit beside each domain's summary
+and missing-part list: club protected read-only UAT (not pilot GO), and one selected
+GetACourt check. Fixed component-specific notes use only the same already validated
+local manifest result and shared scope/expiry guards. No new reads, schema, state,
+storage, controls, transport, evidence collection, work assignment or execution.
+
+Only MISSING and UNKNOWN components produce notes. UNKNOWN remains unresolved for
+independent review, not proven absence or permission to mark PRESENT. PRESENT rows
+produce no steps; an all-declared manifest still needs independent original-evidence
+and authority review, with verified GO none and execution NOT_RUN. Existing blockers
+stay open. Notes refer only to already authorised non-secret records, never fetching,
+provisioning, contacting testers, running hosted/device/OAuth checks or deploying.
+
+Club notes retain organisation/exact Operations binding, two synthetic organisations,
+approved connection freshness and club-wide coverage. Get notes retain exact Get SHA,
+one selected check and its evidence catalog; OAuth/location state-change GO remains
+separate. Neither domain's records, CI or manifest completeness substitute for the
+other's authority. Missing original approvals need independent review; no approver,
+owner, delegation or valid permission is inferred here.
+
+No context/review, file selection/loading/rejection/expiry and scope/auth changes
+remove prior notes alongside summaries/lists; late completions cannot restore them.
+Existing render/read-triggered expiry checks are unchanged, not continuous monitoring.
+Node and loopback Chromium cover exact identities and states, all seven Get types,
+domain isolation, no new network/storage/actions, stale/denied/late-result clearing,
+1440px desktop and 320px screenshots named
+`fill-go-package-preparation-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`.
+This is source/CI rehearsal, not hosted, physical-device or OAuth acceptance.
+
 ## Missing-part lists beside summaries — continuation from Fillb3b83b9
 
 Each package snapshot now has its own labelled read-only **Missing parts** section,
@@ -296,6 +327,8 @@ owner/admin/manager scope, two clubs, logout, no new network calls, no upload or
 storage, 1440px and 320px screenshots labelled FIXTURE-ONLY.
 
 No new deployment is needed/allowed. Preserve PR/commit `[skip netlify]` and the
-existing private-deploy workflow's unconditional false gate. No production,
+existing private-deploy workflow's exact-SHA owner-GO gate before credentials.
+The old d500bb8 approval does not authorise later source; refusal of a stale GO
+is a separate expected deploy-workflow failure, not source CI success. No production,
 hosted access, real Google/provider request, credential/config/schema/Core change,
 booking/hold/payment, outreach, worker activation or Control Tower modification.

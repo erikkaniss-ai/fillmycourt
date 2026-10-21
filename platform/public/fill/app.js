@@ -1106,6 +1106,7 @@
     button: q("#" + domain + "PackageReview"), result: q("#" + domain + "PackageResult"),
     summary: q("#" + domain + "PackageSummary"),
     missing: q("#" + domain + "PackageMissing"),
+    steps: q("#" + domain + "PackageSteps"),
   }]));
   const goPackageCheck = q("#getPackageCheck");
   const goPackageState = {club: {epoch: 0, key: null}, get: {epoch: 0, key: null}};
@@ -1162,14 +1163,53 @@
           : `<p>No components declared ${status} in this manifest.</p>`) + "</section>";
     }).join("");
   }
+  // Fixed preparation guidance only, from the same validated local rows. No work
+  // assignment, evidence collection, execution sequence or inferred authority.
+  function goPackageStepsHTML(rows, domain) {
+    const notes = {
+      "original-authority": "Prepare independent review of the original approval and delegation for this exact scope. No approver or delegation is inferred from the manifest.",
+      "source-binding": domain === "club"
+        ? "Reconcile the selected organisation and exact Operations SHA with already authorised source records; Fill or Get SHA and Get GO cannot substitute for club UAT authority."
+        : "Reconcile the exact Get SHA and this single selected check with already authorised source records; club Operations evidence and club GO cannot substitute for Get authority.",
+      "protected-deploy": "Document the existing protected non-production deployment identity and exact source binding from authorised records. Unknown or mismatched identity means STOP; any new deploy needs separate GO. Do not deploy.",
+      "independent-runtime": "Identify an existing independent runtime identity receipt for manual review; self-reported metadata is insufficient. Do not probe a host.",
+      "isolation": "Inventory existing authorised synthetic isolation and access-denial receipts for this scope. Do not provision accounts, change membership or run UAT.",
+      "tester-consent": "Document existing scoped tester, role and device consent using non-personal references only. Do not contact testers, create accounts or collect credentials.",
+      "scope-allowlist": domain === "club"
+        ? "Describe only the exact club read-only GET routes and synthetic negative-access cases in the local action allowlist for independent review; do not execute them or expand the scope."
+        : "Describe only this selected Get check and its exact local action allowlist for independent review; do not execute it or reuse another check's GO.",
+      "current-evidence": "Inventory existing authorised evidence references and their approved freshness bounds for manual review. Unknown freshness means STOP; do not fetch or refresh evidence.",
+      "unresolved-blockers": "Document the unresolved blocker inventory for this scope. A manifest declaration cannot clear blockers, assign people or certify readiness.",
+      "expiry-revocation-stop": "Identify original scope, validity window, revocation and stop conditions for independent review. Unknown conditions mean STOP; do not extend approval validity.",
+      "two-synthetic-orgs": "Describe two already authorised synthetic organisations, tester-role isolation and access-denial cases. Do not create organisations, change roles or run hosted UAT.",
+      "connection-freshness": "Document the authorised club connection binding and approved freshness policy. Do not infer a provider SLA, refresh a connection or make provider requests.",
+      "club-wide-coverage": "Inventory existing club-wide coverage references; one connection page is not complete club coverage. Do not page, fetch or request provider data.",
+      "source-ci": "Identify existing exact-Get-SHA CI evidence for independent review. CI is not deployed runtime proof, acceptance or GO; do not start checks here.",
+      "perimeter": "Identify existing protected-access perimeter receipts for the exact deployment. Do not visit a protected host, sign in or change access settings.",
+      "ios-device": "Document existing authorised physical iOS device, tester scope and evidence references. Do not run a device check or request device access.",
+      "android-device": "Document existing authorised physical Android device, tester scope and evidence references. Do not run a device check or request device access.",
+      "location-consent": "Identify existing explicit one-shot device location consent, exact scope and expiry for review. Do not request permissions or read location.",
+      "oauth-config": "Identify existing approved non-secret staging OAuth configuration and test-account scope records. Do not change configuration, start login or collect tokens.",
+      "oauth-consent": "Identify existing explicit OAuth test consent and exact allowed actions for independent review. Do not start OAuth or create a session.",
+      "assistive-device": "Document existing authorised assistive-device, tester scope and evidence references. Do not run checks or infer physical-device acceptance.",
+      "separate-state-change-go": "Prepare independent review of a separate original GO for this exact OAuth or location state change. Club GO, CI and manifest completeness cannot replace it; do not execute.",
+    };
+    const unresolved = rows.filter(row => ["MISSING", "UNKNOWN"].includes(row.status));
+    if (!unresolved.length) return "<p>No missing-part preparation notes inferred. Independent original-evidence and authority review is still required. Verified GO: none. Execution NOT_RUN; do not execute.</p>";
+    return "<p>Preparation notes only — not an execution order, assignment or evidence collection. Use already authorised non-secret records only. Verified GO: none. Execution NOT_RUN. Existing blockers stay open.</p>" +
+      '<ul class="go-package-items go-package-preparation">' + unresolved.map(row =>
+        `<li data-package-step="${esc(row.id)}" data-package-step-state="${esc(row.status)}"><strong>${esc(goPackagePartLabels[row.id] || row.id)} — ${esc(row.status)}</strong><p>${row.status === "UNKNOWN" ? "Uncertainty is unresolved; independent review is needed, not a declaration of absence or permission to mark PRESENT. " : "Declared missing in this manifest only; original evidence has not been assessed. "}${esc(notes[row.id] || "Keep unresolved for independent review; no preparation action inferred.")}</p></li>`).join("") + "</ul>";
+  }
   // Presentation only of one domain's existing local result, never a GO decision.
   function renderGoPackageSummary(domain, ctx = packageContext(domain)) {
     const target = goPackageUI[domain].summary;
     if (!target) return;
     const missingTarget = goPackageUI[domain].missing;
+    const stepsTarget = goPackageUI[domain].steps;
     const empty = message => {
       target.textContent = message;
       if (missingTarget) missingTarget.textContent = message ? message + " No missing-part list inferred." : "";
+      if (stepsTarget) stepsTarget.textContent = message ? message + " No missing-part preparation notes inferred." : "";
     };
     empty("");
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) return;
@@ -1209,6 +1249,7 @@
       `<p>Local manifest: ${esc(r.asOf)}; review window ends ${esc(new Date(r.until).toISOString())}. Not live or verified approval validity.</p>` +
       "<p>Verified GO: none. Execution NOT_RUN. Declared presence is not document or authority validation. Existing blockers stay open; club UAT/pilot, Get checks, provider rights and deploy permissions stay separate.</p>";
     if (missingTarget) missingTarget.innerHTML = goPackageMissingHTML(r.rows);
+    if (stepsTarget) stepsTarget.innerHTML = goPackageStepsHTML(r.rows, domain);
   }
   function clearGoPackage(domain, key = null, clearFile = true, status = "not_reviewed") {
     const previous = goPackageState[domain];

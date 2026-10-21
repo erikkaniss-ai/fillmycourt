@@ -268,12 +268,14 @@ Run the preflight separately for A and B only after the existing hosted entry GO
 It does not validate receipts, fetch a provider, grant authority, repair schema,
 write audit/domain data, provision accounts or deploy anything.
 
-**No-deploy freeze for this source-only step:** the existing private-draft job has
-an unconditional false guard before credentials or upload. PR #8 title and commits
+**No-deploy freeze for this source-only step:** the existing private-draft job now
+requires a single exact-SHA owner staging GO before credentials or upload. The old
+d500bb8 approval cannot authorise subsequent source; stale/missing GO must fail
+closed at the first gate, with deployment steps skipped. PR #8 title and commits
 carry `[skip netlify]` to suppress Git-driven publishing as well; this is not
 `[skip ci]`. CI and fictional UAT continue. Green tests must not reactivate the
-job or remove these markers. A later deployment needs separate explicit GO and
-a reviewed source change. No new preview, Operations deployment, production
+job or remove these markers. A later deployment needs separate explicit exact-SHA GO.
+This read-only UI step changes neither gate nor workflow. No new preview, Operations deployment, production
 publication or Netlify/Railway/Supabase configuration change is authorised here.
 
 ### Protected provenance UAT preparation — continued from 72f7c2f
@@ -397,3 +399,20 @@ Only explicit later authority can change these statuses.
 ## Not accepted by this slice
 
 No real club/provider inventory, partner rights, operator identity test, CRM consent, Google OAuth, booking confirmation, provider write, payment, public release, production deployment, or revenue-recovery claim is evidenced here.
+
+### Local GO package missing-part preparation — continued from 072c1f3
+
+Each existing club/Get package summary and missing-part list now has an adjacent
+read-only preparation region. Only current, explicitly inspected MISSING/UNKNOWN
+rows yield fixed component-specific guidance for independent review of already
+authorised non-secret records. UNKNOWN is not verified absence, PRESENT is not
+verified evidence/approval, and no notes form an assigned or ordered work queue.
+No collection, sending, new API/file read, execution or GO control is introduced.
+
+Club organisation/Operations/UAT and Get SHA/single-check evidence and permissions
+stay distinct; pilot, provider, deploy and OAuth/location state-change GO remain
+separate. Existing guard/reset/expiry paths remove old notes with the local result.
+Tests cover all Get catalogs, exact states, isolation, denied/stale/late results,
+no new network/storage, desktop/320px fictional Chromium screenshots. Source/CI
+checks do not change hosted UAT NOT_RUN or pilot GO NOT_GRANTED. Full behaviour
+and limitations: `docs/fill-local-acceptance-viewer.md`.

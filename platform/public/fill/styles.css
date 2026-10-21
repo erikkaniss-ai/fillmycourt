@@ -172,5 +172,8 @@
 .go-package-items { padding-left:22px; overflow-wrap:anywhere; }
 .package-missing-panel { border-top:1px solid var(--line); margin-top:16px; overflow-wrap:anywhere; }
 .package-missing-panel h5, .package-missing-panel h6 { font-size:14px; margin:16px 0 8px; }
+.package-preparation-panel { border-top:1px solid var(--line); margin-top:16px; overflow-wrap:anywhere; }
+.package-preparation-panel h5 { font-size:14px; margin:16px 0 8px; }
+.go-package-preparation li { margin-bottom:16px; }
 .club-package-panel .button, .get-package-panel .button { max-width:100%; white-space:normal; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }
