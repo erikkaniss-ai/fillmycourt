@@ -61,7 +61,8 @@ def fixture_database(url, opt_in):
     ("postgresql+psycopg://fixture@localhost/fmc_test?host=remote.invalid", "ci-local-only"),
     ("sqlite:///fmc_test", "ci-local-only"), ("not-a-url", "ci-local-only"),
     ("", "ci-local-only"),
-])
+], ids=["remote-host", "non-test-db", "missing-opt-in", "query-host-override",
+        "wrong-driver", "malformed-url", "missing-db"])
 def test_uat_fixture_setup_refuses_unsafe_targets(url, opt_in):
     with pytest.raises(ValueError) as rejected:
         fixture_database(url, opt_in)
@@ -215,7 +216,8 @@ def test_two_org_role_matrix_and_no_foreign_evidence(two_org_uat, name):
         assert {item["booking_id"] for item in cursor.json()["items"]} <= set(uat.booking_ids[i])
 
 
-@pytest.mark.parametrize("authorization", [None, "Bearer expired-fixture-token", "Bearer invalid-fixture-token"])
+@pytest.mark.parametrize("authorization", [None, "Bearer expired-fixture-token", "Bearer invalid-fixture-token"],
+                         ids=["anonymous", "expired-session-fixture", "invalid-session-fixture"])
 def test_two_org_auth_denials_do_not_return_private_data(two_org_uat, authorization):
     uat = two_org_uat
     for i in range(2):
@@ -325,7 +327,8 @@ def test_two_org_browser_uses_real_rls_and_discards_late_scope(two_org_uat, tmp_
             assert len(pending) == 1
             page.locator("#orgSelect").select_option(uat.orgs[1])
             expect(page.locator("#provenanceReport")).to_be_empty()
-            expect(page.locator("#provenanceConnection")).not_to_contain_text(uat.connections[0])
+            assert uat.connections[0] not in page.locator(
+                "#provenanceConnection option").evaluate_all("(options) => options.map(o => o.value)")
             assert page.locator("#provenanceAge").input_value() == ""
             review(1)
             expect(page.locator("#provenanceReport")).to_contain_text(uat.booking_ids[1][0])
@@ -343,6 +346,8 @@ def test_two_org_browser_uses_real_rls_and_discards_late_scope(two_org_uat, tmp_
                 pending[0].fulfill(status=old.status_code, content_type="application/json", body=old.text)
             expect(page.locator("#provenanceReport")).to_contain_text(uat.booking_ids[1][0])
             expect(page.locator("#provenanceMessage")).not_to_contain_text("permission")
+            assert uat.connections[0] not in page.locator(
+                "#provenanceConnection option").evaluate_all("(options) => options.map(o => o.value)")
             for bid in uat.booking_ids[0]:
                 assert bid not in page.content()
             page.set_viewport_size({"width": 320, "height": 800})
