@@ -157,6 +157,19 @@ try{
     assert.deepEqual(dialogViolations,[],width+" axe modal WCAG 2.2 A/AA audit");
     await page.keyboard.press("Escape");
 
+    // Audit all remaining dialogs as explicitly isolated UI states; no API
+    // actions or sign-in are triggered by opening an empty native dialog.
+    for(const dialogId of [
+      "venueDialog","bookingDialog","bookingsDialog",
+      "watchesDialog","watchDialog","profileDialog"
+    ]){
+      await page.evaluate(id=>document.getElementById(id).showModal(),dialogId);
+      const v=await evaluateAxe();
+      if(v.length)console.error("AXE "+dialogId+" "+width+"px "+JSON.stringify(v));
+      assert.deepEqual(v,[],width+" axe "+dialogId+" WCAG 2.2 A/AA audit");
+      await page.evaluate(id=>document.getElementById(id).close(),dialogId);
+    }
+
 
     assert.deepEqual(errors,[],width+" JS page errors");
     // External CDN assets are deliberately denied; they are not part of source UAT.
