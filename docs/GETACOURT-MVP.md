@@ -1,5 +1,38 @@
 # GetACourt — Player Platform MVP v1
 
+## Current RC source integration — 21 October 2026 (no deploy)
+
+Continued from Get Draft PR #5 at `031878c3ea284b0718793e94ed1f42f572994d5f`.
+This source checkpoint, not the historical product sketch below, describes the
+integration boundary; it does not attest deployed routes or authorise bookings.
+
+- PR #12 at `ecd748c3ac5a1b0320ce94169ba5af16234dcc23`: accessibility integrated
+  while retaining current PKCE callback/referrer protection, identity/session
+  isolation, date/geolocation request revisions, explicit date-scroll control,
+  SRI assets, install card and per-slot shared-Core native-booking guard.
+  Initial search stays at the keyboard entry point; reduced motion is honoured.
+  Only the current search can clear `aria-busy` after concurrent responses.
+- PR #14 at `b375a271a60148c5ad59b20c3d2b8ecfaf3e477d`: the offline/privacy
+  module and tests are integrated **without registration in the active app**.
+  The manifest, its relative root scope/start URL and existing icons are
+  unchanged. The prototype retains its isolated cache prefix and single
+  public static offline notice; no current auth, booking or availability
+  response is cached. No root worker or cache migration is activated.
+- Platform CI retains full prior PostgreSQL/browser/authorization/provider
+  regression and now also requires the combined current-RC accessibility
+  (32 automated axe audits, four widths) and actual loopback socket-loss /
+  exact-cache offline proof. Dedicated imported workflows remain as additional
+  checks. All auth/provider data in these browser proofs is fictional/local.
+- Source/fixture acceptance is not formal WCAG certification, human screen-reader
+  evaluation, physical iOS/Android testing, live OAuth or protected hosted UAT.
+  Those checks, worker activation and any deployment require separate documented
+  authority and access. No provider credential, real club data, booking, payment,
+  production branch or runtime configuration is changed by this integration.
+- Existing Fill PR #8 remains separately at `cf77b35259c25979ff661bb273765a80e17bbbda`.
+  Control Tower is frozen; it is not a new integration surface. PR #5 title and
+  integration commits retain `[skip netlify]` (not `[skip ci]`); no GitHub PR is
+  merged into `getacourt-staging` or production by this source integration.
+
 ## Product split
 
 - **GetACourt** — consumer discovery and booking experience.

@@ -2,7 +2,7 @@
 // No live provider, auth, booking, payment or production service may be called.
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {readFile} from "node:fs/promises";
+import {readFile,mkdir} from "node:fs/promises";
 import {join,dirname,resolve,extname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createRequire} from "node:module";
@@ -13,6 +13,8 @@ if(!toolsPath)throw Error("GAC_A11Y_TOOLS must resolve the CI's pinned browser t
 const {chromium}=require(join(toolsPath,"playwright-core"));
 const axeSource=await readFile(join(toolsPath,"axe-core","axe.min.js"),"utf8");
 const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
+const artifactDir=process.env.GAC_INTEGRATION_ARTIFACT_DIR;
+if(artifactDir)await mkdir(artifactDir,{recursive:true});
 const MIME={".js":"text/javascript; charset=utf-8",".html":"text/html; charset=utf-8",
   ".css":"text/css; charset=utf-8",".webmanifest":"application/manifest+json",".png":"image/png"};
 
@@ -172,6 +174,7 @@ try{
 
 
     assert.deepEqual(errors,[],width+" JS page errors");
+    if(artifactDir)await page.screenshot({path:join(artifactDir,`get-integrated-${width}-FIXTURE-ONLY.png`),fullPage:true});
     // External CDN assets are deliberately denied; they are not part of source UAT.
     assert.ok(blocked.every(host=>host==="unpkg.com"),width+" unexpected external origins "+blocked);
     completed++;

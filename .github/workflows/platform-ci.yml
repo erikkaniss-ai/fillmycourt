@@ -22,6 +22,41 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  integration-qa:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Integrated accessibility, offline privacy and current-RC boundary contracts
+        run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
+      - name: Install pinned ephemeral integration browser tools (no deploy)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/gac-integration-tools" --no-save --no-package-lock --no-audit --no-fund --ignore-scripts playwright-core@1.56.1 axe-core@4.14.0
+          node "$RUNNER_TEMP/gac-integration-tools/node_modules/playwright-core/cli.js" install --with-deps chromium
+      - name: Integrated current-RC accessibility and 32 automated axe audits
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+          GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
+        run: node getacourt/tests/browser-accessibility.mjs
+      - name: Integrated unregistered module offline network-loss and exact-cache proof
+        env:
+          GAC_OFFLINE_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+        run: node getacourt/offline-safety/test/browser-offline.mjs
+      - name: Fixture-only integrated Get screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: getacourt-integrated-fixture-only
+          path: platform/qa-artifacts/get-integration/
+          if-no-files-found: warn
+          retention-days: 7
   fast-contracts:
     runs-on: ubuntu-latest
     steps:
