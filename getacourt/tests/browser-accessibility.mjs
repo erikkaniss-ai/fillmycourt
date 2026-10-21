@@ -1,0 +1,147 @@
+// Standalone, offline Playwright UAT for the isolated GetACourt accessibility lane.
+// No live provider, auth, booking, payment or production service may be called.
+import assert from "node:assert/strict";
+import {createServer} from "node:http";
+import {readFile} from "node:fs/promises";
+import {join,dirname,resolve,extname} from "node:path";
+import {fileURLToPath} from "node:url";
+import {createRequire} from "node:module";
+
+const require=createRequire(import.meta.url);
+const toolsPath=process.env.GAC_A11Y_TOOLS;
+if(!toolsPath)throw Error("GAC_A11Y_TOOLS must resolve the CI's pinned browser tool installation");
+const {chromium}=require(join(toolsPath,"playwright-core"));
+const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
+const MIME={".js":"text/javascript; charset=utf-8",".html":"text/html; charset=utf-8",
+  ".css":"text/css; charset=utf-8",".webmanifest":"application/manifest+json"};
+
+function sendJson(res,status,obj){
+  res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});
+  res.end(JSON.stringify(obj));
+}
+const forbidden=[];
+const server=createServer(async(req,res)=>{
+  const url=new URL(req.url||"/","http://localhost");
+  if(req.method!=="GET"){forbidden.push(req.method+" "+url.pathname);sendJson(res,405,{error:"READ_ONLY_FIXTURE"});return;}
+  if(url.pathname==="/api/gac/platform-config"){
+    sendJson(res,200,{bookingEnabled:false,authConfigured:false,emailSignInEnabled:false,onlinePayments:false});return;
+  }
+  if(url.pathname==="/api/gac/search"){
+    // Keep aria-busy observable. A zero-inventory fixture is intentional.
+    await new Promise(done=>setTimeout(done,180));
+    sendJson(res,200,{venues:[],search:{radiusUsedKm:10,expanded:false}});return;
+  }
+  if(url.pathname.startsWith("/api/")){
+    forbidden.push(url.pathname);
+    sendJson(res,403,{error:"NO_LIVE_SERVICE"});return;
+  }
+  const requested=url.pathname==="/"?"/index.html":url.pathname;
+  const relative=requested.slice(1);
+  if(!/^(index\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css))$/.test(relative)){
+    sendJson(res,404,{error:"NOT_FOUND"});return;
+  }
+  try{
+    const buf=await readFile(join(root,relative));
+    res.writeHead(200,{"content-type":MIME[extname(relative)],"cache-control":"no-store"});
+    res.end(buf);
+  }catch{
+    sendJson(res,404,{error:"MISSING_FILE"});
+  }
+});
+await new Promise(done=>server.listen(0,"127.0.0.1",done));
+const origin="http://127.0.0.1:"+server.address().port;
+const browser=await chromium.launch({headless:true,args:["--no-sandbox"]});
+const widths=[320,390,768,1440];
+let completed=0;
+try{
+  for(const width of widths){
+    const context=await browser.newContext({viewport:{width,height:850},reducedMotion:"reduce"});
+    const page=await context.newPage();
+    const errors=[];
+    const blocked=[];
+    page.on("pageerror",error=>errors.push(error.message));
+    await page.route("**/*",async route=>{
+      const url=new URL(route.request().url());
+      if(url.origin!==origin){
+        blocked.push(url.host);
+        await route.abort("blockedbyclient");
+        return;
+      }
+      await route.continue();
+    });
+    await page.goto(origin+"/",{waitUntil:"domcontentloaded"});
+    await page.locator("#resultCount").waitFor({state:"visible"});
+    await page.waitForFunction(()=>document.querySelector("#resultsGrid")?.getAttribute("aria-busy")==="false"
+      && document.querySelector("#resultCount")?.textContent?.includes("available slot"));
+    assert.equal(await page.locator("#myBookingsButton").isVisible(),true,width+" bookings visible");
+    assert.equal(await page.locator("#myWatchesButton").isVisible(),true,width+" watches visible");
+    assert.equal(await page.locator("#authButton").isVisible(),true,width+" account visible");
+    const overflow=await page.evaluate(()=>({
+      document:document.documentElement.scrollWidth,viewport:window.innerWidth,
+      nav:document.querySelector(".nav").getBoundingClientRect().width
+    }));
+    assert.ok(overflow.document<=overflow.viewport+1,
+      width+" document horizontal overflow "+JSON.stringify(overflow));
+
+    // Keyboard Tab reaches the visible skip link; skip moves to the search landmark.
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(()=>document.activeElement?.classList.contains("skip-link")),true,
+      width+" skip link keyboard focus");
+    assert.notEqual(await page.locator(".skip-link").evaluate(el=>getComputedStyle(el).outlineStyle),"none",
+      width+" focus outline");
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(()=>location.hash==="#discover");
+
+    const sport=page.locator('[data-sport="squash"]');
+    await sport.focus();
+    await page.keyboard.press("Space");
+    assert.equal(await sport.getAttribute("aria-pressed"),"true",width+" squash selected");
+    assert.equal(await page.locator(".sport-chip[aria-pressed=true]").count(),1,
+      width+" one sport selected");
+    const filter=page.locator('[data-filter="indoor"]');
+    await filter.focus();
+    await page.keyboard.press("Space");
+    assert.equal(await filter.getAttribute("aria-pressed"),"true",width+" indoor selected");
+    assert.equal(await page.locator(".filter-pill[aria-pressed=true]").count(),1,
+      width+" one filter selected");
+
+    // A real keyboard action opens a native dialog; disabled email sign-in stays disabled.
+    await page.locator("#authButton").focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await page.locator("#authDialog").evaluate(el=>el.open),true,
+      width+" auth dialog opened");
+    assert.equal(await page.locator("#authEmail").isDisabled(),true,
+      width+" delivery must remain off in staging");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.locator("#authDialog").evaluate(el=>el.open),false,
+      width+" Escape dismisses modal");
+
+    // Observe the busy transition and its announcement until the fixture finishes.
+    await page.evaluate(()=>{
+      window.__scrollOptions=[];
+      Element.prototype.scrollIntoView=function(options){window.__scrollOptions.push(options);};
+    });
+    await page.locator(".search-cta").click();
+    await page.waitForFunction(()=>document.querySelector("#resultsGrid")?.getAttribute("aria-busy")==="true");
+    assert.match(await page.locator("#resultCount").innerText(),/Searching live inventory/);
+    await page.waitForFunction(()=>document.querySelector("#resultsGrid")?.getAttribute("aria-busy")==="false"
+      && document.querySelector("#resultCount")?.textContent?.includes("0 available slots"));
+    assert.equal(await page.locator(".slot").count(),0,width+" no invented live slots");
+    assert.equal(await page.evaluate(()=>window.__scrollOptions.at(-1)?.behavior),"auto",
+      width+" reduced-motion programmatic scroll");
+    assert.equal(await page.locator("#resultCount").getAttribute("aria-live"),"polite");
+
+    assert.deepEqual(errors,[],width+" JS page errors");
+    // External CDN assets are deliberately denied; they are not part of source UAT.
+    assert.ok(blocked.every(host=>host==="unpkg.com"),width+" unexpected external origins "+blocked);
+    completed++;
+    console.log("PASS local Chromium GetACourt accessibility width="+width+
+      " skip/focus/pressed/mobile-nav/auth-dialog/busy/reduced-motion/no-slots");
+    await context.close();
+  }
+  assert.deepEqual(forbidden,[],"No booking, provider, payment, sign-in, or other API requests");
+  console.log("PASS "+completed+"/4 Chromium viewports; zero external service requests");
+}finally{
+  await browser.close();
+  await new Promise(done=>server.close(done));
+}
