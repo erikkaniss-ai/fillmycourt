@@ -172,14 +172,14 @@
   </footer>
 
 
-  <dialog class="booking-dialog venue-dialog" id="venueDialog">
+  <dialog class="booking-dialog venue-dialog" id="venueDialog" aria-label="Venue details">
     <div class="dialog-shell venue-shell">
       <button class="dialog-close" id="closeVenueButton" type="button" aria-label="Close">×</button>
       <div id="venueDialogContent"></div>
     </div>
   </dialog>
 
-  <dialog class="booking-dialog" id="bookingDialog">
+  <dialog class="booking-dialog" id="bookingDialog" aria-labelledby="bookingHeading">
     <form method="dialog" class="dialog-shell" id="bookingForm">
       <button class="dialog-close" value="cancel" aria-label="Close">×</button>
       <div class="dialog-progress"><span id="dialogProgress"></span></div>
@@ -229,31 +229,31 @@
     </form>
   </dialog>
 
-  <dialog class="bookings-dialog" id="bookingsDialog">
+  <dialog class="bookings-dialog" id="bookingsDialog" aria-labelledby="bookingsHeading">
     <div class="dialog-shell bookings-shell">
       <button class="dialog-close" id="closeBookingsButton" aria-label="Close">×</button>
       <p class="eyebrow">YOUR PLAY</p>
-      <h2>My bookings</h2>
+      <h2 id="bookingsHeading">My bookings</h2>
       <div id="bookingsList" class="bookings-list"></div>
     </div>
   </dialog>
 
-  <dialog class="bookings-dialog watches-dialog" id="watchesDialog">
+  <dialog class="bookings-dialog watches-dialog" id="watchesDialog" aria-labelledby="watchesHeading">
     <div class="dialog-shell watches-shell">
       <button class="dialog-close" id="closeWatchesButton" aria-label="Close">×</button>
       <p class="eyebrow">PLAY ROUTINES</p>
-      <h2>My watches</h2>
+      <h2 id="watchesHeading">My watches</h2>
       <p class="payment-note">GetACourt watches the next useful dates for your routine. Booking remains manual in this staging build.</p>
       <div id="watchAlerts" class="watch-alerts"></div>
       <div id="watchesList" class="bookings-list"></div>
     </div>
   </dialog>
 
-  <dialog class="booking-dialog watch-dialog" id="watchDialog">
+  <dialog class="booking-dialog watch-dialog" id="watchDialog" aria-labelledby="watchHeading">
     <form class="dialog-shell" id="watchForm">
       <button class="dialog-close" id="closeWatchButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">KEEP LOOKING</p>
-      <h2>Save this play routine</h2>
+      <h2 id="watchHeading">Save this play routine</h2>
       <div id="watchSummary" class="booking-summary"></div>
       <div class="checkout-grid watch-grid">
         <label class="field"><span>Duration</span>
@@ -277,22 +277,22 @@
     </form>
   </dialog>
 
-  <dialog class="booking-dialog auth-dialog" id="authDialog">
+  <dialog class="booking-dialog auth-dialog" id="authDialog" aria-labelledby="authHeading">
     <form class="dialog-shell" id="authForm">
       <button class="dialog-close" id="closeAuthButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER ACCOUNT</p>
-      <h2>Sign in to GetACourt</h2>
+      <h2 id="authHeading">Sign in to GetACourt</h2>
       <p class="payment-note" id="authStatus">Email sign-in is available only when staging mail delivery is explicitly enabled.</p>
       <label class="field"><span>Email</span><input id="authEmail" type="email" autocomplete="email" required placeholder="you@example.com" /></label>
       <button class="confirm-button" id="authSubmitButton" type="submit">Continue with email</button>
     </form>
   </dialog>
 
-  <dialog class="booking-dialog profile-dialog" id="profileDialog">
+  <dialog class="booking-dialog profile-dialog" id="profileDialog" aria-labelledby="profileHeading">
     <form class="dialog-shell" id="profileForm">
       <button class="dialog-close" id="closeProfileButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER PROFILE</p>
-      <h2>Your GetACourt profile</h2>
+      <h2 id="profileHeading">Your GetACourt profile</h2>
       <p class="payment-note" id="profileStatus">Set your home area and preferred racket sports. This profile is separate from any club CRM record.</p>
       <div class="checkout-grid">
         <label class="field"><span>Name</span><input id="profileName" autocomplete="name" required maxlength="120" placeholder="Your name" /></label>
