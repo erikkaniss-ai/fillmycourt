@@ -113,13 +113,20 @@ def _sync_playtomic(db: V1Store, job: dict, *, sessions=None):
     payload = job["payload"] or {}
     pc_id = payload.get("provider_connection_id")
     stream = payload.get("stream")
-    connection = _connection(db, pc_id)
-    if connection["provider"] != "playtomic":
-        raise DomainError("PROVIDER", "Unsupported provider.", 422)
-    # A configured club connection or env credentials are NOT sufficient authority.
-    # This gate denies unless a separately approved named-club booking scope and
-    # explicit owner-enabled deployment flag exist, BEFORE credential access.
-    require_official_club_read(connection, stream)
+    try:
+        connection = _connection(db, pc_id)
+        if connection["provider"] != "playtomic":
+            raise DomainError("PROVIDER", "Unsupported provider.", 422)
+        # A configured club connection or env credentials are NOT sufficient authority.
+        # This gate denies unless a separately approved named-club booking scope and
+        # explicit owner-enabled deployment flag exist, BEFORE credential access.
+        require_official_club_read(connection, stream)
+    except DomainError:
+        # Recheck every lease, including connection disable and grant expiry.
+        # A later approval must acquire a fresh token under its own rate slot.
+        if sessions is not None:
+            sessions.discard(connection_id=pc_id)
+        raise
     # A single connection-level reservation is shared across all streams and
     # worker processes. This occurs BEFORE any provider credentials are read.
     now = datetime.now(timezone.utc)
@@ -143,14 +150,21 @@ def _sync_playtomic(db: V1Store, job: dict, *, sessions=None):
     api = sessions.get(organization_id=connection["organization_id"],
                        connection_id=pc_id, client_id=client_id,
                        secret=secret, tenant=tenant)
-    if not api.token_usable(min_remaining_seconds=120):
-        # The token is held only by the current worker process, not in a
-        # job, browser or database. Fresh auth uses this request reservation;
-        # the data page is a separately leased job at least 60s later.
-        api.get_token(force_refresh=True)
-        raise Deferred("PROVIDER_AUTH_PACING", 60)
-    # Exactly ONE provider data page is requested per leased worker job.
-    response = api.page(stream, start, end, cursor=page_state["cursor"], page=page_state["page"])
+    try:
+        if not api.token_usable(min_remaining_seconds=120):
+            # The token is held only by the current worker process, not in a
+            # job, browser or database. Fresh auth uses this request reservation;
+            # the data page is a separately leased job at least 60s later.
+            api.get_token(force_refresh=True)
+            raise Deferred("PROVIDER_AUTH_PACING", 60)
+        # Exactly ONE provider data page is requested per leased worker job.
+        response = api.page(stream, start, end, cursor=page_state["cursor"], page=page_state["page"])
+    except DomainError as exc:
+        if exc.code in ("PROVIDER_AUTH", "PROVIDER_AUTH_TTL", "PROVIDER_SCOPE"):
+            sessions.discard(connection_id=pc_id)
+        # In particular, never retry OAuth immediately after a 401/403.
+        # 202/429/pacing deferrals retain the session and durable page state.
+        raise
     try:
         continuation = next_page_state(page_state, response)
     except PageBudgetError as exc:

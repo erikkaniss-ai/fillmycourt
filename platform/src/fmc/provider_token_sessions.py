@@ -51,6 +51,20 @@ class ProviderTokenSessions:
             self._sessions[key]=(fingerprint,instance)
             return instance
 
+    def discard(self, *, connection_id):
+        """Forget this connection locally; never claim provider-side revocation.
+
+        Clear the client too, so retained references cannot reuse its token.
+        Connection UUIDs are global; discard any old organization binding for
+        that connection while preserving all other cached club connections.
+        """
+        with self._lock:
+            for key in list(self._sessions):
+                if key[1] == connection_id:
+                    _, client = self._sessions.pop(key)
+                    client.token = None
+                    client.expires = 0
+
     def size(self):
         with self._lock:
             return len(self._sessions)
