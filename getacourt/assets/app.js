@@ -257,11 +257,12 @@
     renderBookingIdentity();
   }
 
-  function loading(){el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
+  function loading(){el.grid.setAttribute("aria-busy","true");el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
   async function search(options={}){
     const revision=++state.searchRevision;
     const p={sport:state.sport,location:el.location.value.trim()||"Cascais",date:el.date.value,from:el.from.value,to:el.to.value};
     if(!validSearchDate(p.date,el.date.min)){
+      el.grid.setAttribute("aria-busy","false");
       if(el.dateStatus)el.dateStatus.textContent="Choose a valid date (today or later).";
       toast("Choose a valid future date.");
       return;
@@ -296,11 +297,16 @@
       state.hasSearched=true;
       if(el.radiusNote) el.radiusNote.textContent="";
       toast(err.message||"Live availability is temporarily unavailable.");
+    }finally {
+      if(revision===state.searchRevision)el.grid.setAttribute("aria-busy","false");
     }
     el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
     renderWatchPrompt();
-    if(options.scroll!==false)q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
+    const reduceMotion=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if(options.scroll!==false){
+      if(!options.initial) q("#resultsSection").scrollIntoView({behavior:reduceMotion?"auto":"smooth",block:"start"});
+    }
   }
 
   function useCurrentLocation(){
@@ -826,8 +832,15 @@
     }catch(err){el.authStatus.textContent=err.message||"Could not send sign-in link.";}
   }
 
-  qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{qa(".sport-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.sport=b.dataset.sport;}));
-  qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{qa(".filter-pill").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.filter=b.dataset.filter;render();}));
+  function syncToggleState(selector,chosen){
+    qa(selector).forEach(button=>{
+      const selected=button===chosen;
+      button.classList.toggle("active",selected);
+      button.setAttribute("aria-pressed",String(selected));
+    });
+  }
+  qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{syncToggleState(".sport-chip",b);state.sport=b.dataset.sport;}));
+  qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{syncToggleState(".filter-pill",b);state.filter=b.dataset.filter;render();}));
   el.form.addEventListener("submit",e=>{e.preventDefault();search();});
   // Native date inputs commit a calendar choice via change; re-query without
   // requiring a second click on Find, and do not steal scroll position.
@@ -907,6 +920,6 @@
   loadPlatform().then(async()=>{
     await completeGoogleSignIn();
     if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}
-    search();
+    search({initial:true});
   });
 })();

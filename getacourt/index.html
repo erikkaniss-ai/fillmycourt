@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body data-mode="preview">
+  <a class="skip-link" href="#discover">Skip to court search</a>
   <div class="preview-strip" id="previewStrip">Staging environment · bookings disabled</div>
 
   <header class="site-header">
@@ -32,7 +33,7 @@
   </header>
 
   <main>
-    <section class="hero" id="discover">
+    <section class="hero" id="discover" tabindex="-1">
       <div class="hero-copy">
         <p class="eyebrow">RACKET SPORTS · REAL-TIME AVAILABILITY</p>
         <h1>Find a court.<br><em>Play now.</em></h1>
@@ -50,11 +51,11 @@
 
       <form class="search-panel" id="searchForm">
         <div class="sport-picker" role="group" aria-label="Sport">
-          <button type="button" class="sport-chip active" data-sport="padel">Padel</button>
-          <button type="button" class="sport-chip" data-sport="tennis">Tennis</button>
-          <button type="button" class="sport-chip" data-sport="squash">Squash</button>
-          <button type="button" class="sport-chip" data-sport="badminton">Badminton</button>
-          <button type="button" class="sport-chip" data-sport="pickleball">Pickleball</button>
+          <button type="button" class="sport-chip active" data-sport="padel" aria-pressed="true">Padel</button>
+          <button type="button" class="sport-chip" data-sport="tennis" aria-pressed="false">Tennis</button>
+          <button type="button" class="sport-chip" data-sport="squash" aria-pressed="false">Squash</button>
+          <button type="button" class="sport-chip" data-sport="badminton" aria-pressed="false">Badminton</button>
+          <button type="button" class="sport-chip" data-sport="pickleball" aria-pressed="false">Pickleball</button>
         </div>
 
         <div class="search-grid">
@@ -62,7 +63,7 @@
             <span>Where</span>
             <div class="location-entry">
               <input id="locationInput" name="location" value="Cascais" autocomplete="address-level2" placeholder="City, area or club" />
-              <button id="nearMeButton" class="near-me-button" type="button" aria-label="Use my current location">◎ Near me</button>
+              <button id="nearMeButton" class="near-me-button" type="button" aria-label="Near me — use my current location">◎ Near me</button>
             </div>
             <small id="radiusNote" class="radius-note"></small>
           </label>
@@ -88,23 +89,23 @@
       </form>
     </section>
 
-    <section class="results-shell" id="resultsSection" aria-live="polite">
+    <section class="results-shell" id="resultsSection" aria-labelledby="resultsTitle">
       <div class="results-head">
         <div>
           <p class="eyebrow">AVAILABLE NOW</p>
           <h2 id="resultsTitle">Courts around Cascais</h2>
         </div>
         <div class="results-meta">
-          <span id="resultCount">Search to see live availability</span>
+          <span id="resultCount" role="status" aria-live="polite" aria-atomic="true">Search to see live availability</span>
           <button class="ghost-button" id="refreshButton" type="button">Refresh</button>
         </div>
       </div>
       <div class="discovery-controls">
         <div class="filter-row">
-          <button type="button" class="filter-pill active" data-filter="all">All courts</button>
-          <button type="button" class="filter-pill" data-filter="indoor">Indoor</button>
-          <button type="button" class="filter-pill" data-filter="under35">Under €35</button>
-          <button type="button" class="filter-pill" data-filter="90min">90 min</button>
+          <button type="button" class="filter-pill active" data-filter="all" aria-pressed="true">All courts</button>
+          <button type="button" class="filter-pill" data-filter="indoor" aria-pressed="false">Indoor</button>
+          <button type="button" class="filter-pill" data-filter="under35" aria-pressed="false">Under €35</button>
+          <button type="button" class="filter-pill" data-filter="90min" aria-pressed="false">90 min</button>
         </div>
         <div class="view-sort-controls">
           <label class="sort-control">Sort
@@ -130,7 +131,7 @@
         </div>
         <button id="watchPromptButton" class="ghost-button watch-cta" type="button">Keep looking</button>
       </div>
-      <div id="resultsGrid" class="results-grid">
+      <div id="resultsGrid" class="results-grid" aria-busy="false">
         <div class="empty-state">
           <div class="empty-orbit"></div>
           <h3>Pick a time. We’ll find the court.</h3>
@@ -179,14 +180,14 @@
   </footer>
 
 
-  <dialog class="booking-dialog venue-dialog" id="venueDialog">
+  <dialog class="booking-dialog venue-dialog" id="venueDialog" aria-label="Venue details">
     <div class="dialog-shell venue-shell">
       <button class="dialog-close" id="closeVenueButton" type="button" aria-label="Close">×</button>
       <div id="venueDialogContent"></div>
     </div>
   </dialog>
 
-  <dialog class="booking-dialog" id="bookingDialog">
+  <dialog class="booking-dialog" id="bookingDialog" aria-labelledby="bookingHeading">
     <form method="dialog" class="dialog-shell" id="bookingForm">
       <button class="dialog-close" value="cancel" aria-label="Close">×</button>
       <div class="dialog-progress"><span id="dialogProgress"></span></div>
@@ -236,31 +237,31 @@
     </form>
   </dialog>
 
-  <dialog class="bookings-dialog" id="bookingsDialog">
+  <dialog class="bookings-dialog" id="bookingsDialog" aria-labelledby="bookingsHeading">
     <div class="dialog-shell bookings-shell">
       <button class="dialog-close" id="closeBookingsButton" aria-label="Close">×</button>
       <p class="eyebrow">YOUR PLAY</p>
-      <h2>My bookings</h2>
+      <h2 id="bookingsHeading">My bookings</h2>
       <div id="bookingsList" class="bookings-list"></div>
     </div>
   </dialog>
 
-  <dialog class="bookings-dialog watches-dialog" id="watchesDialog">
+  <dialog class="bookings-dialog watches-dialog" id="watchesDialog" aria-labelledby="watchesHeading">
     <div class="dialog-shell watches-shell">
       <button class="dialog-close" id="closeWatchesButton" aria-label="Close">×</button>
       <p class="eyebrow">PLAY ROUTINES</p>
-      <h2>My watches</h2>
+      <h2 id="watchesHeading">My watches</h2>
       <p class="payment-note">GetACourt watches the next useful dates for your routine. Booking remains manual in this staging build.</p>
       <div id="watchAlerts" class="watch-alerts"></div>
       <div id="watchesList" class="bookings-list"></div>
     </div>
   </dialog>
 
-  <dialog class="booking-dialog watch-dialog" id="watchDialog">
+  <dialog class="booking-dialog watch-dialog" id="watchDialog" aria-labelledby="watchHeading">
     <form class="dialog-shell" id="watchForm">
       <button class="dialog-close" id="closeWatchButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">KEEP LOOKING</p>
-      <h2>Save this play routine</h2>
+      <h2 id="watchHeading">Save this play routine</h2>
       <div id="watchSummary" class="booking-summary"></div>
       <div class="checkout-grid watch-grid">
         <label class="field"><span>Duration</span>
@@ -284,11 +285,11 @@
     </form>
   </dialog>
 
-  <dialog class="booking-dialog auth-dialog" id="authDialog">
+  <dialog class="booking-dialog auth-dialog" id="authDialog" aria-labelledby="authHeading">
     <form class="dialog-shell" id="authForm">
       <button class="dialog-close" id="closeAuthButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER ACCOUNT</p>
-      <h2>Sign in to GetACourt</h2>
+      <h2 id="authHeading">Sign in to GetACourt</h2>
       <p class="payment-note" id="authStatus" role="status">Choose a secure sign-in method.</p>
       <button class="confirm-button" id="googleSignInButton" type="button" hidden>Continue with Google</button>
       <div id="emailSignInFields">
@@ -299,11 +300,11 @@
     </form>
   </dialog>
 
-  <dialog class="booking-dialog profile-dialog" id="profileDialog">
+  <dialog class="booking-dialog profile-dialog" id="profileDialog" aria-labelledby="profileHeading">
     <form class="dialog-shell" id="profileForm">
       <button class="dialog-close" id="closeProfileButton" type="button" aria-label="Close">×</button>
       <p class="eyebrow">PLAYER PROFILE</p>
-      <h2>Your GetACourt profile</h2>
+      <h2 id="profileHeading">Your GetACourt profile</h2>
       <p class="payment-note" id="profileStatus">Set your home area and preferred racket sports. This profile is separate from any club CRM record.</p>
       <div class="checkout-grid">
         <label class="field"><span>Name</span><input id="profileName" autocomplete="name" required maxlength="120" placeholder="Your name" /></label>
