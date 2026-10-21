@@ -81,6 +81,8 @@ def test_api_returns_only_scoped_internal_report_and_safe_connection_list(pilot,
     # These routes must not appear on the transactional Core service.
     core = client_for(pilot, monkeypatch, service="core")
     assert core.get(base + "/connections", headers=TOKEN).status_code == 404
+    assert core.get(base + "/preflight", headers=TOKEN,
+        params={"expected_operations_sha": "f" * 40}).status_code == 404
 
 
 @pytest.mark.parametrize("role,expected", [

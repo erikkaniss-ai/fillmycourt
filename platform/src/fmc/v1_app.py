@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import math
+import os
 from pathlib import Path
 import re
 import uuid
@@ -21,6 +22,7 @@ from sqlalchemy import text
 from .common import DomainError, SPORTS, require_key
 from .supabase_v1 import Actor, SupabaseAuth, V1Store, one, rows
 from .provider_provenance_review import review_provider_provenance
+from .provider_provenance_preflight import operations_provenance_preflight
 
 
 ROLE_ADMIN = {"owner", "admin"}
@@ -1711,6 +1713,15 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     where organization_id=cast(:org as uuid) and provider='playtomic'
                     order by id limit 100
                 """), {"org": str(org)}))}
+
+        @app.get("/api/fmc/{org}/provider-provenance/preflight")
+        def provenance_preflight(org: uuid.UUID, request: Request,
+                                 expected_operations_sha: str = Query(pattern="^[0-9a-f]{40}$")):
+            return operations_provenance_preflight(
+                db, user_id=who(request).id, organization_id=str(org),
+                expected_sha=expected_operations_sha, service=service,
+                environment=settings.environment, env=os.environ, routes=app.routes,
+                now=datetime.now(timezone.utc))
 
         @app.get("/api/fmc/{org}/provider-provenance/{connection_id}")
         def provenance_report(org: uuid.UUID, connection_id: uuid.UUID, request: Request,

@@ -60,6 +60,55 @@ The workspace contains no UI action or request for a price change, message, CRM 
 
 ## Acceptance gates
 
+### Operations read-only preflight — continued from 00b43d1; NO DEPLOY
+
+The authenticated Operations-only GET
+`/api/fmc/{org}/provider-provenance/preflight?expected_operations_sha=<full-lowercase-40-character-SHA>`
+checks local runtime prerequisites for the later protected UAT. Owner/admin
+membership is required separately in each requested organisation; no cross-tenant
+or role elevation is introduced. The private Operations gateway allowlists exactly
+this GET/query shape, retaining site binding, bearer forwarding, response limits,
+no-store and rejected redirects. No new frontend view or automatic request is added.
+
+The preflight checks:
+
+- Operations service in a known non-production test/staging environment.
+- Exact expected SHA against `RAILWAY_GIT_COMMIT_SHA`. Missing, malformed or
+  mismatched metadata is blocked; this self-reported environment value is not
+  independent deployment identity or a signed build attestation. Do not set a
+  fabricated runtime SHA merely to obtain a pass.
+- Actual authenticated, non-superuser/non-BYPASSRLS DB context, matching actor,
+  row_security ON and REPEATABLE READ / READ ONLY transaction.
+- Required tables are real RLS-enabled tables with SELECT privileges; bounded
+  LIMIT 0 probes resolve the reader's required columns without retrieving
+  provider config, receipts, customer or booking values.
+- Required provenance GET route registration and this API process's outbound
+  provider-read flag absent/OFF. Ambiguous or enabled values remain blocked.
+  This does not attest a separately running worker's flags or jobs.
+
+The fixed, redacted response uses
+`provider-provenance-operations-preflight/v1`. HTTP 200 carries either
+`operations_checks_passed` or `blocked`; callers must inspect the status/checks,
+not treat 200 as UAT readiness. Missing/invalid SHA is 422; authentication or role
+denials remain 401/403; an old runtime/Core may return 404; DB/schema failures
+return a generic 503 without DSN/details or trusted fallback. Every result keeps
+`hosted_uat_ready`, `uat_accepted`, `pilot_ready`, `provider_requests_allowed`,
+`can_display_available_slots` and `deploy_allowed` false.
+
+Protected host, independent runtime identity, worker state, two-org hosted/device
+UAT, approved fixture provisioning and owner UAT GO remain explicitly unassessed.
+Run the preflight separately for A and B only after the existing hosted entry GO.
+It does not validate receipts, fetch a provider, grant authority, repair schema,
+write audit/domain data, provision accounts or deploy anything.
+
+**No-deploy freeze for this source-only step:** the existing private-draft job has
+an unconditional false guard before credentials or upload. PR #8 title and commits
+carry `[skip netlify]` to suppress Git-driven publishing as well; this is not
+`[skip ci]`. CI and fictional UAT continue. Green tests must not reactivate the
+job or remove these markers. A later deployment needs separate explicit GO and
+a reviewed source change. No new preview, Operations deployment, production
+publication or Netlify/Railway/Supabase configuration change is authorised here.
+
 ### Protected provenance UAT preparation — continued from 72f7c2f
 
 **Prepared:** reproducible two-organisation rehearsal in the existing Draft PR.

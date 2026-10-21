@@ -192,6 +192,13 @@ def test_two_org_role_matrix_and_no_foreign_evidence(two_org_uat, name):
         assert connections.headers["cache-control"] == first.headers["cache-control"] == "no-store"
         assert_no_foreign_or_private_data(connections, uat, i)
         assert_no_foreign_or_private_data(first, uat, i)
+        preflight = uat.client.get(root(uat, i) + "/preflight",
+            headers=headers(uat, name), params={"expected_operations_sha": "f" * 40})
+        assert preflight.status_code == (200 if allowed else 403)
+        assert_no_foreign_or_private_data(preflight, uat, i)
+        assert preflight.headers["cache-control"] == "no-store"
+        if allowed:
+            assert preflight.json()["hosted_uat_ready"] is False
         if not allowed:
             assert first.json()["error"] == connections.json()["error"] == "FORBIDDEN"
             assert all(bid not in first.text for bid in uat.booking_ids[i])
@@ -271,6 +278,65 @@ def test_uat_reads_and_rejected_writes_preserve_both_orgs(two_org_uat):
                     headers=headers(uat, "dual_admin")).status_code == 405
     assert scoped_snapshot(uat) == before
     assert os.getenv("FMC_OFFICIAL_PROVIDER_READS_ENABLED") == "false"
+
+
+@pytest.mark.parametrize("revision,flag,expected", [
+    ("f" * 40, "false", "operations_checks_passed"),
+    (None, "false", "blocked"), ("e" * 40, "false", "blocked"),
+    ("f" * 40, "true", "blocked"), ("f" * 40, "ambiguous", "blocked"),
+])
+def test_operations_preflight_is_scoped_read_only_and_never_uat_go(two_org_uat, monkeypatch,
+                                                                 revision, flag, expected):
+    uat = two_org_uat
+    if revision is None:
+        monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    else:
+        monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", revision)
+    monkeypatch.setenv("FMC_OFFICIAL_PROVIDER_READS_ENABLED", flag)
+    before = scoped_snapshot(uat)
+    for i in range(2):
+        path = root(uat, i) + "/preflight"
+        response = uat.client.get(path, headers=headers(uat, "dual_admin"),
+                                  params={"expected_operations_sha": "f" * 40})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["status"] == expected
+        for check in ("owner_admin_scope", "authenticated_rls_context", "repeatable_read_only",
+                      "schema_rls_select", "reader_columns_present", "get_routes_present"):
+            assert body["checks"][check] == "pass", body
+        assert all(body[flag] is False for flag in ("hosted_uat_ready", "uat_accepted",
+            "pilot_ready", "provider_requests_allowed", "can_display_available_slots", "deploy_allowed"))
+        assert_no_foreign_or_private_data(response, uat, i)
+        for method in ("post", "put", "patch", "delete"):
+            assert getattr(uat.client, method)(path, headers=headers(uat, "dual_admin")).status_code == 405
+        for bad in ({}, {"expected_operations_sha": "short"}):
+            assert uat.client.get(path, headers=headers(uat, "dual_admin"), params=bad).status_code == 422
+        assert uat.client.get(path, params={"expected_operations_sha": "f" * 40}).status_code == 401
+    assert scoped_snapshot(uat) == before
+
+
+def test_preflight_database_failure_is_redacted_without_trusted_retry(two_org_uat, monkeypatch):
+    from contextlib import contextmanager
+    from sqlalchemy.exc import SQLAlchemyError
+    uat = two_org_uat
+
+    @contextmanager
+    def unavailable(*args, **kwargs):
+        assert kwargs == {"readonly": True}
+        raise SQLAlchemyError("fixture-private-dsn-and-schema-details")
+        yield  # pragma: no cover
+
+    def no_fallback():
+        raise AssertionError("Preflight must not fall back to trusted SQL")
+
+    monkeypatch.setattr(uat.db, "user", unavailable)
+    monkeypatch.setattr(uat.db, "trusted", no_fallback)
+    response = uat.client.get(root(uat, 0) + "/preflight", headers=headers(uat, "dual_admin"),
+        params={"expected_operations_sha": "f" * 40})
+    assert response.status_code == 503
+    assert response.json() == {"error": "PREFLIGHT_UNAVAILABLE",
+                               "message": "Operations preflight is unavailable."}
+    assert "private" not in response.text and "schema" not in response.text
 
 
 @pytest.mark.parametrize("late_status", [200, 403])

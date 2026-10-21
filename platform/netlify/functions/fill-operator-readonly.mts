@@ -38,6 +38,12 @@ function route(url) {
     if (!UUID.test(org)) return {error: "INVALID_ORGANIZATION"};
     if (connection === "connections")
       return url.search === "" ? {path} : {error: "INVALID_QUERY"};
+    if (connection === "preflight") {
+      const sha = url.searchParams.get("expected_operations_sha");
+      if (!onlyOneQuery(url, ["expected_operations_sha"]) || !/^[0-9a-f]{40}$/.test(sha || ""))
+        return {error: "INVALID_PREFLIGHT_QUERY"};
+      return {path: path + "?expected_operations_sha=" + sha};
+    }
     if (!UUID.test(connection)) return {error: "INVALID_CONNECTION"};
     const after = url.searchParams.get("after_booking_id");
     const allowed = ["max_age_seconds", "limit", ...(after === null ? [] : ["after_booking_id"])];
@@ -160,5 +166,6 @@ export const config = {
   path: ["/api/me", "/api/fmc/organizations",
     "/api/fmc/:org/today", "/api/fmc/:org/calendar",
     "/api/fmc/:org/provider-provenance/connections",
+    "/api/fmc/:org/provider-provenance/preflight",
     "/api/fmc/:org/provider-provenance/:connection"]
 };

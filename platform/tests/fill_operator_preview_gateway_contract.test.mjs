@@ -11,6 +11,7 @@ const paths = ["/api/me", "/api/fmc/organizations",
   "/api/fmc/"+ID+"/today?date=2026-10-16",
   "/api/fmc/"+ID+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00",
   "/api/fmc/"+ID+"/provider-provenance/connections",
+  "/api/fmc/"+ID+"/provider-provenance/preflight?expected_operations_sha="+"a".repeat(40),
   "/api/fmc/"+ID+"/provider-provenance/"+ID+"?max_age_seconds=60&limit=50",
   "/api/fmc/"+ID+"/provider-provenance/"+ID+"?max_age_seconds=60&limit=50&after_booking_id="+ID];
 const request = (path, options={}) => new Request(APP+path,{method:options.method||"GET",
@@ -32,7 +33,8 @@ async function harness(req, env=OPS, upstreamStatus=200, siteId=FILL_SITE_ID) {
 test("Private Fill gateway registers only approved Operations GET routes",()=>{
   assert.deepEqual(config.path,["/api/me","/api/fmc/organizations",
     "/api/fmc/:org/today","/api/fmc/:org/calendar",
-    "/api/fmc/:org/provider-provenance/connections","/api/fmc/:org/provider-provenance/:connection"]);
+    "/api/fmc/:org/provider-provenance/connections",
+    "/api/fmc/:org/provider-provenance/preflight","/api/fmc/:org/provider-provenance/:connection"]);
   const conf=readFileSync("platform/netlify.toml","utf8");
   assert.match(conf,/publish = "public"/);
   assert.match(conf,/directory = "netlify\/functions"/);
@@ -52,6 +54,21 @@ test("Provenance route accepts only explicit bounded freshness and cursor, no se
   for(const method of ["PUT","PATCH","DELETE","HEAD"]){
     const r=await harness(request(paths.at(-1),{method}));
     assert.equal(r.status,405);assert.equal(r.calls.length,0);
+  }
+});
+test("Operations preflight accepts exactly one full expected SHA, never arbitrary query/target",async()=>{
+  const root="/api/fmc/"+ID+"/provider-provenance/preflight";
+  for(const query of ["","?expected_operations_sha=short","?expected_operations_sha="+"A".repeat(40),
+    "?expected_operations_sha="+"a".repeat(40)+"&expected_operations_sha="+"b".repeat(40),
+    "?expected_operations_sha="+"a".repeat(40)+"&url=https://provider.invalid",
+    "?expected_operations_sha="+"a".repeat(40)+"&max_age_seconds=60"]){
+    const r=await harness(request(root+query));
+    assert.equal(r.status,422);assert.equal(r.calls.length,0);
+  }
+  for(const status of [401,403,404,503]){
+    const r=await harness(request(root+"?expected_operations_sha="+"a".repeat(40)),OPS,status);
+    assert.equal(r.status,status);assert.equal(r.calls.length,1);
+    assert.equal(r.headers.get("cache-control"),"no-store, private");
   }
 });
 test("Without bearer, no Railway request is sent",async()=>{

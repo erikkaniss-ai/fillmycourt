@@ -5,6 +5,12 @@ const y=readFileSync(".github/workflows/fill-private-preview-deploy.yml","utf8")
 const f=readFileSync("platform/netlify/functions/fill-operator-readonly.mts","utf8");
 const a=readFileSync("platform/public/fill/app.js","utf8");
 
+test("Explicit no-deploy freeze skips the entire private draft job, including secrets and upload",()=>{
+  assert.match(y,/private-draft:\s*\n(?:\s*#[^\n]*\n)*\s*if: >-\s*\n\s*false &&/);
+  assert.doesNotMatch(y,/workflow_dispatch:|repository_dispatch:/);
+  assert.ok(y.indexOf("false &&") < y.indexOf("NETLIFY_AUTH_TOKEN:"));
+});
+
 test("Deployment workflow targets ONLY same-repo Fill PR8 and existing team-only site",()=>{
   assert.match(y,/number == 8/);
   assert.match(y,/head_ref == 'fill\/operator-mvp-readonly'/);

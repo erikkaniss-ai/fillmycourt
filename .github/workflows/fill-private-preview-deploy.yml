@@ -18,7 +18,11 @@ concurrency:
 
 jobs:
   private-draft:
+    # SOURCE-ONLY / NO DEPLOY: explicit owner request for Operations preflight.
+    # Keep frozen until separate deployment GO and a reviewed source change.
+    # Green CI, credentials, PR labels or a retry must not reactivate uploads.
     if: >-
+      false &&
       github.repository == 'erikkaniss-ai/fillmycourt' &&
       github.event.pull_request.number == 8 &&
       github.base_ref == 'platform/v0.4-staging' &&
