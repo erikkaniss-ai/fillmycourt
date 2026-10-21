@@ -61,7 +61,7 @@ a { color: inherit; }
   letter-spacing: -.045em;
   font-size: 22px;
 }
-.brand > span:last-child > span { color: var(--coral); }
+.brand > span:last-child > span { color: #d3441e; }
 .brand-mark {
   display: inline-grid;
   place-items: center;
@@ -270,10 +270,10 @@ main { overflow: hidden; }
 .principles h3 { font-size: 25px; margin: 0 0 10px; }
 .principles p { color: var(--muted); line-height: 1.55; margin: 0; }
 .network-section { max-width: 1440px; margin: 0 auto; padding: 10px clamp(20px,5vw,78px) 96px; }
-.network-card { background: var(--blue); color: #fff; border-radius: 34px; padding: clamp(30px,5vw,64px); display: grid; grid-template-columns: 1fr 1fr; gap: 28px 70px; align-items: end; }
-.network-card .eyebrow { color: #fff; opacity: .7; }
+.network-card { background: #4356cf; color: #fff; border-radius: 34px; padding: clamp(30px,5vw,64px); display: grid; grid-template-columns: 1fr 1fr; gap: 28px 70px; align-items: end; }
+.network-card .eyebrow { color: #fff; opacity: 1; }
 .network-card h2 { margin: 0; font-size: clamp(34px,4.2vw,62px); letter-spacing: -.055em; line-height: 1; }
-.network-card > p { font-size: 17px; line-height: 1.6; opacity: .9; }
+.network-card > p { font-size: 17px; line-height: 1.6; opacity: 1; }
 .network-flow { grid-column: 1/-1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.25); font-size: 12px; letter-spacing: .08em; }
 .network-flow b { font-size: 18px; letter-spacing: -.02em; }
 
