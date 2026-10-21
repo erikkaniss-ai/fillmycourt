@@ -109,6 +109,7 @@ jobs:
             platform/tests/getacourt_install_contract.test.mjs \
             platform/tests/getacourt_commercial_signals_contract.test.mjs \
             platform/tests/getacourt_provider_connection_foundation.test.mjs \
+            platform/tests/getacourt_provider_supply_contract.test.mjs \
             platform/tests/getacourt_provider_account_lab.test.mjs \
             platform/tests/getacourt_ci_dispatch_contract.test.mjs
   contract:
@@ -147,6 +148,10 @@ jobs:
         run: node --test platform/tests/getacourt_commercial_signals_contract.test.mjs
       - name: GetAcourt synthetic provider connection foundation contracts
         run: node --test platform/tests/getacourt_provider_connection_foundation.test.mjs
+      - name: Connected Accounts / club supply fail-closed synthetic contracts
+        run: |
+          node --check getacourt/assets/provider-supply-contract.js
+          node --test platform/tests/getacourt_provider_supply_contract.test.mjs
       - name: Personal provider-account readiness contracts (no live API)
         run: node --test platform/tests/getacourt_provider_account_lab.test.mjs
       - name: GetACourt native-only booking source guard contracts
