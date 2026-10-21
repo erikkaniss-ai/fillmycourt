@@ -370,8 +370,9 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 page.screenshot(path=str(screenshots / f"fill-go-package-missing-{domain}-mobile-FIXTURE-ONLY.png"))
                 page.locator(f".{domain}-package-preparation-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
                 page.screenshot(path=str(screenshots / f"fill-go-package-preparation-{domain}-mobile-FIXTURE-ONLY.png"))
-                page.locator(f".{domain}-package-preparation-summary-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
-                page.screenshot(path=str(screenshots / f"fill-go-package-preparation-summary-{domain}-mobile-FIXTURE-ONLY.png"))
+                # Capture the complete card at the actual 320px layout; viewport
+                # scroll rounding must not crop a wrapped heading or final warning.
+                page.locator(f".{domain}-package-preparation-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-preparation-summary-{domain}-mobile-FIXTURE-ONLY.png"))
             bad_package = copy.deepcopy(GET_PACKAGE)
             bad_package["token"] = "PRIVATE_SECRET<img>"
             inspect_package("get", bad_package)
