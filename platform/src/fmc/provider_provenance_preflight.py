@@ -81,8 +81,13 @@ def operations_provenance_preflight(db, *, user_id, organization_id, expected_sh
         with db.user(user_id, readonly=True) as c:
             db.require_role(c, organization_id, user_id, {"owner", "admin"})
             facts["owner_admin_scope"] = True
+            # Inspect the verified subject/role set by V1Store.user, the same
+            # GUC source read by auth.uid(). Do not require USAGE on Auth schema
+            # or grant extra privileges merely for this diagnostic.
             context = c.execute(text("""
-                select current_user as role,auth.uid()::text as uid,
+                select current_user as role,
+                       current_setting('request.jwt.claim.sub',true) as uid,
+                       current_setting('request.jwt.claim.role',true) as claim_role,
                        current_setting('row_security') as row_security,
                        current_setting('transaction_read_only') as read_only,
                        current_setting('transaction_isolation') as isolation,
@@ -91,6 +96,7 @@ def operations_provenance_preflight(db, *, user_id, organization_id, expected_sh
             """)).mappings().one()
             facts["authenticated_rls_context"] = (
                 context["role"] == "authenticated" and context["uid"] == user_id
+                and context["claim_role"] == "authenticated"
                 and context["row_security"] == "on" and context["privileged"] is False)
             facts["repeatable_read_only"] = (
                 context["read_only"] == "on" and context["isolation"] == "repeatable read")
