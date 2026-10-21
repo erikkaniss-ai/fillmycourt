@@ -24,3 +24,11 @@ Date: 2026-10-16. Existing project getacourt-preview, public production domain g
 
 ## No implicit release
 This draft PR MUST NOT merge automatically. Current public getacourt-staging must remain on its existing SHA until explicit owner release GO.
+
+## Owner-scoped staging UAT authorization — 21 October 2026
+
+Erik approved a NEW access-controlled, non-production staging deploy and synthetic UAT test identities on 21 October 2026. Approval applies to the exact GetACourt Draft PR #5 source selected for deployment; it does not authorize production, provider API reads, bookings, holds, payments, credential disclosure, changing existing client data, public release, merge or customer sends. The approved deployment target is the already existing getacourt-preview Netlify project, using **Deploy Preview / non-production context protected with Team Login**, not the public getacourt.com production context.
+
+Acceptance sequence: independently record candidate full GitHub SHA and actual Netlify deploy ID/SHA/context; verify draft remains OPEN/UNMERGED and exact SHA full CI is green; anonymous deploy-preview root must return HTTP 401 and production remain unchanged; only then allow authenticated tester access. Prefer synthetic isolated identity, not a production or personal account. Do not activate provider OAuth, Google auth, geolocation permission, paid API or create a real booking as a consequence of this deploy; each stateful consent/provider scope remains its own explicit acceptance action. All synthetic test users and clubs must be labelled UAT, isolated from any real data, minimally privileged, and subject to deletion at test completion.
+
+A clean CI and a protected preview alone are insufficient for hosted/device UAT pass. Existing Seven-check preflight remains authoritative for NOT_RUN / missing evidence until independent exact-deploy receipts are recorded. Stop immediately if wrong deployment context, wrong SHA, anonymous 200 or broken Team Login.
