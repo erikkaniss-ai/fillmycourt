@@ -18,11 +18,10 @@ concurrency:
 
 jobs:
   private-draft:
-    # SOURCE-ONLY / NO DEPLOY: explicit owner request for Operations preflight.
-    # Keep frozen until separate deployment GO and a reviewed source change.
-    # Green CI, credentials, PR labels or a retry must not reactivate uploads.
+    # Owner authorizes protected staging only for one exact SHA recorded
+    # separately in PR metadata and rechecked at upload; later SHA is denied.
+    # Full exact-head PostgreSQL/Chromium CI and HTTP 401 remain mandatory.
     if: >-
-      false &&
       github.repository == 'erikkaniss-ai/fillmycourt' &&
       github.event.pull_request.number == 8 &&
       github.base_ref == 'platform/v0.4-staging' &&
@@ -41,6 +40,15 @@ jobs:
           # GitHub pull_request GITHUB_SHA points to a merge ref, not the
           # reviewed Fill branch commit. Always deploy the exact head SHA.
           ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require single exact-SHA owner staging GO before any credentials
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs --check-owner-go
 
       - name: Check private preview credential
         id: eligibility
@@ -63,11 +71,6 @@ jobs:
             echo "::error::Existing Fill preview must return HTTP 401, observed $status"
             exit 1
           }
-
-      - uses: actions/setup-node@v4
-        if: steps.eligibility.outputs.configured == 'true'
-        with:
-          node-version: '22'
 
       - name: Install pinned Netlify CLI
         if: steps.eligibility.outputs.configured == 'true'
@@ -108,6 +111,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node platform/scripts/fill_ci_gate.mjs --check-head
+
+      - name: Revalidate exact-SHA owner staging GO before private upload
+        if: steps.eligibility.outputs.configured == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs --check-owner-go
 
       - name: Upload DRAFT only to existing private Fill site
         if: steps.eligibility.outputs.configured == 'true'
