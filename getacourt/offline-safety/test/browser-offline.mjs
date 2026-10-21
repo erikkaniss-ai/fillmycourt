@@ -15,9 +15,15 @@ const URL_ROOT="/getacourt/offline-safety/";
 const SECRET="SYNTHETIC_PERSONAL_BOOKING_MUST_NOT_LEAK";
 let privateReads=0;
 let storedReads=0;
+let simulatedNetworkDown=false;
 const server=createServer(async(req,res)=>{
   const url=new URL(req.url||"/","http://127.0.0.1");
   const route=url.pathname;
+  // Playwright offline flags may not affect service-worker fetch in all builds.
+  // Enforce a real socket failure at the origin, not a mocked HTTP 503 page.
+  if(simulatedNetworkDown && route!==URL_ROOT+"offline.html"){
+    req.socket.destroy();return;
+  }
   if(route===URL_ROOT+"sw.js"||route===URL_ROOT+"offline.html"){
     const file=await readFile(join(root,route.endsWith("sw.js")?"sw.js":"offline.html"));
     res.writeHead(200,{"content-type":route.endsWith("sw.js")?"text/javascript":"text/html",
@@ -76,6 +82,7 @@ try{
   assert.ok(before.urls[0].endsWith("/offline.html"),"only offline notice cached");
 
   // Reject network to force an actual SW fallback from the cache.
+  simulatedNetworkDown=true;
   await context.setOffline(true);
   await page.goto(base+"dynamic",{waitUntil:"domcontentloaded"});
   const fallbackText=await page.locator("body").innerText();
