@@ -45,7 +45,16 @@ class ProviderTokenSessions:
             old=self._sessions.get(key)
             if old is not None and hmac.compare_digest(old[0],fingerprint):
                 return old[1]
+            # Invalidate retained client references when a credential changes.
+            # Removing a cache entry alone does not clear the old bearer token.
+            if old is not None:
+                old[1].token = None
+                old[1].expires = 0
             if len(self._sessions)>=_MAX_SESSIONS:
+                # Capacity eviction must clear tokens held by other references.
+                for _, client in self._sessions.values():
+                    client.token = None
+                    client.expires = 0
                 self._sessions.clear()
             instance=self._factory(client_id,secret,tenant)
             self._sessions[key]=(fingerprint,instance)
