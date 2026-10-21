@@ -66,6 +66,7 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
     packageReview:domain=>get("#"+domain+"PackageForm").run("submit"),
     packageResult:domain=>get("#"+domain+"PackageResult").innerHTML||get("#"+domain+"PackageResult").textContent,
     packageSummary:domain=>get("#"+domain+"PackageSummary").innerHTML||get("#"+domain+"PackageSummary").textContent,
+    packageMissing:domain=>get("#"+domain+"PackageMissing").innerHTML||get("#"+domain+"PackageMissing").textContent,
     clubSteps:()=>get("#clubNextSteps").innerHTML||get("#clubNextSteps").textContent,
     candidateSteps:()=>get("#candidateNextSteps").innerHTML||get("#candidateNextSteps").textContent,
     clubDraft:()=>get("#clubGoRequest").innerHTML||get("#clubGoRequest").textContent,
@@ -368,6 +369,7 @@ test("Local manifest check is explicit and scoped; no context or denied/demo rol
       await h.selectPackage(domain,{}, {size:100,text:async()=>{reads++;return "{}";}});await h.packageReview(domain);
       assert.match(h.packageResult(domain),/No current owner\/admin source context/);
       assert.doesNotMatch(h.packageSummary(domain),/of \d+ PRESENT|MISSING;|UNKNOWN\.|79977c8/);
+      assert.doesNotMatch(h.packageMissing(domain),/data-package-component=|data-package-part=/);
     }
     assert.equal(reads,0);
   }
@@ -422,6 +424,7 @@ test("Manifest rejects foreign domains/orgs/SHA/check/actions, expiry, unknown o
     const d=structuredClone(getPackage);mutate(d);await h.selectPackage("get",d);await h.packageReview("get");
     assert.match(h.packageResult("get"),/Manifest rejected/);assert.doesNotMatch(h.packageResult("get"),/SECRET|<img|All required/);
     assert.match(h.packageSummary("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageSummary("get"),/SECRET|<img|of \d+ PRESENT/);
+    assert.match(h.packageMissing("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageMissing("get"),/SECRET|<img|data-package-component=/);
   }
   for(const change of [d=>d.organisationId=OTHER,d=>d.sourceSha=SHA,d=>d.checkId="club-pilot",d=>d.actions.push("provider-fetch")]){
     const d=structuredClone(clubPackage);change(d);await h.selectPackage("club",d);await h.packageReview("club");assert.match(h.packageResult("club"),/Manifest rejected/);
@@ -438,6 +441,7 @@ test("Bounded files only, no automatic read; file exceptions are redacted and ma
   await h.selectPackage("get",getPackage);await h.packageReview("get");h.setNow(NOW+60*60*1000);
   await h.get("#operationsSha").run("input");assert.match(h.packageResult("get"),/review window expired/);
   assert.match(h.packageSummary("get"),/review expired/);assert.doesNotMatch(h.packageSummary("get"),/of \d+ PRESENT/);
+  assert.match(h.packageMissing("get"),/review expired/);assert.doesNotMatch(h.packageMissing("get"),/data-package-component=/);
   assert.equal(h.get("#getPackageFile").files.length,0);
 });
 for(const action of ["club","tab","logout","401","get-sha","get-file","check","ops-sha","refresh"])
@@ -454,14 +458,18 @@ test(`Late manifest completion cannot rehydrate a superseded package: ${action}`
   wait.resolve(JSON.stringify(domain==="club"?clubPackage:getPackage));await running;
   assert.equal(h.packageResult(domain),"");assert.equal(h.get("#"+domain+"PackageFile").files.length,0);
   assert.doesNotMatch(h.packageSummary(domain),/of \d+ PRESENT|MISSING;|UNKNOWN\./);
+  assert.doesNotMatch(h.packageMissing(domain),/data-package-component=/);
   if(["tab","logout","401"].includes(action))assert.equal(h.packageSummary(domain),"");
+  if(["tab","logout","401"].includes(action))assert.equal(h.packageMissing(domain),"");
 });
 test("Late manifest failure cannot erase a newer result; Get edits do not erase club package",async()=>{
   const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");const club=h.packageResult("club"),old=deferred();
   await h.selectPackage("get",{}, {size:100,text:()=>old.promise});const running=h.packageReview("get");await settle();
-  await h.selectPackage("get",getPackage);await h.packageReview("get");const current=h.packageResult("get"),summary=h.packageSummary("get"),clubSummary=h.packageSummary("club");old.reject(Error("SECRET"));await running;
+  await h.selectPackage("get",getPackage);await h.packageReview("get");const current=h.packageResult("get"),summary=h.packageSummary("get"),clubSummary=h.packageSummary("club"),missing=h.packageMissing("get"),clubMissing=h.packageMissing("club");old.reject(Error("SECRET"));await running;
   assert.equal(h.packageResult("get"),current);assert.equal(h.packageSummary("get"),summary);
+  assert.equal(h.packageMissing("get"),missing);
   await h.select();assert.equal(h.packageResult("club"),club);assert.equal(h.packageSummary("club"),clubSummary);assert.equal(h.packageResult("get"),"");
+  assert.equal(h.packageMissing("club"),clubMissing);assert.doesNotMatch(h.packageMissing("get"),/data-package-component=/);
 });
 test("Manifest inspection stays local, has labelled independent regions and no network, credential, clipboard or approval transport",()=>{
   const segment=source.slice(source.indexOf("  const goPackageCommon ="),source.indexOf("  async function load()"));
@@ -515,8 +523,57 @@ test("Completed summaries and files clear on scope loss; a new club has no carri
     if(action==="club"){h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();}
     if(action==="tab")await h.nav[0].run("click");if(action==="logout")await h.get("#signOut").run("click");
     if(action==="401"){h.controls.deny=true;await h.get("#refreshButton").run("click");await settle();}
-    for(const d of ["club","get"]){assert.doesNotMatch(h.packageSummary(d),/of \d+ PRESENT|79977c8/);if(action!=="club")assert.equal(h.packageSummary(d),"");}
+    for(const d of ["club","get"]){assert.doesNotMatch(h.packageSummary(d),/of \d+ PRESENT|79977c8/);assert.doesNotMatch(h.packageMissing(d),/data-package-component=/);if(action!=="club"){assert.equal(h.packageSummary(d),"");assert.equal(h.packageMissing(d),"");}}
   }
+});
+
+const partIDs=(html,status)=>[...html.matchAll(new RegExp('data-package-part="'+status+'" data-package-component="([^"]+)"','g'))].map(m=>m[1]);
+test("Missing-part lists are opt-in only, exact per-domain groups; PRESENT is never listed or treated as GO",async()=>{
+  const h=await packageHarness(),calls=h.calls.length,blockers=h.get("#clubUatBlockers").innerHTML,candidate=h.summary();
+  for(const d of ["club","get"])assert.match(h.packageMissing(d),/No local package reviewed/);
+  await h.selectPackage("club",clubPackage);assert.doesNotMatch(h.packageMissing("club"),/data-package-component=/);await h.packageReview("club");
+  assert.deepEqual(partIDs(h.packageMissing("club"),"UNKNOWN"),["original-authority"]);
+  assert.deepEqual(partIDs(h.packageMissing("club"),"MISSING"),["protected-deploy","independent-runtime","isolation","tester-consent","scope-allowlist","current-evidence","unresolved-blockers","expiry-revocation-stop","two-synthetic-orgs","connection-freshness","club-wide-coverage"]);
+  assert.doesNotMatch(h.packageMissing("club"),/data-package-component="source-binding"/);
+  assert.match(h.packageMissing("club"),/Original approval and delegation/);assert.match(h.packageMissing("club"),/Declared UNKNOWN \(1\)/);
+  const club=h.packageMissing("club"),clubSummary=h.packageSummary("club");await h.selectPackage("get",getPackage);await h.packageReview("get");
+  assert.doesNotMatch(h.packageMissing("get"),/data-package-component=/);assert.match(h.packageMissing("get"),/No components declared MISSING or UNKNOWN/);
+  assert.match(h.packageMissing("get"),/Original evidence and GO remain unverified; do not execute/);
+  assert.equal(h.packageMissing("club"),club);assert.equal(h.packageSummary("club"),clubSummary);
+  assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);assert.equal(h.summary(),candidate);assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
+test("Mixed Get list identifies exact missing/unknown parts only, including separate state-change GO, without club parts",async()=>{
+  const h=await packageHarness(),d=structuredClone(getPackage);d.items[0].state="UNKNOWN";d.items[1].state="MISSING";d.items.pop();
+  await h.selectPackage("get",d);await h.packageReview("get");
+  assert.deepEqual(partIDs(h.packageMissing("get"),"MISSING"),["source-binding","separate-state-change-go"]);
+  assert.deepEqual(partIDs(h.packageMissing("get"),"UNKNOWN"),["original-authority"]);
+  assert.doesNotMatch(h.packageMissing("get"),/data-package-component="(?:two-synthetic-orgs|connection-freshness|club-wide-coverage)"/);
+  assert.match(h.packageSummary("get"),/2 MISSING; 1 UNKNOWN/);
+});
+test("All seven Get types retain only their own unresolved component catalog and no club evidence",async()=>{
+  const h=await packageHarness();
+  for(const c of golden.checks){const d=structuredClone(getPackage);d.checkId=c.id;d.actions=c.requiredGoActions;
+    const ids=[...new Set([...getPackage.items.slice(0,10).map(x=>x.id),...c.requiredEvidence,...(c.requiresStateChangeGO?["separate-state-change-go"]:[])])];
+    d.items=ids.map(id=>({id,state:"UNKNOWN"}));await h.check(c.id);await h.selectPackage("get",d);await h.packageReview("get");
+    assert.deepEqual(partIDs(h.packageMissing("get"),"UNKNOWN"),ids);assert.deepEqual(partIDs(h.packageMissing("get"),"MISSING"),[]);
+    assert.doesNotMatch(h.packageMissing("get"),/undefined|data-package-component="club-wide-coverage"/);
+  }
+});
+test("New file/loading/error cannot keep previous missing-item identities; source expiry clears the list",async()=>{
+  const h=await packageHarness(),d=structuredClone(getPackage);d.items=[];await h.selectPackage("get",d);await h.packageReview("get");
+  assert.equal(partIDs(h.packageMissing("get"),"MISSING").length,15);
+  const wait=deferred();await h.selectPackage("get",{}, {size:100,text:()=>wait.promise});const run=h.packageReview("get");await settle();
+  assert.match(h.packageMissing("get"),/read in progress/);assert.doesNotMatch(h.packageMissing("get"),/data-package-component=/);
+  wait.reject(Error("SECRET"));await run;assert.match(h.packageMissing("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageMissing("get"),/SECRET|data-package-component=/);
+  await h.selectPackage("get",d);await h.packageReview("get");h.setNow(NOW+25*60*60*1000);await h.get("#operationsSha").run("input");
+  assert.doesNotMatch(h.packageMissing("get"),/data-package-component=/);
+});
+test("Missing-part panels are labelled read-only siblings of summaries; helper is escaped and has no transport or decision side effects",()=>{
+  const html=readFileSync("platform/public/fill/index.html","utf8");
+  for(const d of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+d+'PackageMissingHeading"'));assert.match(html,new RegExp('id="'+d+'PackageMissing" role="status" aria-live="polite" aria-atomic="true"'));assert.ok(html.indexOf('id="'+d+'PackageMissing"')>html.indexOf('id="'+d+'PackageSummary"'));}
+  const helper=source.slice(source.indexOf("  function goPackageMissingHTML("),source.indexOf("  // Presentation only of one domain"));
+  assert.match(helper,/esc\(row.id\)/);assert.match(helper,/esc\(goPackagePartLabels/);
+  assert.doesNotMatch(helper,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|state\.|goPackageState|<button|<form|<input|<a /);
 });
 test("Package summary presentation has distinct accessible regions by blockers and no reads, side effects or shared decision",()=>{
   const html=readFileSync("platform/public/fill/index.html","utf8");

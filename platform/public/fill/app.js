@@ -1105,6 +1105,7 @@
     form: q("#" + domain + "PackageForm"), file: q("#" + domain + "PackageFile"),
     button: q("#" + domain + "PackageReview"), result: q("#" + domain + "PackageResult"),
     summary: q("#" + domain + "PackageSummary"),
+    missing: q("#" + domain + "PackageMissing"),
   }]));
   const goPackageCheck = q("#getPackageCheck");
   const goPackageState = {club: {epoch: 0, key: null}, get: {epoch: 0, key: null}};
@@ -1137,18 +1138,47 @@
       required: [...new Set([...goPackageCommon, ...check[2],
         ...(["device-location", "google-oauth"].includes(check[0]) ? ["separate-state-change-go"] : [])])]} : null;
   }
+  const goPackagePartLabels = {
+    "original-authority": "Original approval and delegation", "source-binding": "Exact source binding",
+    "protected-deploy": "Existing protected deployment", "independent-runtime": "Independent runtime identity",
+    "isolation": "Isolation evidence", "tester-consent": "Tester consent", "scope-allowlist": "Exact action allowlist",
+    "current-evidence": "Current evidence", "unresolved-blockers": "Unresolved blocker inventory",
+    "expiry-revocation-stop": "Expiry, revocation and stop conditions", "two-synthetic-orgs": "Two authorised synthetic organisations",
+    "connection-freshness": "Connection and approved freshness policy", "club-wide-coverage": "Club-wide provenance coverage",
+    "source-ci": "Exact-source CI evidence", "perimeter": "Protected access perimeter", "ios-device": "Physical iOS device evidence",
+    "android-device": "Physical Android device evidence", "location-consent": "Device location consent",
+    "oauth-config": "OAuth configuration evidence", "oauth-consent": "OAuth test consent",
+    "assistive-device": "Assistive-device evidence", "separate-state-change-go": "Separate state-change GO record",
+  };
+  // Fixed labels from validated rows only; no external evidence or implied task.
+  function goPackageMissingHTML(rows) {
+    if (rows.every(row => row.status === "PRESENT"))
+      return "<p>No components declared MISSING or UNKNOWN in this local manifest. Original evidence and GO remain unverified; do not execute.</p>";
+    return ["MISSING", "UNKNOWN"].map(status => {
+      const items = rows.filter(row => row.status === status);
+      return `<section data-package-part-group="${status}"><h6>Declared ${status} (${items.length})</h6>` +
+        (items.length ? '<ul class="go-package-items">' + items.map(row =>
+          `<li data-package-part="${status}" data-package-component="${esc(row.id)}">${esc(goPackagePartLabels[row.id] || row.id)} <code>(${esc(row.id)})</code></li>`).join("") + "</ul>"
+          : `<p>No components declared ${status} in this manifest.</p>`) + "</section>";
+    }).join("");
+  }
   // Presentation only of one domain's existing local result, never a GO decision.
   function renderGoPackageSummary(domain, ctx = packageContext(domain)) {
     const target = goPackageUI[domain].summary;
     if (!target) return;
-    target.textContent = "";
+    const missingTarget = goPackageUI[domain].missing;
+    const empty = message => {
+      target.textContent = message;
+      if (missingTarget) missingTarget.textContent = message ? message + " No missing-part list inferred." : "";
+    };
+    empty("");
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) return;
     if (!acceptanceAllowed()) {
-      target.textContent = "No package summary in this scope. Owner/admin local review required; demo has no real evidence. No verified GO.";
+      empty("No package summary in this scope. Owner/admin local review required; demo has no real evidence. No verified GO.");
       return;
     }
     if (!ctx) {
-      target.textContent = "No current source/check context for this package. No completeness counts inferred; no verified GO.";
+      empty("No current source/check context for this package. No completeness counts inferred; no verified GO.");
       return;
     }
     const model = goPackageState[domain];
@@ -1160,12 +1190,12 @@
       expired: "Local package review expired. Review a current manifest again; no counts retained.",
     };
     if (model.key !== key || !model.result) {
-      target.textContent = (labels[model.key === key ? model.status : "not_reviewed"] || labels.not_reviewed) + " Verified GO: none. Execution NOT_RUN.";
+      empty((labels[model.key === key ? model.status : "not_reviewed"] || labels.not_reviewed) + " Verified GO: none. Execution NOT_RUN.");
       return;
     }
     const r = model.result;
     if (!packageFresh(r.asOf) || r.until <= Date.now()) {
-      target.textContent = labels.expired + " Verified GO: none. Execution NOT_RUN.";
+      empty(labels.expired + " Verified GO: none. Execution NOT_RUN.");
       return;
     }
     const present = r.rows.filter(row => row.status === "PRESENT").length;
@@ -1178,6 +1208,7 @@
       `<p>${present === r.rows.length ? "All declared — independent manual review still required." : "Incomplete declarations — missing or unknown items remain."}</p>` +
       `<p>Local manifest: ${esc(r.asOf)}; review window ends ${esc(new Date(r.until).toISOString())}. Not live or verified approval validity.</p>` +
       "<p>Verified GO: none. Execution NOT_RUN. Declared presence is not document or authority validation. Existing blockers stay open; club UAT/pilot, Get checks, provider rights and deploy permissions stay separate.</p>";
+    if (missingTarget) missingTarget.innerHTML = goPackageMissingHTML(r.rows);
   }
   function clearGoPackage(domain, key = null, clearFile = true, status = "not_reviewed") {
     const previous = goPackageState[domain];

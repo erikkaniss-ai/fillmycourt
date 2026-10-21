@@ -1,5 +1,36 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Missing-part lists beside summaries — continuation from Fillb3b83b9
+
+Each package snapshot now has its own labelled read-only **Missing parts** section,
+for club UAT and for the single Get check respectively. The same validated local
+result and scope/expiry guards render the summary and list together. No additional
+file/API/document read, storage, transport, link, action, request, approval, repair
+or execution is added. Existing schema, source/check binding, blockers and staging
+GO/deployment gate are unchanged.
+
+Only rows declared MISSING or UNKNOWN are listed, in distinct named groups with
+exact counts. Human-readable fixed labels retain component IDs for traceability.
+PRESENT rows never appear in either group; omitted components remain MISSING under
+the existing decoder. UNKNOWN means unresolved declaration, never verified absence
+or authority. Club-only coverage/freshness/two-org components do not enter Get lists;
+Get evidence kinds and separate state-change GO appear only in their exact check.
+
+No missing/unknown declarations yields only a local-manifest statement, not a clean
+blocker inventory, verified evidence or GO. Original evidence and GO still require
+independent review; execution remains NOT_RUN. Lists are not an execution checklist,
+outreach draft, assigned work queue or permission to fetch/repair evidence.
+
+Before review, on file selection/loading/rejection/expiry or source/check/club/auth/
+tab changes, old item identities are removed; no missing-part list is invented.
+Late success/failure cannot restore superseded items or erase a newer list. Opposite
+domain data and existing club/candidate blockers stay independent. Existing expiry
+checks run on renders/reads, not a new timer. Node and loopback Chromium checks cover
+exact MISSING/UNKNOWN identities, all seven Get types, no-PRESENT/all-declared cases,
+mixed states, unsafe and stale inputs, scope/late-result clearing, no new network/
+storage/actions and desktop/320px `fill-go-package-missing-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`.
+These are synthetic source/CI checks, not hosted, device or OAuth acceptance.
+
 ## Adjacent package summaries — continuation from Fill0998f21
 
 Separate read-only **GO package snapshot** sections now sit immediately after

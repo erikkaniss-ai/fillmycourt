@@ -72,6 +72,11 @@
               <h4 id="clubPackageSummaryHeading">GO package snapshot — club</h4>
               <p class="muted">Only the last local club manifest checked below. No combined readiness, verified GO or pilot permission.</p>
               <div id="clubPackageSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+              <section class="package-missing-panel club-package-missing-panel" aria-labelledby="clubPackageMissingHeading">
+                <h5 id="clubPackageMissingHeading">Missing parts — club</h5>
+                <p class="muted">Local club declarations only: MISSING and UNKNOWN are separate unresolved states, not an action list or permission. Verified GO: none. Execution NOT_RUN. Existing blockers stay open.</p>
+                <div id="clubPackageMissing" role="status" aria-live="polite" aria-atomic="true"></div>
+              </section>
             </section>
             <section class="go-next-panel club-next-panel" aria-labelledby="clubNextHeading">
               <h4 id="clubNextHeading">Next steps — club GO</h4>
@@ -103,6 +108,11 @@
               <h4 id="getPackageSummaryHeading">GO package snapshot — GetACourt</h4>
               <p class="muted">One explicitly reviewed local Get package/check only, not club evidence, permission or a combined GO.</p>
               <div id="getPackageSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+              <section class="package-missing-panel get-package-missing-panel" aria-labelledby="getPackageMissingHeading">
+                <h5 id="getPackageMissingHeading">Missing parts — GetACourt</h5>
+                <p class="muted">This local Get check only, never club evidence or combined GO. Declared presence never verifies authority. Verified GO: none. Execution NOT_RUN.</p>
+                <div id="getPackageMissing" role="status" aria-live="polite" aria-atomic="true"></div>
+              </section>
             </section>
             <section class="go-next-panel candidate-next-panel" aria-labelledby="candidateNextHeading">
               <h4 id="candidateNextHeading">Next steps — GetACourt GO</h4>

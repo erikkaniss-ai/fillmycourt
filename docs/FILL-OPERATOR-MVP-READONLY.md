@@ -11,6 +11,13 @@
 
 ### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
 
+Continuation from Fill `b3b83b9`: separate read-only missing-part lists beside the
+package summaries show only exact local MISSING and UNKNOWN component declarations,
+with fixed readable labels and IDs; PRESENT is omitted. No list is inferred before
+review or after stale/rejected/changed context, and late results cannot restore it.
+No missing declaration means no verified GO; blockers stay open. No new reads,
+actions, transport, permission or deployment change.
+
 Continuation from Fill `0998f21`, preserving concurrent Draft changes: two
 separate read-only local package summaries now sit by the club and Get blockers.
 They reuse existing inspected manifest state for exact source/scope/time and

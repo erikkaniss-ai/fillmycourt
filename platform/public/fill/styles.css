@@ -170,5 +170,7 @@
 .go-request summary:focus-visible, .go-request-text:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
 .go-request-text { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; user-select:text; margin-bottom:0; }
 .go-package-items { padding-left:22px; overflow-wrap:anywhere; }
+.package-missing-panel { border-top:1px solid var(--line); margin-top:16px; overflow-wrap:anywhere; }
+.package-missing-panel h5, .package-missing-panel h6 { font-size:14px; margin:16px 0 8px; }
 .club-package-panel .button, .get-package-panel .button { max-width:100%; white-space:normal; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }
