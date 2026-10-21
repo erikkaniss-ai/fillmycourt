@@ -32,6 +32,24 @@ function route(url) {
   if (path === "/api/me" || path === "/api/fmc/organizations") {
     return url.search === "" ? {path} : {error: "INVALID_QUERY"};
   }
+  const provenance = /^\/api\/fmc\/([^/]+)\/provider-provenance\/([^/]+)$/.exec(path);
+  if (provenance) {
+    const [, org, connection] = provenance;
+    if (!UUID.test(org)) return {error: "INVALID_ORGANIZATION"};
+    if (connection === "connections")
+      return url.search === "" ? {path} : {error: "INVALID_QUERY"};
+    if (!UUID.test(connection)) return {error: "INVALID_CONNECTION"};
+    const after = url.searchParams.get("after_booking_id");
+    const allowed = ["max_age_seconds", "limit", ...(after === null ? [] : ["after_booking_id"])];
+    const age = url.searchParams.get("max_age_seconds");
+    const limit = url.searchParams.get("limit");
+    if (!onlyOneQuery(url, allowed) || !/^[1-9][0-9]*$/.test(age || "") ||
+        Number(age) > 31536000 || !/^[1-9][0-9]*$/.test(limit || "") ||
+        Number(limit) > 50 || (after !== null && !UUID.test(after)))
+      return {error: "INVALID_REVIEW_QUERY"};
+    return {path: path + "?max_age_seconds=" + age + "&limit=" + limit +
+      (after === null ? "" : "&after_booking_id=" + encodeURIComponent(after))};
+  }
   const match = /^\/api\/fmc\/([^/]+)\/(today|calendar)$/.exec(path);
   if (!match) return null;
   const org = match[1], operation = match[2];
@@ -140,5 +158,7 @@ export default async function fillOperatorReadonly(request, context) {
 }
 export const config = {
   path: ["/api/me", "/api/fmc/organizations",
-    "/api/fmc/:org/today", "/api/fmc/:org/calendar"]
+    "/api/fmc/:org/today", "/api/fmc/:org/calendar",
+    "/api/fmc/:org/provider-provenance/connections",
+    "/api/fmc/:org/provider-provenance/:connection"]
 };

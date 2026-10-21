@@ -1,7 +1,7 @@
 (() => {
   const q = (selector) => document.querySelector(selector);
   const qa = (selector) => [...document.querySelectorAll(selector)];
-  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0 };
+  const state = { token: null, org: null, orgs: [], view: "today", today: null, calendar: null, demo: false, authEpoch: 0, readEpoch: 0, calendarEpoch: 0, provenanceEpoch: 0, provenancePage: null };
   // Synthetic demo is opt-in and restricted to the separate private-preview host
   // and loopback dev. This NEVER activates on public fillmycourt.com.
   // Also accept the CI's non-production manual draft aliases and immutable
@@ -22,6 +22,11 @@
     loginForm: q("#operatorSignIn"), loginEmail: q("#operatorEmail"),
     loginPassword: q("#operatorPassword"), loginButton: q("#operatorLoginButton"),
     loginError: q("#operatorLoginError"),
+    provenance: q("#provenanceView"), dateToolbar: q("#dateToolbar"),
+    provenanceForm: q("#provenanceForm"), connection: q("#provenanceConnection"),
+    age: q("#provenanceAge"), review: q("#provenanceReview"),
+    provenanceMessage: q("#provenanceMessage"), report: q("#provenanceReport"),
+    next: q("#provenanceNext"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -79,7 +84,7 @@
     return typeof sessionStorage !== "undefined" ? sessionStorage.getItem("fill.access") : null;
   }
 
-  async function api(path, expectedCalendarEpoch = null) {
+  async function api(path, expectedCalendarEpoch = null, expectedProvenanceEpoch = null) {
     // Demo calls never touch a backend or persist/forward any token.
     if (state.demo) {
       if (!window.FillDemo?.get) throw Error("Synthetic demo dataset unavailable.");
@@ -94,18 +99,25 @@
     if (epoch !== state.authEpoch || token !== state.token) throw Error("STALE_SESSION");
     // An older tenant/date read must never revoke the session after navigation.
     if (readEpoch !== state.readEpoch ||
+        (expectedProvenanceEpoch !== null &&
+          (expectedProvenanceEpoch !== state.provenanceEpoch || state.view !== "provenance")) ||
         (expectedCalendarEpoch !== null &&
           (expectedCalendarEpoch !== state.calendarEpoch || state.view !== "calendar")))
       throw Error("STALE_REQUEST");
     if (!response.ok) {
       if (response.status === 401) invalidateSession();
-      throw Error(body.message || body.error || `Request failed ${response.status}`);
+      const error = Error(body.message || body.error || `Request failed ${response.status}`);
+      error.status = response.status;
+      throw error;
     }
     return body;
   }
 
   function showAuth() {
     state.calendarEpoch++;
+    resetProvenance(true);
+    if (el.provenance) el.provenance.hidden = true;
+    if (el.dateToolbar) el.dateToolbar.hidden = false;
     // Hidden nodes are still part of the DOM: remove private data on logout.
     state.today = null;
     state.calendar = null;
@@ -405,8 +417,140 @@
       'Rate coverage does not confirm a new booking can be completed.</p>';
   }
 
+  const evidenceLabels = {
+    foreign_booking: "Booking outside the selected organisation",
+    missing_receipt_reference: "Receipt reference missing",
+    receipt_unavailable: "Receipt missing or inaccessible",
+    foreign_receipt: "Receipt belongs to a different connection or organisation",
+    invalid_receipt: "Receipt is invalid",
+    stale_receipt: "Receipt is too old or expired",
+    permission_not_current: "Current permission evidence is not valid",
+    permission_changed: "Permission evidence has changed",
+    record_not_linked: "Booking is not linked to the source record",
+    consistent_internal_evidence: "Internal evidence is consistent — not pilot approval",
+  };
+  const evidenceUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  function resetProvenance(connections = false) {
+    state.provenanceEpoch++;
+    state.provenancePage = null;
+    if (el.report) el.report.textContent = "";
+    if (el.provenanceMessage) el.provenanceMessage.textContent = "";
+    if (el.next) { el.next.hidden = true; el.next.disabled = false; }
+    if (el.review) el.review.disabled = connections;
+    if (connections) {
+      if (el.connection) el.connection.innerHTML = '<option value="">Choose connection</option>';
+      if (el.age) el.age.value = "";
+    }
+  }
+
+  function evidenceError(error) {
+    if (["STALE_SESSION", "STALE_REQUEST"].includes(error?.message)) return;
+    if (!state.demo && !state.token) return;
+    el.provenanceMessage.textContent = error?.status === 403
+      ? "You do not have permission to review evidence for this organisation or connection."
+      : "Stored evidence report unavailable. No provider request was made; pilot remains unapproved.";
+  }
+
+  async function loadProvenanceConnections() {
+    if (!el.connection || !state.org) return;
+    const epoch = ++state.provenanceEpoch;
+    const org = state.org, auth = state.authEpoch;
+    const current = () => epoch === state.provenanceEpoch && org === state.org &&
+      auth === state.authEpoch && state.view === "provenance";
+    if (state.demo) {
+      el.provenanceMessage.textContent = "This synthetic demo contains no provider evidence. No API request was sent.";
+      return;
+    }
+    el.provenanceMessage.textContent = "Loading accessible connections…";
+    try {
+      const data = await api(`/api/fmc/${encodeURIComponent(org)}/provider-provenance/connections`, null, epoch);
+      if (!current()) return;
+      if (!Array.isArray(data.items) || data.items.length > 100 ||
+          data.items.some(item => !evidenceUUID.test(item.id) || item.provider !== "playtomic"))
+        throw Error("INVALID_REPORT");
+      el.connection.innerHTML = '<option value="">Choose connection</option>' +
+        data.items.map((item, i) => `<option value="${esc(item.id)}">Playtomic · connection ${i + 1}</option>`).join("");
+      el.review.disabled = data.items.length === 0;
+      el.provenanceMessage.textContent = data.items.length
+        ? "Choose a connection and enter the maximum receipt age to review stored evidence."
+        : "No supported connection in this organisation. No evidence or pilot readiness is inferred.";
+    } catch (error) { if (current()) evidenceError(error); }
+  }
+
+  function validEvidencePage(data, age) {
+    const flags = item => item?.pilot_ready === false &&
+      item.provider_requests_allowed === false && item.can_display_available_slots === false;
+    return data?.mode === "read_only_source_review" && flags(data) &&
+      data.max_age_seconds === age && typeof data.as_of === "string" &&
+      data.as_of.endsWith("Z") && Number.isFinite(Date.parse(data.as_of)) &&
+      ["no_shadow_bookings", "needs_review", "page_consistent"].includes(data.status) &&
+      Array.isArray(data.items) && data.items.length <= 50 &&
+      data.items.every(item => evidenceUUID.test(item.booking_id) &&
+        Object.hasOwn(evidenceLabels, item.status) && flags(item)) &&
+      new Set(data.items.map(item => item.booking_id)).size === data.items.length &&
+      typeof data.has_more === "boolean" &&
+      (data.has_more ? data.items.length > 0 && evidenceUUID.test(data.next_after_booking_id) &&
+        data.next_after_booking_id === data.items.at(-1).booking_id
+        : data.next_after_booking_id === null) &&
+      (data.status !== "page_consistent" || (!data.has_more && data.items.length > 0 &&
+        data.items.every(item => item.status === "consistent_internal_evidence"))) &&
+      (data.status !== "no_shadow_bookings" || (!data.has_more && data.items.length === 0));
+  }
+
+  async function loadProvenancePage(after = null) {
+    if (!state.org || state.view !== "provenance" || state.demo) return;
+    const org = state.org, connection = el.connection.value, ageText = el.age.value;
+    const age = Number(ageText);
+    if (!evidenceUUID.test(connection) || !/^[1-9][0-9]*$/.test(ageText) ||
+        !Number.isInteger(age) || age > 31536000) {
+      resetProvenance();
+      el.provenanceMessage.textContent = "Choose a connection and a whole-number receipt age from 1 to 31,536,000 seconds.";
+      return;
+    }
+    resetProvenance();
+    const epoch = state.provenanceEpoch, auth = state.authEpoch;
+    const current = () => epoch === state.provenanceEpoch && auth === state.authEpoch &&
+      org === state.org && state.view === "provenance";
+    el.review.disabled = true;
+    el.next.disabled = true;
+    el.provenanceMessage.textContent = "Reviewing stored evidence…";
+    try {
+      const data = await api(`/api/fmc/${encodeURIComponent(org)}/provider-provenance/${encodeURIComponent(connection)}?max_age_seconds=${age}&limit=50` +
+        (after ? `&after_booking_id=${encodeURIComponent(after)}` : ""), null, epoch);
+      if (!current()) return;
+      if (!validEvidencePage(data, age)) throw Error("INVALID_REPORT");
+      state.provenancePage = data;
+      const counts = new Map();
+      data.items.forEach(item => counts.set(item.status, (counts.get(item.status) || 0) + 1));
+      const heading = data.status === "no_shadow_bookings" ? "No stored shadow bookings on this page."
+        : data.status === "page_consistent" ? "This page is internally consistent. Pilot remains unapproved."
+        : "This page needs review. Pilot remains unapproved.";
+      el.provenanceMessage.textContent = heading;
+      el.report.innerHTML = `<p>Snapshot: ${esc(data.as_of)} · Maximum age: ${esc(age)} seconds · ${data.items.length} bookings on this page.</p>` +
+        (data.has_more ? "<p>More bookings remain. This is not a complete report.</p>" : "<p>End of this page sequence. This is not pilot approval.</p>") +
+        [...counts].map(([status, count]) => `<p>${esc(evidenceLabels[status])}: ${count}</p>`).join("") +
+        '<ul class="provenance-items">' + data.items.map(item =>
+          `<li>${esc(evidenceLabels[item.status])}<small>Internal booking ID: ${esc(item.booking_id)}</small></li>`).join("") + "</ul>";
+      el.next.hidden = !data.has_more;
+    } catch (error) { if (current()) evidenceError(error); }
+    finally { if (current()) { el.review.disabled = false; el.next.disabled = false; } }
+  }
+
+  el.provenanceForm?.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!el.review.disabled) return loadProvenancePage();
+  });
+  el.next?.addEventListener("click", () => {
+    const after = state.provenancePage?.next_after_booking_id;
+    if (after && !el.next.disabled) return loadProvenancePage(after);
+  });
+  el.connection?.addEventListener("change", () => resetProvenance());
+  el.age?.addEventListener("input", () => resetProvenance());
+
   async function load() {
     if (!state.org) return;
+    resetProvenance(true);
     const org = state.org, date = el.date.value;
     const authEpoch = state.authEpoch, readEpoch = ++state.readEpoch;
     state.calendarEpoch++;
@@ -419,6 +563,7 @@
       el.courtComparison, el.timeline].forEach((node) => { node.textContent = ""; });
     el.utilBadge.textContent = "—";
     clearError();
+    if (state.view === "provenance") return loadProvenanceConnections();
     try {
       const today = await api(`/api/fmc/${encodeURIComponent(org)}/today?date=${encodeURIComponent(date)}`);
       if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
@@ -459,13 +604,18 @@
   }
 
   qa(".nav-item").forEach((button) => button.addEventListener("click", async () => {
+    resetProvenance(true);
+    clearError();
     if (button.dataset.view !== "calendar") state.calendarEpoch++;
     state.view = button.dataset.view;
     qa(".nav-item").forEach((item) => item.classList.toggle("active", item === button));
-    el.pageTitle.textContent = state.view === "today" ? "Today" : state.view === "calendar" ? "Calendar" : "Revenue & Capacity";
+    el.pageTitle.textContent = state.view === "today" ? "Today" : state.view === "calendar" ? "Calendar" : state.view === "provenance" ? "Provider evidence" : "Revenue & Capacity";
     el.today.hidden = state.view !== "today";
     el.calendar.hidden = state.view !== "calendar";
     el.revenue.hidden = state.view !== "revenue";
+    if (el.provenance) el.provenance.hidden = state.view !== "provenance";
+    if (el.dateToolbar) el.dateToolbar.hidden = state.view === "provenance";
+    if (state.view === "provenance") await loadProvenanceConnections();
     if (state.view === "calendar") {
       try { await loadCalendar(); } catch (error) { fail(error); }
     }

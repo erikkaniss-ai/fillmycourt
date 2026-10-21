@@ -16,6 +16,7 @@
       <button class="nav-item active" data-view="today">Today</button>
       <button class="nav-item" data-view="calendar">Calendar</button>
       <button class="nav-item" data-view="revenue">Revenue & Capacity</button>
+      <button class="nav-item" data-view="provenance">Provider evidence</button>
     </nav>
     <div class="side-foot"><span>Revenue infrastructure for racket clubs.</span><a href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">Public site ↗</a></div>
   </aside>
@@ -48,12 +49,31 @@
         <strong>DEMONSTRATION ONLY · SYNTHETIC FIXTURE</strong>
         <span>Illustrative courts, utilisation, bookings, prices and revenue. No club, customer or provider data. No backend API requests.</span>
       </div>
-      <div class="toolbar">
+      <div id="dateToolbar" class="toolbar">
         <label>Date<input id="dateInput" type="date"></label>
         <button id="refreshButton" class="button primary">Refresh</button>
       </div>
       <div id="error" class="error" hidden></div>
       <p class="read-only-notice"><strong>Staging · read-only.</strong> This workspace shows the existing Core snapshot only. Until a club or provider source is explicitly authorised, displayed inventory is fixture-safe test data — not partner availability, a booking confirmation, or recoverable revenue.</p>
+
+      <section id="provenanceView" hidden>
+        <section class="panel">
+          <p class="eyebrow">PILOT PREPARATION · READ ONLY</p>
+          <h2>Provider evidence</h2>
+          <p>Review stored Playtomic booking receipts, not live provider data. TieSports evidence is not supported by this report.</p>
+          <p class="read-only-notice"><strong>Pilot not approved.</strong> Internal consistency never authorises provider requests, available slots, bookings or payments. Missing or hidden evidence stays unresolved; this screen cannot repair or refresh receipts.</p>
+          <form id="provenanceForm" class="provenance-controls">
+            <label>Provider connection<select id="provenanceConnection" required><option value="">Choose connection</option></select></label>
+            <label>Maximum receipt age (seconds)<input id="provenanceAge" type="number" min="1" max="31536000" step="1" required aria-describedby="provenanceAgeHelp"></label>
+            <button id="provenanceReview" type="submit" class="button primary" disabled>Review stored evidence</button>
+          </form>
+          <p id="provenanceAgeHelp" class="muted">Enter the approved review threshold explicitly (1–31,536,000 seconds). No provider freshness SLA is assumed.</p>
+          <p id="provenanceMessage" role="status" aria-live="polite"></p>
+          <div id="provenanceReport"></div>
+          <button id="provenanceNext" class="button secondary" type="button" hidden>Review next page</button>
+          <p class="muted">Each page is a separate snapshot, not a complete pilot assessment. A receipt from another organisation is hidden and shown as unavailable, never fetched through privileged access.</p>
+        </section>
+      </section>
 
       <section id="todayView">
         <div id="kpis" class="kpi-grid"></div>

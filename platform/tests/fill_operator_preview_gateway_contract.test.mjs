@@ -9,7 +9,10 @@ const OTHER_SITE_ID = "72eee365-bff0-48ec-bb8f-f08ff01341b7";
 const ID = "11111111-1111-4111-8111-111111111111";
 const paths = ["/api/me", "/api/fmc/organizations",
   "/api/fmc/"+ID+"/today?date=2026-10-16",
-  "/api/fmc/"+ID+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00"];
+  "/api/fmc/"+ID+"/calendar?start=2026-10-16T00%3A00%3A00%2B01%3A00&end=2026-10-17T00%3A00%3A00%2B01%3A00",
+  "/api/fmc/"+ID+"/provider-provenance/connections",
+  "/api/fmc/"+ID+"/provider-provenance/"+ID+"?max_age_seconds=60&limit=50",
+  "/api/fmc/"+ID+"/provider-provenance/"+ID+"?max_age_seconds=60&limit=50&after_booking_id="+ID];
 const request = (path, options={}) => new Request(APP+path,{method:options.method||"GET",
   headers: options.headers||{"authorization":"Bearer fixture-staging-user"}});
 async function harness(req, env=OPS, upstreamStatus=200, siteId=FILL_SITE_ID) {
@@ -26,14 +29,30 @@ async function harness(req, env=OPS, upstreamStatus=200, siteId=FILL_SITE_ID) {
     headers:r.headers,calls};}
   finally{globalThis.Netlify=previousNetlify;globalThis.fetch=previousFetch;}
 }
-test("Private Fill gateway registers only the four existing Operations GET routes",()=>{
+test("Private Fill gateway registers only approved Operations GET routes",()=>{
   assert.deepEqual(config.path,["/api/me","/api/fmc/organizations",
-    "/api/fmc/:org/today","/api/fmc/:org/calendar"]);
+    "/api/fmc/:org/today","/api/fmc/:org/calendar",
+    "/api/fmc/:org/provider-provenance/connections","/api/fmc/:org/provider-provenance/:connection"]);
   const conf=readFileSync("platform/netlify.toml","utf8");
   assert.match(conf,/publish = "public"/);
   assert.match(conf,/directory = "netlify\/functions"/);
   assert.match(conf,/X-Robots-Tag = "noindex, nofollow, noarchive"/);
   assert.doesNotMatch(conf,/GETACOURT_|provider|payment/i);
+});
+test("Provenance route accepts only explicit bounded freshness and cursor, no secret query",async()=>{
+  const root="/api/fmc/"+ID+"/provider-provenance/";
+  for(const path of [root+"connections?token=secret",root+"bad?max_age_seconds=60&limit=50",
+    root+ID,root+ID+"?max_age_seconds=0&limit=50",root+ID+"?max_age_seconds=31536001&limit=50",
+    root+ID+"?max_age_seconds=1.5&limit=50",root+ID+"?max_age_seconds=1e3&limit=50",
+    root+ID+"?max_age_seconds=60&limit=51",root+ID+"?max_age_seconds=60&limit=50&x=1",
+    root+ID+"?max_age_seconds=60&limit=50&limit=1",root+ID+"?max_age_seconds=60&limit=50&after_booking_id=",
+    root+ID+"?max_age_seconds=60&limit=50&after_booking_id=foreign"]){
+    const r=await harness(request(path));assert.equal(r.status,422,path);assert.equal(r.calls.length,0);
+  }
+  for(const method of ["PUT","PATCH","DELETE","HEAD"]){
+    const r=await harness(request(paths.at(-1),{method}));
+    assert.equal(r.status,405);assert.equal(r.calls.length,0);
+  }
 });
 test("Without bearer, no Railway request is sent",async()=>{
   for(const path of paths){

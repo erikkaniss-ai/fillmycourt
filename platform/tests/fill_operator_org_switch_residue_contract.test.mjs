@@ -50,6 +50,7 @@ test("org switch purges former tenant rendering before the new tenant read resol
       return request.promise;
     },
     clearError() {},
+    resetProvenance() {},
     renderToday() { rendered++; },
     loadCalendar: async () => {},
     fail(error) { throw error; },

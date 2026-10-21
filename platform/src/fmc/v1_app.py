@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from .common import DomainError, SPORTS, require_key
 from .supabase_v1 import Actor, SupabaseAuth, V1Store, one, rows
+from .provider_provenance_review import review_provider_provenance
 
 
 ROLE_ADMIN = {"owner", "admin"}
@@ -1698,6 +1699,29 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     order by starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
                 return {"bookings": bookings, "holds": holds, "blocks": blocks}
+
+        @app.get("/api/fmc/{org}/provider-provenance/connections")
+        def provenance_connections(org: uuid.UUID, request: Request):
+            a = who(request)
+            # Never reuse /providers: its config is not an operator-view DTO.
+            with db.user(a.id, readonly=True) as c:
+                role(c, str(org), a, ROLE_FINANCE)
+                return {"items": rows(c.execute(text("""
+                    select id::text,provider from public.provider_connections
+                    where organization_id=cast(:org as uuid) and provider='playtomic'
+                    order by id limit 100
+                """), {"org": str(org)}))}
+
+        @app.get("/api/fmc/{org}/provider-provenance/{connection_id}")
+        def provenance_report(org: uuid.UUID, connection_id: uuid.UUID, request: Request,
+                              max_age_seconds: int = Query(ge=1, le=31536000),
+                              limit: int = Query(default=50, ge=1, le=50),
+                              after_booking_id: uuid.UUID | None = None):
+            return review_provider_provenance(
+                db, user_id=who(request).id, organization_id=str(org),
+                connection_id=str(connection_id), now=datetime.now(timezone.utc),
+                max_age_seconds=max_age_seconds, limit=limit,
+                after_booking_id=str(after_booking_id) if after_booking_id else None)
 
         @app.get("/api/fmc/{org}/providers")
         def providers(org: str, request: Request):
