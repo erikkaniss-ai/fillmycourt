@@ -33,6 +33,7 @@ test("One PR CI run still requires complete browser + database coverage",()=>{
   assert.match(workflow,/Apply migrations from zero/);
   assert.match(workflow,/pytest -q platform\/tests/);
   assert.match(workflow,/getacourt_auth_facade_contract\.test\.mjs/);
-  assert.match(workflow,/QA-PREVIEW-02 anonymous Netlify perimeter/);
+  assert.match(workflow,/QA-PREVIEW-02 offline preflight regression/);
+  assert.doesNotMatch(workflow,/run: node platform\/tests\/getacourt_preview_perimeter_smoke.mjs/);
   assert.match(workflow,/cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/);
 });

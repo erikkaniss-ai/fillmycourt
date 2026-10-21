@@ -1,5 +1,20 @@
 # GetACourt — Player Platform MVP v1
 
+## Remaining acceptance preflight — 21 October 2026 (no deploy)
+
+Continued from accepted Get `be691ef98b5c2adb6ff412b39fae1d44305fee08`,
+existing Draft PR #5. The [read-only acceptance preflight](getacourt-acceptance-preflight.md)
+defines seven separate hosted/device/location/OAuth/human-accessibility GO gates.
+It only evaluates local nonsecret evidence and scoped approval records. Missing,
+stale, mismatched or contradictory records fail closed; even complete records
+require human GO verification, never enable execution or mark UAT passed.
+Current snapshot has no exact-candidate deployment or GO: all remain BLOCKED /
+NOT_RUN. Real OAuth/user-session creation is explicitly not read-only.
+CI's historical live preview/production perimeter probe is retired and replaced
+by offline contracts, while full fixture/PostgreSQL/browser regression is retained.
+Worker stays unregistered. No active app, auth, provider, hosting or production
+configuration changes; no new Control Tower, deploy or public/base merge.
+
 ## Current RC source integration — 21 October 2026 (no deploy)
 
 Continued from Get Draft PR #5 at `031878c3ea284b0718793e94ed1f42f572994d5f`.
