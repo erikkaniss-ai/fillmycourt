@@ -462,4 +462,6 @@ test("Manifest inspection stays local, has labelled independent regions and no n
   const html=readFileSync("platform/public/fill/index.html","utf8");
   for(const domain of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+domain+'PackageHeading"'));assert.match(html,new RegExp('id="'+domain+'PackageResult" role="status" aria-live="polite"'));}
   assert.match(html,/Declared completeness is not permission/);
+  assert.match(html,/<span id="getPackageCheckLabel">GetACourt package check<\/span>/);
+  assert.match(html,/id="getPackageCheck"[^>]*aria-labelledby="getPackageCheckLabel"/);
 });
