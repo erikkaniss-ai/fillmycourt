@@ -73,6 +73,8 @@ try{
     await page.locator("#resultCount").waitFor({state:"visible"});
     await page.waitForFunction(()=>document.querySelector("#resultsGrid")?.getAttribute("aria-busy")==="false"
       && document.querySelector("#resultCount")?.textContent?.includes("available slot"));
+    const initialScroll=await page.evaluate(()=>window.scrollY);
+    assert.ok(initialScroll<=2,width+" initial search must not jump past hero; y="+initialScroll);
     assert.equal(await page.locator("#myBookingsButton").isVisible(),true,width+" bookings visible");
     assert.equal(await page.locator("#myWatchesButton").isVisible(),true,width+" watches visible");
     assert.equal(await page.locator("#authButton").isVisible(),true,width+" account visible");
@@ -84,8 +86,7 @@ try{
       width+" document horizontal overflow "+JSON.stringify(overflow));
 
     // Keyboard Tab reaches the visible skip link; skip moves to the search landmark.
-    await page.locator(".site-header .brand").focus();
-    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(()=>document.activeElement?.classList.contains("skip-link")),true,
       width+" skip link keyboard focus");
     assert.notEqual(await page.locator(".skip-link").evaluate(el=>getComputedStyle(el).outlineStyle),"none",
