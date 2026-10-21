@@ -475,6 +475,7 @@ def test_preflight_viewer_two_org_real_api_scope_and_denials(two_org_uat, monkey
                 calls.append(url.path)
                 if hold[0] and url.path == root(uat, 0) + "/preflight":
                     pending.append(route)
+                    hold[0] = False  # Delay exactly one old-scope read, not the later manager denial.
                     return
                 response = uat.client.get(url.path + ("?" + url.query if url.query else ""),
                     headers={"Authorization": req.headers.get("authorization", "")})
