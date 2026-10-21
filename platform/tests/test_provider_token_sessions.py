@@ -36,6 +36,38 @@ def test_secret_rotation_or_different_org_must_not_reuse_club_token():
     assert sessions.size()==2
     assert all(not hasattr(sessions,"export_tokens") for _ in [0])
 
+def test_rotation_and_capacity_eviction_scrub_retained_token_references():
+    # All tokens and clients are fictional: no network calls or real credentials.
+    from time import time
+    sessions = ProviderTokenSessions()
+    original = sessions.get(**params())
+    original.token = "synthetic-before-rotation"
+    original.expires = time() + 3600
+    other = sessions.get(**params(org="org-other"))
+    other.token = "synthetic-unrelated"
+    other.expires = time() + 3600
+
+    rotated = sessions.get(**params(secret="new-fixture-secret"))
+    assert rotated is not original
+    assert original.token is None and original.expires == 0
+    assert not original.token_usable()
+    # Rotation is scoped: an unrelated club's cached token remains intact.
+    assert other.token_usable()
+
+    rotated.token = "synthetic-retained-token"
+    rotated.expires = time() + 3600
+    # 64 cache keys, then a new connection triggers a full capacity eviction.
+    for i in range(62):
+        sessions.get(**params(connection=f"pc-filler-{i}"))
+    assert sessions.size() == 64
+    sessions.get(**params(connection="pc-overflow"))
+    assert sessions.size() == 1
+    for retained in (rotated, other):
+        assert retained.token is None and retained.expires == 0
+        assert not retained.token_usable()
+    assert sessions.get(**params(connection="pc-overflow")).token is None
+
+
 def test_cache_is_in_memory_not_a_persistent_token_store():
     sessions=ProviderTokenSessions()
     old=sessions.get(**params())
