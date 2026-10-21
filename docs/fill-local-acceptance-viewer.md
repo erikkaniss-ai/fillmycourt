@@ -1,5 +1,72 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Local GO-package manifest completeness — continuation from Fill1e5846d
+
+Two separate owner/admin-only sections inspect a **sanitized local JSON manifest**,
+never raw approvals or linked documents. Explicit selection and button click are
+required; no upload, fetch, sending, persistence, clipboard, approval record,
+credential handling, evidence repair or check execution is added. This verifies
+only schema/context and **declared presence**, not actual document contents,
+signature, approver/delegation, consent, evidence, deployment or legal authority.
+Even every item PRESENT yields only "independent manual review required",
+"Verified GO: none" and "Execution NOT_RUN". Existing blockers stay open.
+
+Club context requires a completed valid explicit Operations read for the selected
+organisation, matching the current expected Operations SHA. Passed **or blocked**
+snapshots supply context only, not approval. Get requires a current explicitly
+reviewed local candidate report and an explicit selection of one of its seven
+check types; this is never a combined GO. Each package is tied to source SHA,
+check, organisation/auth context and source snapshot. Club manifests additionally
+must name exactly the selected organisation; Get manifests cannot contain a club
+ID. Club packages cover protected read-only provenance UAT only, NOT pilot GO.
+
+Manifest v1 has exactly these top-level fields:
+
+- `schemaVersion: 1`, `mode: "READ_ONLY_GO_PACKAGE"`, `domain: "club" | "get"`.
+- `sourceSha` (full exact source SHA), `checkId` (`club-provenance-uat` for club,
+  otherwise one exact Get check ID), plus `organisationId` for club **only**.
+- `asOf` and `reviewUntil`: canonical UTC second timestamps, e.g.
+  `2026-10-21T10:20:00Z`. The manifest/source snapshot must not be future or more
+  than 24 hours old; the local manifest review window must be future and at most
+  24 hours from `asOf`. This UI limit is NOT a provider freshness SLA or verified
+  approval validity/expiry. Original policy, expiry/revocation and stop evidence
+  still require independent review.
+- `authorityVerified: false`, `executionEnabled: false` only.
+- `actions`: exact ordered allowlist. For Get use that check's pinned
+  `requiredGoActions` from report-v1. Club uses exactly
+  `operations-preflight-get`, `stored-provenance-get`,
+  `two-synthetic-org-isolation`, `unauthenticated-access-denial`,
+  `wrong-role-access-denial`, `cross-org-access-denial`. These are local scope
+  identifiers, not callable routes or permission to execute them.
+- `items`: at most one `{ "id": "…", "state": "PRESENT" | "MISSING" | "UNKNOWN" }`
+  for each allowed component. Omitted components are MISSING; explicit UNKNOWN
+  stays unresolved. Extra keys, unknown/duplicate items, foreign SHA/org/check/
+  domain, changed actions, unsafe flags, malformed or expired data are rejected
+  without rendering raw contents. Maximum file/text size 32 KiB.
+
+Common required components: `original-authority`, `source-binding`,
+`protected-deploy`, `independent-runtime`, `isolation`, `tester-consent`,
+`scope-allowlist`, `current-evidence`, `unresolved-blockers`,
+`expiry-revocation-stop`. Club adds `two-synthetic-orgs`, `connection-freshness`,
+`club-wide-coverage`. Get adds its pinned `requiredEvidence` kinds, de-duplicated,
+and `separate-state-change-go` for OAuth/location. PRESENT for blockers means
+only that a blocker inventory is declared present, NOT that blockers are resolved.
+
+Synthetic schema examples (fictional declarations, NOT GO or current evidence):
+[incomplete club manifest](../platform/tests/fixtures/club-go-package-INCOMPLETE-FIXTURE-ONLY.json)
+and [all-declared Get OAuth manifest](../platform/tests/fixtures/get-go-package-DECLARED-FIXTURE-ONLY.json).
+Fixed fixture dates deliberately expire; do not refresh them to claim real evidence.
+
+File/check/source/club/tab/session resets clear old results and selected files;
+neither domain clears or grants the other's independent result. Late file success
+or failure cannot restore superseded data or erase a newer review. Source and
+manifest expiry are rechecked on existing renders/reads, not an automatic timer
+or monitoring service. Local Node contracts and loopback Chromium cover missing,
+unknown, all-declared, malformed/foreign/unsafe data, context isolation, late
+results, no extra network/storage and desktop/320px images named
+`fill-go-package-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`. This is source/CI
+acceptance only, not protected hosted UAT, physical devices or OAuth acceptance.
+
 ## Unsent GO request templates — continuation from Fill27fe097
 
 Each scope column has its own labelled template section. Native keyboard-accessible

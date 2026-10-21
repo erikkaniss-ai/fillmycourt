@@ -11,6 +11,16 @@
 
 ### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
 
+Continuation from Fill `1e5846d`: separate local GO-package completeness checks
+now inspect bounded sanitized manifests for club protected read-only UAT and one
+explicit Get check. Missing/UNKNOWN components stay unresolved; all PRESENT means
+only declared completeness requiring independent manual review, never verified
+GO or permission. Exact source/domain/check/org and current review windows are
+required. No raw approvals, transport, sending, storage, authority verification,
+new API or execution. Existing blockers, per-domain permissions and no-deploy
+guards remain unchanged. Schema/examples and safety details are in the
+[local viewer notes](fill-local-acceptance-viewer.md).
+
 Continuation from Fill `27fe097`: separate owner/admin read-only unsent GO request
 templates now sit under the club and Get planning lists. Club requests cover only
 protected provenance UAT (not pilot GO); Get requests select per-check missing-GO

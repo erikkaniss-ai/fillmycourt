@@ -5,6 +5,14 @@ import vm from "node:vm";
 const source=readFileSync("platform/public/fill/app.js","utf8");
 // Pinned sanitized CI output, not a newly issued GO or hosted acceptance receipt.
 const golden=JSON.parse(readFileSync("platform/tests/fixtures/get-acceptance-79977c8-NOT-RUN.json","utf8"));
+const clubPackage=JSON.parse(readFileSync("platform/tests/fixtures/club-go-package-INCOMPLETE-FIXTURE-ONLY.json","utf8"));
+const getPackage=JSON.parse(readFileSync("platform/tests/fixtures/get-go-package-DECLARED-FIXTURE-ONLY.json","utf8"));
+function operationsRead(){return {mode:"read_only_operations_preflight",contract_version:"provider-provenance-operations-preflight/v1",
+  as_of:"2026-10-21T10:00:00Z",operations_runtime_sha:"a".repeat(40),runtime_identity_source:"railway_build_environment_not_independent_attestation",
+  status:"operations_checks_passed",checks:Object.fromEntries(["operations_service","non_production_runtime","runtime_revision_matches",
+    "provider_reads_disabled_in_this_api","owner_admin_scope","authenticated_rls_context","repeatable_read_only","schema_rls_select","reader_columns_present","get_routes_present"].map(k=>[k,"pass"])),
+  not_assessed:["external_runtime_identity","protected_host","two_org_hosted_uat","worker_provider_read_state","fixture_provisioning","owner_uat_go"],
+  ...Object.fromEntries(["hosted_uat_ready","uat_accepted","pilot_ready","provider_requests_allowed","can_display_available_slots","deploy_allowed"].map(k=>[k,false]))};}
 const SHA="79977c8672db84e6c062a804268dd9123e04f480";
 const ORG="11111111-1111-4111-8111-111111111111",OTHER="22222222-2222-4222-8222-222222222222";
 const NOW=Date.parse("2026-10-21T10:30:00Z");
@@ -29,6 +37,7 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
   const fixture=path=>path==="/api/me"?{user:{email:"fixture@example.invalid"}}:
     path==="/api/fmc/organizations"?{items:[{id:ORG,name,role},{id:OTHER,name:"SYNTHETIC B",role:"admin"}]}:
     path.includes("/today?")?{summary:{},courts:[],empty_windows:[]}:
+    path.includes("/preflight?")?(controls.preflight||operationsRead()):
     path.endsWith("/connections")?{items:[]}:null;
   vm.runInNewContext(source,{URLSearchParams,Intl,Date:ReviewClock,Map,Set,Number,String,Error,JSON,encodeURIComponent,
     document:{querySelector:get,querySelectorAll:()=>nav},window:{FillDemo:{get:fixture}},
@@ -48,7 +57,14 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
     await get("#acceptanceFile").run("change");
   };
   const review=()=>get("#acceptanceForm").run("submit");
-  return {get,nav,storage,calls,controls,open,select,review,setNow:value=>{clockNow=value;},
+  const ops=async()=>{get("#operationsSha").value="a".repeat(40);await get("#operationsSha").run("input");await get("#preflightForm").run("submit");};
+  const check=async(id="google-oauth")=>{get("#getPackageCheck").value=id;await get("#getPackageCheck").run("change");};
+  const selectPackage=async(domain,data,customFile)=>{const text=typeof data==="string"?data:JSON.stringify(data);
+    get("#"+domain+"PackageFile").files=[customFile||{size:Buffer.byteLength(text),text:async()=>text}];
+    await get("#"+domain+"PackageFile").run("change");};
+  return {get,nav,storage,calls,controls,open,select,review,ops,check,selectPackage,setNow:value=>{clockNow=value;},
+    packageReview:domain=>get("#"+domain+"PackageForm").run("submit"),
+    packageResult:domain=>get("#"+domain+"PackageResult").innerHTML||get("#"+domain+"PackageResult").textContent,
     clubSteps:()=>get("#clubNextSteps").innerHTML||get("#clubNextSteps").textContent,
     candidateSteps:()=>get("#candidateNextSteps").innerHTML||get("#candidateNextSteps").textContent,
     clubDraft:()=>get("#clubGoRequest").innerHTML||get("#clubGoRequest").textContent,
@@ -341,4 +357,109 @@ test("Templates are escaped selectable disclosures, not editable approvals, send
   for(const segment of [helper,club,candidate])assert.doesNotMatch(segment,/<(?:button|input|textarea|form|a)\b|contenteditable|mailto:|clipboard|Storage|\.addEventListener|\bapi\(|\bfetch\(|\.submit\(/);
   assert.match(css,/\.go-request-text \{ white-space:pre-wrap; overflow-wrap:anywhere/);
   assert.match(css,/summary:focus-visible/);
+});
+
+async function packageHarness(){const h=await harness();await h.open();await h.ops();await h.select();await h.review();await h.check();return h;}
+test("Local manifest check is explicit and scoped; no context or denied/demo role cannot read files",async()=>{
+  for(const options of [{},{role:"manager"},{signedIn:false},{demo:true}]){
+    const h=await harness(options);await h.open();let reads=0;
+    for(const domain of ["club","get"]){
+      await h.selectPackage(domain,{}, {size:100,text:async()=>{reads++;return "{}";}});await h.packageReview(domain);
+      assert.match(h.packageResult(domain),/No current owner\/admin source context/);
+    }
+    assert.equal(reads,0);
+  }
+  const h=await packageHarness();const count=h.calls.length;
+  await h.selectPackage("club",clubPackage);await h.selectPackage("get",getPackage);
+  assert.equal(h.packageResult("club"),"");assert.equal(h.packageResult("get"),"");assert.equal(h.calls.length,count);
+});
+test("Club manifest reports absent/unknown items and cannot grant UAT or pilot; Get remains independent",async()=>{
+  const h=await packageHarness(),candidate=h.summary(),drafts=h.candidateDrafts(),blockers=h.get("#clubUatBlockers").innerHTML,count=h.calls.length;
+  await h.selectPackage("club",clubPackage);await h.packageReview("club");
+  assert.match(h.packageResult("club"),/Manifest incomplete/);assert.match(h.packageResult("club"),/1 of 13/);
+  assert.match(h.packageResult("club"),/original-authority: UNKNOWN/);assert.match(h.packageResult("club"),/protected-deploy: MISSING/);
+  assert.match(h.packageResult("club"),new RegExp(ORG));assert.match(h.packageResult("club"),/Verified GO: none/);
+  assert.equal(h.summary(),candidate);assert.equal(h.candidateDrafts(),drafts);assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);
+  assert.equal(h.calls.length,count);assert.equal(h.storage.size,1);
+  const empty=structuredClone(clubPackage);empty.items=[];await h.selectPackage("club",empty);await h.packageReview("club");assert.match(h.packageResult("club"),/0 of 13/);
+  empty.items=[...getPackage.items.slice(0,10),...['two-synthetic-orgs','connection-freshness','club-wide-coverage'].map(id=>({id,state:"PRESENT"}))];
+  await h.selectPackage("club",empty);await h.packageReview("club");assert.match(h.packageResult("club"),/All required items declared present/);
+  assert.match(h.packageResult("club"),/Existing blockers stay open/);assert.match(h.packageResult("club"),/Verified GO: none/);
+});
+test("A blocked Operations source with native fractional timestamp supplies context only; source expiry clears both packages",async()=>{
+  const h=await packageHarness();h.controls.preflight=operationsRead();h.controls.preflight.as_of="2026-10-21T10:00:00.123456Z";
+  h.controls.preflight.status="blocked";h.controls.preflight.operations_runtime_sha=null;h.controls.preflight.checks.runtime_revision_matches="blocked";
+  await h.ops();await h.selectPackage("club",clubPackage);await h.packageReview("club");assert.match(h.packageResult("club"),/1 of 13/);
+  assert.match(h.get("#clubUatBlockers").innerHTML,/Runtime revision matches/);
+  await h.selectPackage("get",getPackage);await h.packageReview("get");
+  h.setNow(NOW+25*60*60*1000);await h.get("#operationsSha").run("input");
+  for(const domain of ["club","get"]){assert.equal(h.packageResult(domain),"");assert.equal(h.get("#"+domain+"PackageFile").files.length,0);}
+  assert.equal(h.get("#getPackageCheck").value,"");
+});
+test("All seven Get package scopes require exact actions and check-specific components, never claim verified GO",async()=>{
+  const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");const club=h.packageResult("club"),count=h.calls.length;
+  for(const c of golden.checks){
+    const d=structuredClone(getPackage);d.checkId=c.id;d.actions=c.requiredGoActions;
+    d.items=[...new Set([...getPackage.items.slice(0,10).map(x=>x.id),...c.requiredEvidence,...(c.requiresStateChangeGO?["separate-state-change-go"]:[])])].map(id=>({id,state:"PRESENT"}));
+    await h.check(c.id);await h.selectPackage("get",d);await h.packageReview("get");
+    assert.match(h.packageResult("get"),/All required items declared present/);assert.match(h.packageResult("get"),/NOT document or authority validation/);
+    assert.match(h.packageResult("get"),/Execution NOT_RUN/);assert.match(h.packageResult("get"),/Verified GO: none/);
+    assert.doesNotMatch(h.packageResult("get"),new RegExp(ORG));assert.equal(h.packageResult("club"),club);
+  }
+  assert.equal(h.calls.length,count);assert.equal(h.storage.size,1);
+});
+test("Manifest rejects foreign domains/orgs/SHA/check/actions, expiry, unknown or duplicate components and unsafe flags without raw data",async()=>{
+  const h=await packageHarness();const mutations=[d=>d.schemaVersion=2,d=>d.mode="RUN",d=>d.domain="club",d=>d.organisationId=ORG,
+    d=>d.sourceSha="a".repeat(40),d=>d.checkId="hosted-ui",d=>d.authorityVerified=true,d=>d.executionEnabled=true,
+    d=>d.asOf="2026-10-20T10:29:59Z",d=>d.asOf="2026-10-21T10:30:01Z",d=>d.asOf="2026-02-30T10:00:00Z",
+    d=>d.reviewUntil="2026-10-21T10:30:00Z",d=>d.reviewUntil="2026-10-22T10:20:01Z",d=>d.reviewUntil="SECRET",
+    d=>d.actions.push("production-deploy"),d=>d.actions.reverse(),d=>d.items.push(d.items[0]),d=>d.items[0].id="SECRET<img>",
+    d=>d.items[0].state="APPROVED",d=>d.items[0].url="SECRET",d=>d.token="SECRET",d=>d.items=null,d=>d.items[0]=null];
+  for(const mutate of mutations){
+    await h.selectPackage("get",getPackage);await h.packageReview("get");assert.match(h.packageResult("get"),/All required/);
+    const d=structuredClone(getPackage);mutate(d);await h.selectPackage("get",d);await h.packageReview("get");
+    assert.match(h.packageResult("get"),/Manifest rejected/);assert.doesNotMatch(h.packageResult("get"),/SECRET|<img|All required/);
+  }
+  for(const change of [d=>d.organisationId=OTHER,d=>d.sourceSha=SHA,d=>d.checkId="club-pilot",d=>d.actions.push("provider-fetch")]){
+    const d=structuredClone(clubPackage);change(d);await h.selectPackage("club",d);await h.packageReview("club");assert.match(h.packageResult("club"),/Manifest rejected/);
+  }
+  for(const value of ["{","null","[]","{}"]){await h.selectPackage("get",value);await h.packageReview("get");assert.match(h.packageResult("get"),/Manifest rejected/);}
+  assert.ok(h.calls.every(c=>c.method==="GET"));
+});
+test("Bounded files only, no automatic read; file exceptions are redacted and manifest expiry clears results",async()=>{
+  const h=await packageHarness();let reads=0;
+  for(const size of [0,-1,32769,NaN]){await h.selectPackage("get",{}, {size,text:async()=>{reads++;return "{}";}});await h.packageReview("get");}
+  assert.equal(reads,0);
+  for(const value of [null," ".repeat(32769)]){await h.selectPackage("get",{}, {size:100,text:async()=>value});await h.packageReview("get");assert.match(h.packageResult("get"),/Manifest rejected/);}
+  await h.selectPackage("get",{}, {size:100,text:async()=>{throw Error("SECRET");}});await h.packageReview("get");assert.doesNotMatch(h.packageResult("get"),/SECRET/);
+  await h.selectPackage("get",getPackage);await h.packageReview("get");h.setNow(NOW+60*60*1000);
+  await h.get("#operationsSha").run("input");assert.match(h.packageResult("get"),/review window expired/);
+  assert.equal(h.get("#getPackageFile").files.length,0);
+});
+for(const action of ["club","tab","logout","401","get-sha","get-file","check","ops-sha","refresh"])
+test(`Late manifest completion cannot rehydrate a superseded package: ${action}`,async()=>{
+  const h=await packageHarness(),domain=action==="ops-sha"?"club":"get",wait=deferred();
+  await h.selectPackage(domain,{}, {size:100,text:()=>wait.promise});const running=h.packageReview(domain);await settle();
+  if(action==="club"){h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();}
+  if(action==="tab")await h.nav[0].run("click");if(action==="logout")await h.get("#signOut").run("click");
+  if(action==="401"){h.controls.deny=true;await h.get("#refreshButton").run("click");await settle();}
+  if(action==="get-sha"){h.get("#acceptanceSha").value="b".repeat(40);await h.get("#acceptanceSha").run("input");}
+  if(action==="get-file")await h.select();if(action==="check")await h.check("hosted-ui");
+  if(action==="ops-sha"){h.get("#operationsSha").value="b".repeat(40);await h.get("#operationsSha").run("input");}
+  if(action==="refresh"){await h.get("#refreshButton").run("click");await settle();}
+  wait.resolve(JSON.stringify(domain==="club"?clubPackage:getPackage));await running;
+  assert.equal(h.packageResult(domain),"");assert.equal(h.get("#"+domain+"PackageFile").files.length,0);
+});
+test("Late manifest failure cannot erase a newer result; Get edits do not erase club package",async()=>{
+  const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");const club=h.packageResult("club"),old=deferred();
+  await h.selectPackage("get",{}, {size:100,text:()=>old.promise});const running=h.packageReview("get");await settle();
+  await h.selectPackage("get",getPackage);await h.packageReview("get");const current=h.packageResult("get");old.reject(Error("SECRET"));await running;
+  assert.equal(h.packageResult("get"),current);await h.select();assert.equal(h.packageResult("club"),club);assert.equal(h.packageResult("get"),"");
+});
+test("Manifest inspection stays local, has labelled independent regions and no network, credential, clipboard or approval transport",()=>{
+  const segment=source.slice(source.indexOf("  const goPackageCommon ="),source.indexOf("  async function load()"));
+  assert.doesNotMatch(segment,/\bfetch\(|\bapi\(|Storage|FormData|clipboard|mailto:|setInterval|setTimeout|serviceWorker|\.submit\(/);
+  const html=readFileSync("platform/public/fill/index.html","utf8");
+  for(const domain of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+domain+'PackageHeading"'));assert.match(html,new RegExp('id="'+domain+'PackageResult" role="status" aria-live="polite"'));}
+  assert.match(html,/Declared completeness is not permission/);
 });

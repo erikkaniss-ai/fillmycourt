@@ -12,6 +12,8 @@ from test_fill_operator_e2e import QuietHandler
 
 ROOT = Path(__file__).resolve().parent
 PINNED = json.loads((ROOT / "fixtures/get-acceptance-79977c8-NOT-RUN.json").read_text())
+CLUB_PACKAGE = json.loads((ROOT / "fixtures/club-go-package-INCOMPLETE-FIXTURE-ONLY.json").read_text())
+GET_PACKAGE = json.loads((ROOT / "fixtures/get-go-package-DECLARED-FIXTURE-ONLY.json").read_text())
 SHA = "79977c8672db84e6c062a804268dd9123e04f480"
 ORG = "11111111-1111-4111-8111-111111111111"
 OTHER = "22222222-2222-4222-8222-222222222222"
@@ -52,6 +54,15 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                     body = {"summary": {}, "courts": [], "empty_windows": []}
                 elif url.path.endswith("/connections"):
                     body = {"items": []}
+                elif url.path.endswith("/preflight"):
+                    body = {"mode": "read_only_operations_preflight", "contract_version": "provider-provenance-operations-preflight/v1",
+                        "as_of": "2026-10-21T10:00:00Z", "operations_runtime_sha": "a" * 40,
+                        "runtime_identity_source": "railway_build_environment_not_independent_attestation", "status": "operations_checks_passed",
+                        "checks": {k: "pass" for k in ["operations_service", "non_production_runtime", "runtime_revision_matches",
+                            "provider_reads_disabled_in_this_api", "owner_admin_scope", "authenticated_rls_context", "repeatable_read_only",
+                            "schema_rls_select", "reader_columns_present", "get_routes_present"]},
+                        "not_assessed": ["external_runtime_identity", "protected_host", "two_org_hosted_uat", "worker_provider_read_state", "fixture_provisioning", "owner_uat_go"],
+                        **{k: False for k in ["hosted_uat_ready", "uat_accepted", "pilot_ready", "provider_requests_allowed", "can_display_available_slots", "deploy_allowed"]}}
                 else:
                     raise AssertionError("Unexpected API route; no acceptance backend exists")
                 route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
@@ -72,6 +83,9 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(club_draft).to_contain_text("[REQUIRED: exact approved Operations SHA")
             expect(candidate_drafts.locator("details")).to_have_count(0)
             club_draft_before = club_draft.inner_html()
+            expect(page.locator("#clubPackageReview")).to_be_disabled()
+            expect(page.locator("#getPackageReview")).to_be_disabled()
+            expect(page.locator("#getPackageCheck")).to_be_disabled()
             expect(club_steps.locator('[data-club-next="club-uat-go"]')).to_have_count(1)
             expect(club_steps.locator('[data-club-next="club-pilot-go"]')).to_have_count(1)
             expect(candidate_steps.locator('[data-candidate-go]')).to_have_count(0)
@@ -195,7 +209,62 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             assert club_steps.inner_html() == club_steps_before
             assert page.locator("#clubUatBlockers").inner_html() == club_before
 
+            # New local completeness surfaces: declarations only, no approval or live check.
+            page.get_by_label("Expected Operations SHA", exact=True).fill("a" * 40)
+            page.get_by_role("button", name="Check Operations preflight", exact=True).click()
+            expect(page.locator("#clubPackageReview")).to_be_enabled()
+            package_calls = len(calls)
+            package_blockers = page.locator("#clubUatBlockers").inner_html()
+            club_result, get_result = page.locator("#clubPackageResult"), page.locator("#getPackageResult")
+
+            def inspect_package(domain, value):
+                page.locator(f"#{domain}PackageFile").set_input_files({
+                    "name": "SANITIZED-FIXTURE-ONLY.json", "mimeType": "application/json", "buffer": json.dumps(value).encode(),
+                })
+                expect(page.locator(f"#{domain}PackageResult")).to_be_empty()
+                page.locator(f"#{domain}PackageReview").click()
+
+            inspect_package("club", CLUB_PACKAGE)
+            expect(club_result).to_contain_text("1 of 13")
+            expect(club_result).to_contain_text("original-authority: UNKNOWN")
+            expect(club_result).to_contain_text("protected-deploy: MISSING")
+            expect(club_result).to_contain_text("Verified GO: none")
+            club_package_before = club_result.inner_html()
+            page.get_by_label("GetACourt package check", exact=True).select_option("google-oauth")
+            inspect_package("get", GET_PACKAGE)
+            expect(get_result).to_contain_text("15 of 15")
+            expect(get_result).to_contain_text("independent manual review required")
+            expect(get_result).to_contain_text("Verified GO: none")
+            expect(get_result).to_contain_text("separate-state-change-go: PRESENT")
+            expect(get_result).not_to_contain_text(ORG)
+            assert club_result.inner_html() == club_package_before
+            assert page.locator("#clubUatBlockers").inner_html() == package_blockers
+            assert len(calls) == package_calls
+            page.set_viewport_size({"width": 1440, "height": 1000})
+            for domain in ["club", "get"]:
+                panel = page.locator(f".{domain}-package-panel")
+                panel.screenshot(path=str(screenshots / f"fill-go-package-{domain}-desktop-FIXTURE-ONLY.png"))
+            page.set_viewport_size({"width": 320, "height": 900})
+            assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+            for domain in ["club", "get"]:
+                page.locator(f".{domain}-package-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
+                page.screenshot(path=str(screenshots / f"fill-go-package-{domain}-mobile-FIXTURE-ONLY.png"))
+            bad_package = copy.deepcopy(GET_PACKAGE)
+            bad_package["token"] = "PRIVATE_SECRET<img>"
+            inspect_package("get", bad_package)
+            expect(get_result).to_contain_text("Manifest rejected")
+            expect(get_result).not_to_contain_text("PRIVATE_SECRET")
+            assert club_result.inner_html() == club_package_before
+            inspect_package("get", GET_PACKAGE)
+            assert len(calls) == package_calls
+            assert page.evaluate("localStorage.length") == 0
+            assert page.evaluate("sessionStorage.length") == 1
+
             page.locator("#orgSelect").select_option(OTHER)
+            for domain in ["club", "get"]:
+                expect(page.locator(f"#{domain}PackageResult")).to_be_empty()
+                assert page.locator(f"#{domain}PackageFile").input_value() == ""
+            expect(page.locator("#getPackageCheck")).to_have_value("")
             expect(report).to_be_empty()
             expect(summary).to_contain_text("No local report reviewed")
             expect(summary).not_to_contain_text(SHA)
@@ -219,6 +288,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(summary).not_to_contain_text(SHA)
             expect(club_draft.locator("details")).to_have_count(0)
             expect(candidate_drafts.locator("details")).to_have_count(0)
+            expect(page.locator("#clubPackageReview")).to_be_disabled()
+            expect(page.locator("#getPackageReview")).to_be_disabled()
             page.locator("#orgSelect").select_option(ORG)
             expect(page.locator("#acceptanceReview")).to_be_enabled()
             select_report(PINNED)
@@ -229,6 +300,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(candidate_steps).to_be_empty()
             expect(club_draft).to_be_empty()
             expect(candidate_drafts).to_be_empty()
+            expect(club_result).to_be_empty()
+            expect(get_result).to_be_empty()
             page.get_by_role("button", name="Provider evidence", exact=True).click()
             select_report(PINNED)
             page.get_by_role("button", name="Sign out", exact=True).click()
@@ -238,6 +311,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(candidate_steps).to_be_empty()
             expect(club_draft).to_be_empty()
             expect(candidate_drafts).to_be_empty()
+            expect(club_result).to_be_empty()
+            expect(get_result).to_be_empty()
             expect(page.locator("#acceptanceSha")).to_have_value("")
             assert page.locator("#acceptanceFile").input_value() == ""
             assert page.evaluate("sessionStorage.length") == 0

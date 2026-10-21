@@ -447,6 +447,7 @@
   // Presentation of the two existing manual reads only. No request, combined
   // readiness decision, page accumulation, storage or inferred freshness here.
   function renderReviewSummary() {
+    syncGoPackages();
     renderAcceptanceSummary();
     if (!el.reviewSummary) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
@@ -842,6 +843,7 @@
   }
   // Independent candidate-wide presentation; never feeds club UAT/Operations state.
   function renderAcceptanceSummary() {
+    syncGoPackages();
     if (!el.acceptanceSummary) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.acceptanceSummary.textContent = "";
@@ -1091,6 +1093,139 @@
     if (!el.preflightCheck.disabled) return loadPreflight();
   });
   el.operationsSha?.addEventListener("input", () => resetPreflight());
+
+  // Local sanitized manifest completeness ONLY. No document fetch, signature or
+  // authority verification, approval storage, message, execution or shared GO.
+  const goPackageCommon = ["original-authority", "source-binding", "protected-deploy",
+    "independent-runtime", "isolation", "tester-consent", "scope-allowlist",
+    "current-evidence", "unresolved-blockers", "expiry-revocation-stop"];
+  const clubPackageActions = ["operations-preflight-get", "stored-provenance-get",
+    "two-synthetic-org-isolation", "unauthenticated-access-denial", "wrong-role-access-denial", "cross-org-access-denial"];
+  const goPackageUI = Object.fromEntries(["club", "get"].map(domain => [domain, {
+    form: q("#" + domain + "PackageForm"), file: q("#" + domain + "PackageFile"),
+    button: q("#" + domain + "PackageReview"), result: q("#" + domain + "PackageResult"),
+  }]));
+  const goPackageCheck = q("#getPackageCheck");
+  const goPackageState = {club: {epoch: 0, key: null}, get: {epoch: 0, key: null}};
+  function packageTime(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value)) return NaN;
+    const time = Date.parse(value);
+    return Number.isFinite(time) && new Date(time).toISOString().replace(".000Z", "Z") === value ? time : NaN;
+  }
+  function packageFresh(value, now = Date.now(), validatedSourceTimestamp = false) {
+    const time = validatedSourceTimestamp ? Date.parse(value) : packageTime(value);
+    return Number.isFinite(now) && time <= now && now - time <= 86400000;
+  }
+  function packageCandidate() {
+    const s = acceptanceSnapshot;
+    return acceptanceAllowed() && s?.status === "reviewed" && s.org === state.org && s.auth === state.authEpoch &&
+      s.sha === el.acceptanceSha.value && packageFresh(s.asOf) ? s : null;
+  }
+  function packageContext(domain) {
+    if (!acceptanceAllowed()) return null; // Same owner/admin view gate, not candidate evidence.
+    if (domain === "club") {
+      const s = state.reviewSummary.preflight;
+      if (!s || s.org !== state.org || s.auth !== state.authEpoch ||
+          !["passed", "blocked"].includes(s.status) || !operationsSHA.test(s.expected) ||
+          s.expected !== el.operationsSha.value || !packageFresh(s.asOf, Date.now(), true)) return null;
+      return {sha: s.expected, check: "club-provenance-uat", observed: s.asOf,
+        actions: clubPackageActions, required: [...goPackageCommon, "two-synthetic-orgs", "connection-freshness", "club-wide-coverage"]};
+    }
+    const s = packageCandidate(), check = acceptanceCatalog.find(row => row[0] === goPackageCheck?.value);
+    return s && check ? {sha: s.sha, check: check[0], observed: s.asOf, actions: check[3],
+      required: [...new Set([...goPackageCommon, ...check[2],
+        ...(["device-location", "google-oauth"].includes(check[0]) ? ["separate-state-change-go"] : [])])]} : null;
+  }
+  function clearGoPackage(domain, key = null, clearFile = true) {
+    const previous = goPackageState[domain];
+    goPackageState[domain] = {epoch: previous.epoch + 1, key};
+    if (clearFile && goPackageUI[domain].file) goPackageUI[domain].file.value = "";
+    if (goPackageUI[domain].result) goPackageUI[domain].result.textContent = "";
+  }
+  function syncGoPackages() {
+    if (goPackageCheck) {
+      goPackageCheck.disabled = !packageCandidate();
+      if (goPackageCheck.disabled) goPackageCheck.value = "";
+    }
+    for (const domain of ["club", "get"]) {
+      const ctx = packageContext(domain), ui = goPackageUI[domain], previous = goPackageState[domain];
+      const key = ctx ? [state.org, state.authEpoch, ctx.sha, ctx.check, ctx.observed].join("|") : null;
+      if (key !== previous.key || (!key && (previous.result || previous.loading || ui.file?.files?.length))) clearGoPackage(domain, key);
+      const current = goPackageState[domain];
+      if (current.result && (!packageFresh(current.result.asOf) || current.result.until <= Date.now())) {
+        clearGoPackage(domain, key);
+        if (ui.result) ui.result.textContent = "Manifest review window expired. Review a current manifest again. No verified GO.";
+      }
+      if (ui.button) ui.button.disabled = !ctx || Boolean(goPackageState[domain].loading);
+    }
+  }
+  function inspectGoPackage(data, domain, ctx) {
+    const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
+      Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+    const keys = ["schemaVersion", "mode", "domain", "sourceSha", "checkId", "asOf", "reviewUntil",
+      "authorityVerified", "executionEnabled", "actions", "items", ...(domain === "club" ? ["organisationId"] : [])];
+    if (!exact(data, keys) || data.schemaVersion !== 1 || data.mode !== "READ_ONLY_GO_PACKAGE" ||
+        data.domain !== domain || data.sourceSha !== ctx.sha || data.checkId !== ctx.check ||
+        (domain === "club" && data.organisationId !== state.org) || data.authorityVerified !== false ||
+        data.executionEnabled !== false || !packageFresh(data.asOf) ||
+        !(packageTime(data.reviewUntil) > Date.now()) || packageTime(data.reviewUntil) > packageTime(data.asOf) + 86400000 ||
+        !Array.isArray(data.actions) || data.actions.length !== ctx.actions.length ||
+        !data.actions.every((action, i) => action === ctx.actions[i]) || !Array.isArray(data.items) ||
+        data.items.length > ctx.required.length || new Set(data.items.map(item => item?.id)).size !== data.items.length ||
+        !data.items.every(item => exact(item, ["id", "state"]) && ctx.required.includes(item.id) &&
+          ["PRESENT", "MISSING", "UNKNOWN"].includes(item.state))) throw Error("INVALID_MANIFEST");
+    return {asOf: data.asOf, until: packageTime(data.reviewUntil),
+      rows: ctx.required.map(id => ({id, status: data.items.find(item => item.id === id)?.state || "MISSING"}))};
+  }
+  async function reviewGoPackage(domain) {
+    syncGoPackages();
+    const ctx = packageContext(domain), ui = goPackageUI[domain], key = goPackageState[domain].key;
+    clearGoPackage(domain, key, false);
+    if (!ctx) {
+      if (ui.result) ui.result.textContent = "No current owner/admin source context. Club needs an explicit completed Operations read; Get needs a fresh reviewed report and selected check. No file read; no GO.";
+      return;
+    }
+    const files = ui.file?.files;
+    if (files?.length !== 1 || !Number.isInteger(files[0].size) || files[0].size < 1 || files[0].size > 32768) {
+      ui.result.textContent = "Select one sanitized manifest JSON, at most 32 KiB. Never supply raw approvals, documents, URLs, personal data or credentials. Nothing is uploaded.";
+      return;
+    }
+    const file = files[0], epoch = goPackageState[domain].epoch;
+    const current = () => {
+      syncGoPackages();
+      return goPackageState[domain].epoch === epoch && goPackageState[domain].key === key && ui.file.files?.[0] === file;
+    };
+    goPackageState[domain].loading = true;ui.button.disabled = true;
+    ui.result.textContent = "Reading sanitized local manifest only. No previous completeness result retained.";
+    try {
+      const text = await file.text();
+      if (!current()) return;
+      if (typeof text !== "string" || text.length > 32768) throw Error("INVALID_MANIFEST");
+      const result = inspectGoPackage(JSON.parse(text), domain, ctx);
+      goPackageState[domain].result = result;
+      const present = result.rows.filter(row => row.status === "PRESENT").length;
+      ui.result.innerHTML = `<p>${domain === "club" ? "Club protected UAT" : "GetACourt " + esc(ctx.check)} · SHA <code>${esc(ctx.sha)}</code></p>` +
+        (domain === "club" ? `<p>Organisation: <code>${esc(state.org)}</code></p>` : "") +
+        `<p>Manifest time: ${esc(result.asOf)}; local review window ends ${esc(new Date(result.until).toISOString())}. Not verified approval validity.</p>` +
+        `<p><strong>${present === result.rows.length ? "All required items declared present — independent manual review required" : "Manifest incomplete — missing or unknown items remain"}.</strong></p>` +
+        `<p>${present} of ${result.rows.length} items declared present. Presence declarations only, NOT document or authority validation. Verified GO: none. Execution NOT_RUN.</p>` +
+        '<ul class="go-package-items">' + result.rows.map(row => `<li>${esc(row.id)}: ${esc(row.status)}</li>`).join("") + '</ul>' +
+        "<p>Existing blockers stay open. Club UAT, pilot, Get checks, provider rights and deployment permissions are not interchangeable. No sending, approval, execution or repair.</p>";
+    } catch {
+      if (current()) ui.result.textContent = "Manifest rejected: incompatible, unsafe, expired or foreign scope. No completeness result or verified GO. Nothing sent.";
+    } finally {
+      if (current()) {goPackageState[domain].loading = false;syncGoPackages();}
+    }
+  }
+  for (const domain of ["club", "get"]) {
+    const ui = goPackageUI[domain];
+    ui.form?.addEventListener("submit", event => {
+      event.preventDefault();
+      if (!goPackageState[domain].loading) return reviewGoPackage(domain);
+    });
+    ui.file?.addEventListener("change", () => {clearGoPackage(domain, goPackageState[domain].key, false);syncGoPackages();});
+  }
+  goPackageCheck?.addEventListener("change", () => {clearGoPackage("get");syncGoPackages();});
 
   async function load() {
     resetProvenance(true);

@@ -78,6 +78,15 @@
               <p class="muted">Read-only unsent draft for protected club UAT, not pilot GO. Select text manually if needed; nothing is sent, saved or approved.</p>
               <div id="clubGoRequest"></div>
             </section>
+            <section class="go-next-panel club-package-panel" aria-labelledby="clubPackageHeading">
+              <h4 id="clubPackageHeading">GO package completeness — club</h4>
+              <p id="clubPackageHelp" class="muted">Local sanitized manifest only, maximum 32 KiB; no raw approvals, URLs, personal data or credentials. First complete an explicit scoped Operations read below. Checks declared presence for protected read-only club UAT only, not pilot GO. No upload, sending or authority verification.</p>
+              <form id="clubPackageForm" class="provenance-controls">
+                <label>Club GO package manifest JSON<input id="clubPackageFile" type="file" accept="application/json,.json" aria-describedby="clubPackageHelp" required></label>
+                <button id="clubPackageReview" type="submit" class="button secondary" disabled>Check club package locally</button>
+              </form>
+              <div id="clubPackageResult" role="status" aria-live="polite"></div>
+            </section>
           </section>
           <section class="acceptance-summary" aria-labelledby="acceptanceSummaryHeading">
             <p class="eyebrow">GETACOURT CANDIDATE · SEPARATE SCOPE</p>
@@ -94,6 +103,25 @@
               <h4 id="candidateGoRequestsHeading">GO request templates — GetACourt</h4>
               <p class="muted">Read-only unsent drafts selected only by missing-GO flags in the current local report. Each check needs separate authority; no combined GO or sending control.</p>
               <div id="candidateGoRequests"></div>
+            </section>
+            <section class="go-next-panel get-package-panel" aria-labelledby="getPackageHeading">
+              <h4 id="getPackageHeading">GO package completeness — GetACourt</h4>
+              <p id="getPackageHelp" class="muted">Review the local Get report below, then explicitly choose one check. One sanitized manifest per check, no combined GO. Declared completeness is not permission. No raw documents, URLs, personal data or credentials; maximum 32 KiB. Nothing sent or saved.</p>
+              <form id="getPackageForm" class="provenance-controls">
+                <label>GetACourt package check<select id="getPackageCheck" required disabled aria-describedby="getPackageHelp">
+                  <option value="">Choose one check</option>
+                  <option value="hosted-perimeter">Hosted access perimeter</option>
+                  <option value="hosted-ui">Hosted fixture UI</option>
+                  <option value="ios-safari">Physical iOS / Safari</option>
+                  <option value="android-chrome">Physical Android / Chrome</option>
+                  <option value="device-location">Device location permission</option>
+                  <option value="google-oauth">Google OAuth</option>
+                  <option value="human-accessibility">Human accessibility</option>
+                </select></label>
+                <label>GetACourt GO package manifest JSON<input id="getPackageFile" type="file" accept="application/json,.json" aria-describedby="getPackageHelp" required></label>
+                <button id="getPackageReview" type="submit" class="button secondary" disabled>Check GetACourt package locally</button>
+              </form>
+              <div id="getPackageResult" role="status" aria-live="polite"></div>
             </section>
           </section>
           </div>

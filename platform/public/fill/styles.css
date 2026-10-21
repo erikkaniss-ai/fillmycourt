@@ -169,4 +169,6 @@
 .go-request summary { cursor:pointer; font-weight:700; overflow-wrap:anywhere; }
 .go-request summary:focus-visible, .go-request-text:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
 .go-request-text { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; user-select:text; margin-bottom:0; }
+.go-package-items { padding-left:22px; overflow-wrap:anywhere; }
+.club-package-panel .button, .get-package-panel .button { max-width:100%; white-space:normal; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }
