@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {classifyFullCi,matchesCurrentPr} from "../scripts/fill_ci_gate.mjs";
+import {classifyFullCi,matchesCurrentPr,hasExactOwnerApproval} from "../scripts/fill_ci_gate.mjs";
 import {readFileSync} from "node:fs";
 const sha="a".repeat(40), other="b".repeat(40);
 const pr=()=>({
@@ -79,4 +79,16 @@ test("Full Platform CI cannot omit the two-org provenance rehearsal or silently 
   assert.match(suite,/fixture_database\(url, os\.getenv\("FILL_PROVENANCE_UAT_FIXTURES"\)\)/);
   assert.match(suite,/httpx\.MockTransport\(auth_response\)/);
   assert.match(suite,/test_two_org_browser_uses_real_rls_and_discards_late_scope/);
+});
+
+test("Staging UAT approval is an exact, unique, owner-controlled SHA receipt",()=>{
+  const good="<!-- FILL_STAGING_UAT_APPROVED_SHA:"+sha+" -->";
+  assert.equal(hasExactOwnerApproval("Other text\\n"+good+"\\n",sha),true);
+  for(const body of ["",null,good+good,"<!-- FILL_STAGING_UAT_APPROVED_SHA:"+other+" -->",
+                      "<!-- FILL_STAGING_UAT_APPROVED_SHA:bad -->",
+                      "<!-- FILL_STAGING_UAT_APPROVED_SHA:"+sha+" -->"+
+                        "<!-- FILL_STAGING_UAT_APPROVED_SHA:"+other+" -->"]){
+    assert.equal(hasExactOwnerApproval(body,sha),false);
+  }
+  assert.equal(hasExactOwnerApproval(good,other),false);
 });
