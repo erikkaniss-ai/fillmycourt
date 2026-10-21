@@ -21,7 +21,11 @@ worker, activating a provider, or changing the frozen Control Tower.
   explicit `max_age_seconds` (1–31,536,000), bounded `limit` (1–50) and an optional
   UUID `after_booking_id`. The private gateway allowlists exactly these reads,
   never the existing configuration-bearing `/providers` endpoint or a write.
-- Owner/admin/manager/analyst only, authenticated RLS and REPEATABLE READ / READ ONLY.
+- Owner/admin only, authenticated RLS and REPEATABLE READ / READ ONLY.
+  Existing provider-connection RLS does not permit manager/analyst access to
+  the internal configuration required by the validator. These roles (as well
+  as front_desk/support) remain denied; no policy widening or privileged access
+  is introduced by the viewer.
   The reader has no privileged fallback. Foreign hidden evidence remains
   unavailable. Responses contain scoped booking IDs and fixed statuses, never
   credentials, grant configuration, receipt hashes, customer records or raw payloads.

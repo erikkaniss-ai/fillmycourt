@@ -138,12 +138,14 @@ def review_provider_provenance(db, *, user_id, organization_id, connection_id, n
         raise DomainError("PROVENANCE_REVIEW_INPUT", "Valid scoped review identifiers and bounded limit required.", 422) from None
     args = {"org": organization_id, "pc": connection_id, "after": after_booking_id, "take": limit + 1}
     with db.user(user_id, readonly=True) as c:
-        db.require_role(c, organization_id, user_id, {"owner", "admin", "manager", "analyst"})
+        # Existing provider_connections RLS protects config from other roles.
+        # This viewer must not broaden it or use a privileged fallback.
+        db.require_role(c, organization_id, user_id, {"owner", "admin"})
         connection = c.execute(text("""
             select id::text,organization_id::text,provider,status,capabilities,config
             from public.provider_connections where organization_id=cast(:org as uuid) and id=cast(:pc as uuid)
         """), args).mappings().first()
-        if not connection:
+        if not connection or connection["provider"] != "playtomic":
             raise DomainError("FORBIDDEN", "Provider connection is not accessible in this organization.", 403)
         connection = dict(connection)
         bookings = c.execute(text("""

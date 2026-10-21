@@ -41,7 +41,7 @@ async function harness() {
       calls.push({path,method:options.method||"GET"});
       if(path==="/api/me")return ok({user:{email:"fixture@example.invalid"}});
       if(path==="/api/fmc/organizations")return ok({items:[
-        {id:ORG,name:"SYNTHETIC A",role:"manager"},{id:OTHER,name:"SYNTHETIC B",role:"manager"}]});
+        {id:ORG,name:"SYNTHETIC A",role:"owner"},{id:OTHER,name:"SYNTHETIC B",role:"owner"}]});
       if(path.includes("/today?"))return ok({summary:{},courts:[],empty_windows:[]});
       if(path.endsWith("/provider-provenance/connections"))return controls.list(path);
       if(path.includes("/provider-provenance/"))return controls.page(path);
@@ -110,6 +110,17 @@ test("No connections and empty booking page do not imply readiness",async()=>{
   await h.review();
   assert.match(h.get("#provenanceMessage").textContent,/No stored shadow bookings/);
   assert.match(h.get("#provenanceReport").innerHTML,/not pilot approval/);
+});
+
+test("Connection-list denial fails closed for non-admin roles without fetching a report",async()=>{
+  const h=await harness();
+  h.controls.list=()=>denied(403);await h.open();
+  assert.equal(h.get("#provenanceReview").disabled,true);
+  assert.match(h.get("#provenanceMessage").textContent,/permission/);
+  assert.equal(h.get("#provenanceReport").innerHTML,"");
+  assert.equal(h.calls.length,4);
+  await h.get("#provenanceForm").run("submit");
+  assert.equal(h.calls.length,4);
 });
 
 for(const kind of ["report401","reportNetwork","list401"]){

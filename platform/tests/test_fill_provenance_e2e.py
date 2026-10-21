@@ -38,7 +38,7 @@ def test_operator_can_review_stored_evidence_without_provider_requests(tmp_path)
                 if url.path == "/api/me":
                     body = {"user": {"email": "fixture@example.invalid"}}
                 elif url.path == "/api/fmc/organizations":
-                    body = {"items": [{"id": ORG, "name": "SYNTHETIC CLUB", "role": "manager"}]}
+                    body = {"items": [{"id": ORG, "name": "SYNTHETIC CLUB", "role": "owner"}]}
                 elif url.path.endswith("/today"):
                     body = {"summary": {}, "courts": [], "empty_windows": []}
                 elif url.path.endswith("/connections"):

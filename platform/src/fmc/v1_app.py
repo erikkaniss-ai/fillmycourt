@@ -1705,7 +1705,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
             a = who(request)
             # Never reuse /providers: its config is not an operator-view DTO.
             with db.user(a.id, readonly=True) as c:
-                role(c, str(org), a, ROLE_FINANCE)
+                role(c, str(org), a, ROLE_ADMIN)
                 return {"items": rows(c.execute(text("""
                     select id::text,provider from public.provider_connections
                     where organization_id=cast(:org as uuid) and provider='playtomic'

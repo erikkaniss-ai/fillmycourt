@@ -70,13 +70,21 @@ def test_api_returns_only_scoped_internal_report_and_safe_connection_list(pilot,
         params={"max_age_seconds": 60}).status_code == 403
     assert client.get(f"/api/fmc/{foreign}/provider-provenance/{pc}", headers=TOKEN,
         params={"max_age_seconds": 60}).status_code == 403
+    unsupported_pc = str(uuid.uuid4())
+    with db.trusted() as c:
+        c.execute(text("""insert into public.provider_connections(id,organization_id,provider)
+            values(cast(:id as uuid),cast(:org as uuid),'tiesports')"""),
+            {"id": unsupported_pc, "org": org})
+    assert client.get(base + "/" + unsupported_pc, headers=TOKEN,
+        params={"max_age_seconds": 60}).status_code == 403
+    assert client.get(base + "/connections", headers=TOKEN).json() == connections.json()
     # These routes must not appear on the transactional Core service.
     core = client_for(pilot, monkeypatch, service="core")
     assert core.get(base + "/connections", headers=TOKEN).status_code == 404
 
 
 @pytest.mark.parametrize("role,expected", [
-    ("owner", 200), ("admin", 200), ("manager", 200), ("analyst", 200),
+    ("owner", 200), ("admin", 200), ("manager", 403), ("analyst", 403),
     ("front_desk", 403), ("support", 403),
 ])
 def test_evidence_requires_a_review_role(pilot, monkeypatch, role, expected):
