@@ -18,6 +18,7 @@ from sqlalchemy import text
 from .common import DomainError
 from .playtomic import Deferred, Playtomic
 from .provider_read_gate import require_official_club_read
+from .provider_read_provenance import booking_page_receipt
 from .provider_token_sessions import ProviderTokenSessions
 from .provider_page_budget import read_page_state, next_page_state, PageBudgetError
 from .supabase_v1 import V1Store, one, rows
@@ -109,6 +110,26 @@ def _observe(c, org: str, pc: str, stream: str, record: dict, complete=True):
            "fp": fp, "complete": complete, "payload": payload})
 
 
+def _observe_booking_receipt(c, receipt):
+    payload = _json(receipt)
+    fingerprint = hashlib.sha256(payload.encode()).hexdigest()
+    # Separate stream: do not change normalized booking payloads, their dedupe,
+    # or the reconciliation reader. Even a final empty page proves no inventory.
+    c.execute(text("""
+        insert into public.provider_observations
+          (organization_id,provider_connection_id,stream,fingerprint,
+           observed_at,window_start,window_end,complete,payload)
+        values(cast(:org as uuid),cast(:pc as uuid),:stream,:fp,
+               cast(:observed as timestamptz),cast(:start as timestamptz),
+               cast(:end as timestamptz),false,cast(:payload as jsonb))
+        on conflict(provider_connection_id,stream,fingerprint) do nothing
+    """), {"org": receipt["organization_id"], "pc": receipt["provider_connection_id"],
+           "stream": "bookings_provenance", "fp": fingerprint,
+           "observed": receipt["observed_at"], "start": receipt["window_start"],
+           "end": receipt["window_end"], "payload": payload})
+    return fingerprint
+
+
 def _sync_playtomic(db: V1Store, job: dict, *, sessions=None):
     payload = job["payload"] or {}
     pc_id = payload.get("provider_connection_id")
@@ -173,7 +194,13 @@ def _sync_playtomic(db: V1Store, job: dict, *, sessions=None):
     total = prior_records + len(records)
     if total > 10000:
         raise DomainError("PROVIDER_SYNC_LIMIT", "Source batch exceeded safety cap.", 413)
+    try:
+        receipt = booking_page_receipt(connection, pc_id, page_state, response)
+    except DomainError:
+        sessions.discard(connection_id=pc_id)
+        raise
     with db.trusted() as c:
+        receipt_fingerprint = _observe_booking_receipt(c, receipt)
         for rec in records:
             _observe(c, connection["organization_id"], pc_id, stream, rec, complete=True)
             if stream == "players":
@@ -225,7 +252,10 @@ def _sync_playtomic(db: V1Store, job: dict, *, sessions=None):
                            "court": mapping["court_id"], "status": status,
                            "starts": rec["starts_at"], "ends": rec["ends_at"],
                            "currency": rec["currency"], "amount": rec["total_minor"],
-                           "external": rec["external_id"], "metadata": _json({"provider":"playtomic","shadow":True})})
+                           "external": rec["external_id"], "metadata": _json({
+                               "provider": "playtomic", "shadow": True,
+                               "provenance": {"read_receipt_fingerprint": receipt_fingerprint,
+                                              "availability_feed_authorized": False}})})
         c.execute(text("""
             insert into public.sync_cursors(provider_connection_id,stream,cursor,last_started_at,last_completed_at,last_error)
             values(cast(:pc as uuid),:stream,cast(:cursor as jsonb),now(),
