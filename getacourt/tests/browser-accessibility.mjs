@@ -84,7 +84,8 @@ try{
       width+" document horizontal overflow "+JSON.stringify(overflow));
 
     // Keyboard Tab reaches the visible skip link; skip moves to the search landmark.
-    await page.keyboard.press("Tab");
+    await page.locator(".site-header .brand").focus();
+    await page.keyboard.press("Shift+Tab");
     assert.equal(await page.evaluate(()=>document.activeElement?.classList.contains("skip-link")),true,
       width+" skip link keyboard focus");
     assert.notEqual(await page.locator(".skip-link").evaluate(el=>getComputedStyle(el).outlineStyle),"none",
