@@ -7,3 +7,5 @@ The acceptance engineer must independently record: current PR HEAD, Netlify depl
 Physical iOS Safari/Android Chrome, Google OAuth/test-account login and device-location permission tests need explicit tester consent and working staging identity/configuration. No UAT check can be marked PASS from CI alone. Do not create real provider connections or enable external OAuth/login flags without separate scoped setup and evidence.
 
 If Netlify cannot deploy this exact candidate or site protection fails, stop and record BLOCKED instead of trying a public context.
+
+Release-note guard: this PR remains Draft and may only be built using the existing Netlify Deploy Preview context with Team Login. Live booking/provider grants stay disabled. A manual Netlify deploy to the production context is not authorized.
