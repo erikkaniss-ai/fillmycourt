@@ -52,6 +52,8 @@ test("keyboard skip link and visible focus are available",()=>{
 test("reduced motion and disabled staging controls remain accessible",()=>{
   assert.match(css,/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
   assert.match(css,/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^]*?\.skeleton\s*\{\s*animation:\s*none;/);
+  assert.match(js,/matchMedia\?\.\("\(prefers-reduced-motion: reduce\)"\)/);
+  assert.match(js,/behavior:reduceMotion\?"auto":"smooth"/);
   assert.match(html,/data-mode="preview"/);
   assert.match(js,/bookingEnabled:false/);
 });
