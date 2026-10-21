@@ -24,7 +24,7 @@
     try{url=new URL(request.url);base=new URL(scope);}catch{return false;}
     if(url.origin!==base.origin||!url.pathname.startsWith(base.pathname))return false;
     // Encoded path separators / escapes are ambiguous. Never take over these.
-    if(/%2f|%5c|%2e/i.test(url.pathname)||url.pathname.includes("\\"))return false;
+    if(url.pathname.includes("%")||url.pathname.includes("\\"))return false;
     const parts=url.pathname.slice(base.pathname.length).split("/").filter(Boolean);
     if(parts.some(x=>BLOCKED_SEGMENTS.has(x.toLowerCase())))return false;
     for(const key of url.searchParams.keys())
