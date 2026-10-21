@@ -151,7 +151,7 @@
     renderBookingIdentity();
   }
 
-  function loading(){el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
+  function loading(){el.grid.setAttribute("aria-busy","true");el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
   async function search(){
     const p={sport:state.sport,location:el.location.value.trim()||"Cascais",date:el.date.value,from:el.from.value,to:el.to.value};
     if(state.geo){p.lat=String(state.geo.lat);p.lon=String(state.geo.lon);}
@@ -173,6 +173,8 @@
       state.hasSearched=true;
       if(el.radiusNote) el.radiusNote.textContent="";
       toast(err.message||"Live availability is temporarily unavailable.");
+    }finally {
+      el.grid.setAttribute("aria-busy","false");
     }
     el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
@@ -637,8 +639,15 @@
     }catch(err){el.authStatus.textContent=err.message||"Could not send sign-in link.";}
   }
 
-  qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{qa(".sport-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.sport=b.dataset.sport;}));
-  qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{qa(".filter-pill").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.filter=b.dataset.filter;render();}));
+  function syncToggleState(selector,chosen){
+    qa(selector).forEach(button=>{
+      const selected=button===chosen;
+      button.classList.toggle("active",selected);
+      button.setAttribute("aria-pressed",String(selected));
+    });
+  }
+  qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{syncToggleState(".sport-chip",b);state.sport=b.dataset.sport;}));
+  qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{syncToggleState(".filter-pill",b);state.filter=b.dataset.filter;render();}));
   el.form.addEventListener("submit",e=>{e.preventDefault();search();});
   el.refresh.addEventListener("click",search);
   el.sortSelect?.addEventListener("change",()=>{state.sort=el.sortSelect.value;render();});
