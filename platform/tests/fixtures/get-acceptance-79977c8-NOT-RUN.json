@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "mode": "READ_ONLY_OFFLINE_PREFLIGHT",
+  "reviewedSha": "79977c8672db84e6c062a804268dd9123e04f480",
+  "asOf": "2026-10-21T10:22:52Z",
+  "executionEnabled": false,
+  "authorityVerified": false,
+  "releaseReady": false,
+  "workerActivation": "NOT_AUTHORISED",
+  "checks": [
+    {
+      "id": "hosted-perimeter",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": false,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation"
+      ],
+      "requiredGoActions": [
+        "anonymous-preview-root-get-no-redirect-no-body"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    },
+    {
+      "id": "hosted-ui",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": false,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation",
+        "perimeter"
+      ],
+      "requiredGoActions": [
+        "team-login",
+        "fixture-ui-read-only"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EVIDENCE_REQUIRED:perimeter",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    },
+    {
+      "id": "ios-safari",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": false,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation",
+        "perimeter",
+        "ios-device"
+      ],
+      "requiredGoActions": [
+        "team-login",
+        "fixture-ui-read-only",
+        "physical-ios-safari",
+        "install-ui-observation"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EVIDENCE_REQUIRED:perimeter",
+        "EVIDENCE_REQUIRED:ios-device",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    },
+    {
+      "id": "android-chrome",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": false,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation",
+        "perimeter",
+        "android-device"
+      ],
+      "requiredGoActions": [
+        "team-login",
+        "fixture-ui-read-only",
+        "physical-android-chrome",
+        "install-ui-observation"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EVIDENCE_REQUIRED:perimeter",
+        "EVIDENCE_REQUIRED:android-device",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    },
+    {
+      "id": "device-location",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": true,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation",
+        "perimeter",
+        "location-consent"
+      ],
+      "requiredGoActions": [
+        "team-login",
+        "fixture-ui-read-only",
+        "device-location-permission-once"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EVIDENCE_REQUIRED:perimeter",
+        "EVIDENCE_REQUIRED:location-consent",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    },
+    {
+      "id": "google-oauth",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": true,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation",
+        "perimeter",
+        "oauth-config",
+        "oauth-consent"
+      ],
+      "requiredGoActions": [
+        "team-login",
+        "staging-google-login",
+        "create-test-user-session",
+        "refresh-own-test-session",
+        "sign-out-own-test-session"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EVIDENCE_REQUIRED:perimeter",
+        "EVIDENCE_REQUIRED:oauth-config",
+        "EVIDENCE_REQUIRED:oauth-consent",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    },
+    {
+      "id": "human-accessibility",
+      "preflight": "BLOCKED",
+      "execution": "NOT_RUN",
+      "executionEnabled": false,
+      "requiresStateChangeGO": false,
+      "requiredEvidence": [
+        "source-ci",
+        "isolation",
+        "perimeter",
+        "assistive-device"
+      ],
+      "requiredGoActions": [
+        "team-login",
+        "fixture-ui-read-only",
+        "human-keyboard-screen-reader"
+      ],
+      "blockers": [
+        "CANDIDATE_NOT_EXACT_OPEN_DRAFT",
+        "MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT",
+        "EVIDENCE_REQUIRED:source-ci",
+        "EVIDENCE_REQUIRED:isolation",
+        "EVIDENCE_REQUIRED:perimeter",
+        "EVIDENCE_REQUIRED:assistive-device",
+        "EXACT_SCOPED_GO_REQUIRED"
+      ]
+    }
+  ]
+}

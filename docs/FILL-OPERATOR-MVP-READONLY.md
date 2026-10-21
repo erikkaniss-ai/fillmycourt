@@ -9,6 +9,18 @@
 
 ## Delivered slice
 
+### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
+
+The Provider evidence tab now includes a local, owner/admin-scoped viewer for
+the sanitized report-v1 contract from Get `79977c8`. It shows seven NOT_RUN
+checks, missing evidence and exact scoped GO requirements. No file is uploaded,
+persisted or automatically fetched; no API, OAuth, provider or execution route
+is added. Reports require an explicit exact Get SHA, a fresh bounded JSON and
+false execution/authority/release flags. Complete records mean manual GO review
+only, never club UAT/pilot clearance. Scope changes discard files and results;
+late file reads cannot restore them. See the
+[viewer boundary and verification notes](fill-local-acceptance-viewer.md).
+
 ### Stored provider evidence viewer (21 October 2026; Draft source only)
 
 The operator's separate **Provider evidence** tab reuses the review contract from

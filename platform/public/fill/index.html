@@ -86,6 +86,21 @@
           <button id="provenanceNext" class="button secondary" type="button" hidden>Review next page</button>
           <p class="muted">Each page is a separate snapshot, not a complete pilot assessment. A receipt from another organisation is hidden and shown as unavailable, never fetched through privileged access.</p>
         </section>
+        <section class="panel acceptance-panel" aria-labelledby="acceptanceHeading">
+          <p class="eyebrow">GETACOURT CANDIDATE · LOCAL READ ONLY</p>
+          <h2 id="acceptanceHeading">Hosted / device / OAuth preflight and missing GO</h2>
+          <p>Signed-in owner or admin scope only. Select a nonsecret JSON report produced by the GetACourt offline preflight. The file is read locally, not uploaded or fetched from GitHub.</p>
+          <p class="read-only-notice"><strong>No verified GO; all real checks remain NOT_RUN.</strong> This candidate-wide report is not club-specific evidence or pilot permission. Nothing can be approved, executed, deployed, refreshed or repaired here. OAuth and device permissions require separate state-change GO.</p>
+          <form id="acceptanceForm" class="provenance-controls">
+            <label>Expected GetACourt SHA<input id="acceptanceSha" type="text" minlength="40" maxlength="40" pattern="[0-9a-f]{40}" required autocomplete="off" spellcheck="false" autocapitalize="none" aria-describedby="acceptanceHelp"></label>
+            <label>Local preflight report JSON<input id="acceptanceFile" type="file" accept="application/json,.json" required aria-describedby="acceptanceHelp"></label>
+            <button id="acceptanceReview" type="submit" class="button secondary" disabled>Review local acceptance report</button>
+          </form>
+          <p id="acceptanceHelp" class="muted">Exact SHA only; no default or remembered candidate. Report must be at most 24 hours old and 64 KiB. Use the sanitized report, never raw evidence, approvals, passwords, tokens, OAuth codes, email addresses or personal data. Leaving this scope clears the file, SHA and result.</p>
+          <p class="muted">GO needs a separately verified authorised approver, exact SHA / existing deploy / action scope, current consent and expiry. A complete record only permits manual GO review, never execution. Worker activation and provider API rights stay separate.</p>
+          <p id="acceptanceMessage" role="status" aria-live="polite"></p>
+          <div id="acceptanceReport"></div>
+        </section>
         <section class="panel preflight-panel" aria-labelledby="preflightHeading">
           <p class="eyebrow">OPERATIONS PREREQUISITES · READ ONLY</p>
           <h2 id="preflightHeading">Operations preflight</h2>

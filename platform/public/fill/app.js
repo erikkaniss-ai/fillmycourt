@@ -32,6 +32,9 @@
     preflightReport: q("#preflightReport"),
     reviewSummary: q("#clubReviewSummary"),
     uatBlockers: q("#clubUatBlockers"),
+    acceptanceForm: q("#acceptanceForm"), acceptanceSha: q("#acceptanceSha"),
+    acceptanceFile: q("#acceptanceFile"), acceptanceReview: q("#acceptanceReview"),
+    acceptanceMessage: q("#acceptanceMessage"), acceptanceReport: q("#acceptanceReport"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -543,6 +546,7 @@
     if (el.next) { el.next.hidden = true; el.next.disabled = false; }
     if (el.review) el.review.disabled = connections;
     if (connections) {
+      resetAcceptance(true);
       resetPreflight(true);
       if (el.connection) el.connection.innerHTML = '<option value="">Choose connection</option>';
       if (el.age) el.age.value = "";
@@ -561,6 +565,7 @@
 
   async function loadProvenanceConnections() {
     if (!el.connection || !state.org) return;
+    resetAcceptance(true);
     const epoch = ++state.provenanceEpoch;
     const org = state.org, auth = state.authEpoch;
     const current = () => epoch === state.provenanceEpoch && org === state.org &&
@@ -668,6 +673,118 @@
   el.age?.addEventListener("input", () => resetProvenance());
 
   const operationsSHA = /^[0-9a-f]{40}$/;
+  // Strict report-v1 presentation contract derived from Get 79977c8.
+  // This is NOT the evaluator, an evidence fetcher, a GO verifier or a runner.
+  const acceptanceCatalog = [
+    ["hosted-perimeter", "Hosted access perimeter", ["source-ci", "isolation"], ["anonymous-preview-root-get-no-redirect-no-body"]],
+    ["hosted-ui", "Hosted fixture UI", ["source-ci", "isolation", "perimeter"], ["team-login", "fixture-ui-read-only"]],
+    ["ios-safari", "Physical iOS / Safari", ["source-ci", "isolation", "perimeter", "ios-device"], ["team-login", "fixture-ui-read-only", "physical-ios-safari", "install-ui-observation"]],
+    ["android-chrome", "Physical Android / Chrome", ["source-ci", "isolation", "perimeter", "android-device"], ["team-login", "fixture-ui-read-only", "physical-android-chrome", "install-ui-observation"]],
+    ["device-location", "Device location permission", ["source-ci", "isolation", "perimeter", "location-consent"], ["team-login", "fixture-ui-read-only", "device-location-permission-once"]],
+    ["google-oauth", "Google OAuth", ["source-ci", "isolation", "perimeter", "oauth-config", "oauth-consent"], ["team-login", "staging-google-login", "create-test-user-session", "refresh-own-test-session", "sign-out-own-test-session"]],
+    ["human-accessibility", "Human accessibility", ["source-ci", "isolation", "perimeter", "assistive-device"], ["team-login", "fixture-ui-read-only", "human-keyboard-screen-reader"]],
+  ];
+  const acceptanceReasons = {
+    INVALID_REVIEW_CONTEXT: "Review context invalid",
+    INVALID_INPUT: "Input incompatible",
+    CANDIDATE_NOT_EXACT_OPEN_DRAFT: "Candidate is not the exact open Draft source",
+    MISSING_INVALID_STALE_OR_FOREIGN_DEPLOYMENT: "Exact existing protected deploy receipt missing, invalid, stale or foreign",
+    INVALID_RECORD_COLLECTION: "Evidence / GO collection invalid",
+    UNKNOWN_OR_MALFORMED_RECORD: "Unknown or malformed evidence / GO record",
+    DUPLICATE_RECORD: "Duplicate or conflicting records",
+    EXACT_SCOPED_GO_REQUIRED: "Exact scoped GO record missing or invalid",
+    TESTER_CONSENT_MISMATCH: "Tester consent does not match the GO record",
+  };
+  let acceptanceEpoch = 0;
+  function acceptanceAllowed() {
+    return !state.demo && Boolean(state.token) && state.view === "provenance" &&
+      state.orgs.some(org => org.id === state.org && ["owner", "admin"].includes(org.role));
+  }
+  function resetAcceptance(clearInputs = false) {
+    acceptanceEpoch++;
+    if (el.acceptanceReport) el.acceptanceReport.textContent = "";
+    if (el.acceptanceMessage) el.acceptanceMessage.textContent = "";
+    if (clearInputs) {
+      if (el.acceptanceSha) el.acceptanceSha.value = "";
+      if (el.acceptanceFile) el.acceptanceFile.value = "";
+    }
+    if (el.acceptanceReview) el.acceptanceReview.disabled = !acceptanceAllowed();
+  }
+  function validAcceptanceReport(data, expected, now = Date.now()) {
+    const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
+      Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+    const list = (value, expected) => Array.isArray(value) && value.length === expected.length &&
+      value.every((item, index) => item === expected[index]);
+    if (!exact(data, ["schemaVersion", "mode", "reviewedSha", "asOf", "executionEnabled", "authorityVerified", "releaseReady", "workerActivation", "checks"]) ||
+        data.schemaVersion !== 1 || data.mode !== "READ_ONLY_OFFLINE_PREFLIGHT" ||
+        !/^[a-f0-9]{40}$/.test(expected) || data.reviewedSha !== expected ||
+        data.executionEnabled !== false || data.authorityVerified !== false || data.releaseReady !== false ||
+        data.workerActivation !== "NOT_AUTHORISED" || typeof data.asOf !== "string" ||
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(data.asOf)) return false;
+    const observed = Date.parse(data.asOf);
+    if (!Number.isFinite(observed) || new Date(observed).toISOString().replace(".000Z", "Z") !== data.asOf ||
+        observed > now || now - observed > 24 * 60 * 60 * 1000 ||
+        !Array.isArray(data.checks) || data.checks.length !== acceptanceCatalog.length) return false;
+    return acceptanceCatalog.every(([id, , kinds, actions], index) => {
+      const item = data.checks[index];
+      return exact(item, ["id", "preflight", "execution", "executionEnabled", "requiresStateChangeGO", "requiredEvidence", "requiredGoActions", "blockers"]) &&
+        item.id === id && item.execution === "NOT_RUN" && item.executionEnabled === false &&
+        item.requiresStateChangeGO === ["device-location", "google-oauth"].includes(id) &&
+        list(item.requiredEvidence, kinds) && list(item.requiredGoActions, actions) &&
+        Array.isArray(item.blockers) && item.blockers.length <= 20 && new Set(item.blockers).size === item.blockers.length &&
+        item.blockers.every(reason => typeof reason === "string" &&
+          (Object.hasOwn(acceptanceReasons, reason) || kinds.some(kind => reason === "EVIDENCE_REQUIRED:" + kind))) &&
+        item.preflight === (item.blockers.length ? "BLOCKED" : "READY_FOR_MANUAL_GO_REVIEW");
+    });
+  }
+  async function reviewAcceptanceFile() {
+    resetAcceptance();
+    if (!acceptanceAllowed()) {
+      el.acceptanceMessage.textContent = "Local report review requires a signed-in owner or admin scope. Demo has no real acceptance report. No file was read or sent.";
+      return;
+    }
+    const expected = el.acceptanceSha.value, files = el.acceptanceFile.files;
+    if (!/^[a-f0-9]{40}$/.test(expected) || files?.length !== 1 ||
+        !Number.isInteger(files[0].size) || files[0].size < 1 || files[0].size > 65536) {
+      el.acceptanceMessage.textContent = "Choose one nonsecret report JSON (maximum 64 KiB) and enter the exact GetACourt SHA. Nothing is inferred or uploaded.";
+      return;
+    }
+    const file = files[0], epoch = acceptanceEpoch, auth = state.authEpoch, org = state.org;
+    const current = () => epoch === acceptanceEpoch && auth === state.authEpoch && org === state.org &&
+      acceptanceAllowed() && el.acceptanceSha.value === expected && el.acceptanceFile.files?.[0] === file;
+    el.acceptanceReview.disabled = true;
+    el.acceptanceMessage.textContent = "Reading local report only…";
+    try {
+      const text = await file.text();
+      if (!current()) return;
+      if (typeof text !== "string" || text.length > 65536) throw Error("INVALID_LOCAL_REPORT");
+      const data = JSON.parse(text);
+      if (!validAcceptanceReport(data, expected)) throw Error("INVALID_LOCAL_REPORT");
+      const club = state.orgs.find(item => item.id === org);
+      el.acceptanceReport.innerHTML = `<p>Reviewed locally in selected-club scope: <strong>${esc(club?.name)}</strong>.</p>` +
+        "<p>GetACourt candidate-wide snapshot — not a club-specific report or club GO. Source and authority are not independently verified.</p>" +
+        `<p>GetACourt SHA: <code>${esc(data.reviewedSha)}</code><br>Report time: ${esc(data.asOf)}. Not live; all evidence and GO must be revalidated.</p>` +
+        '<ul class="acceptance-checks">' + data.checks.map((item, index) => {
+          const [, label, kinds, actions] = acceptanceCatalog[index];
+          const missing = item.blockers.includes("EXACT_SCOPED_GO_REQUIRED");
+          return `<li><h3>${esc(label)}</h3><p><strong>${item.preflight === "BLOCKED" ? "Blocked" : "Ready for manual GO review only"}</strong> · NOT_RUN · execution disabled</p>` +
+            `<p>${missing ? "Missing / invalid exact scoped GO in this snapshot." : "No verified GO. Record completeness is not authority or permission."}</p>` +
+            (item.requiresStateChangeGO ? "<p>Separate state-change GO required; this action is not read-only.</p>" : "") +
+            "<ul>" + item.blockers.map(reason => `<li>${esc(acceptanceReasons[reason] || "Evidence required: " + reason.slice(18))}</li>`).join("") + "</ul>" +
+            `<p>Required evidence: ${esc(kinds.join(", "))}.</p><p>Exact GO action scope: ${esc(actions.join(", "))}.</p></li>`;
+        }).join("") + "</ul>";
+      el.acceptanceMessage.textContent = "Local snapshot reviewed. No verified GO, hosted acceptance or pilot approval. No file was uploaded and no check was run.";
+    } catch {
+      if (current()) el.acceptanceMessage.textContent = "Report unavailable, incompatible, stale or for another SHA. No readiness is inferred. Do not include credentials or raw evidence.";
+    } finally { if (current()) el.acceptanceReview.disabled = false; }
+  }
+  el.acceptanceForm?.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!el.acceptanceReview.disabled) return reviewAcceptanceFile();
+  });
+  el.acceptanceSha?.addEventListener("input", () => resetAcceptance());
+  el.acceptanceFile?.addEventListener("change", () => resetAcceptance());
+
   const preflightChecks = {
     operations_service: "Operations service",
     non_production_runtime: "Non-production runtime",

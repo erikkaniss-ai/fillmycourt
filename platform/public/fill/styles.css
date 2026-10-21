@@ -143,6 +143,11 @@
 #provenanceReport { overflow-wrap:anywhere; }
 .preflight-panel { margin-top:24px; }
 #preflightReport { overflow-wrap:anywhere; }
+.acceptance-panel { margin-top:24px; }
+#acceptanceReport { overflow-wrap:anywhere; }
+.acceptance-checks { list-style:none; padding:0; }
+.acceptance-checks > li { border-top:1px solid var(--line); padding:12px 0; }
+.acceptance-checks h3 { margin:8px 0; }
 .preflight-checks { padding-left:20px; }
 .preflight-checks li { margin:8px 0; }
 .review-summary-panel { margin-bottom:24px; }
