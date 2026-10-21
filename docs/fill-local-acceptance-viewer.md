@@ -1,5 +1,34 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Adjacent package summaries — continuation from Fill0998f21
+
+Separate read-only **GO package snapshot** sections now sit immediately after
+the selected-club UAT blockers and the independent Get preflight/missing-GO
+snapshot respectively. They display only the current domain's already-inspected
+local manifest result: source SHA, club organisation or single Get check,
+declared PRESENT/MISSING/UNKNOWN counts, manifest time and review-window end.
+No summary combines packages/checks, computes a readiness score, consumes the
+other domain's evidence, clears blockers or authorises anything.
+
+All declared items still require independent manual review; permanent wording is
+"Verified GO: none. Execution NOT_RUN" and "Existing blockers stay open".
+Counts describe declarations only, not actual documents, original authority,
+consent, deploy, evidence validity or pilot/provider rights. No prior package or
+source context means no invented counts. Selection/loading/rejection/expiry and
+source/check/club/session/tab changes remove previous counts and metadata;
+late reads cannot restore them or erase a newer result. Existing expiry checks
+run on summary renders/reads, not a new timer or live monitor.
+
+The sections are separately labelled polite live regions, without controls,
+links, new file/API reads, storage, sending, approval, execution or repair. They
+reuse the existing local inspection and its context/epoch guards. Existing
+manifest-v1 schema and protected-host/deployment gates remain unchanged.
+Node and loopback Chromium checks cover exact independent counts, zero-missing
+declarations without GO, mixed states, loading/invalid/stale/foreign results,
+scope resets, late responses, unchanged blockers, no extra network/storage and
+desktop/320px `fill-go-package-summary-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`.
+Synthetic source/CI checks are not hosted, physical-device or OAuth acceptance.
+
 ## Local GO-package manifest completeness — continuation from Fill1e5846d
 
 Two separate owner/admin-only sections inspect a **sanitized local JSON manifest**,

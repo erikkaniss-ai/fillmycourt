@@ -78,6 +78,11 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             candidate_steps = page.locator("#candidateNextSteps")
             club_draft = page.locator("#clubGoRequest")
             candidate_drafts = page.locator("#candidateGoRequests")
+            club_package_summary = page.locator("#clubPackageSummary")
+            get_package_summary = page.locator("#getPackageSummary")
+            for item in [club_package_summary, get_package_summary]:
+                expect(item).to_contain_text("No current source/check context")
+                expect(item).not_to_contain_text("PRESENT")
             expect(club_draft.locator('[data-go-template="club-uat"]')).to_have_count(1)
             expect(club_draft).to_contain_text(ORG)
             expect(club_draft).to_contain_text("[REQUIRED: exact approved Operations SHA")
@@ -222,6 +227,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                     "name": "SANITIZED-FIXTURE-ONLY.json", "mimeType": "application/json", "buffer": json.dumps(value).encode(),
                 })
                 expect(page.locator(f"#{domain}PackageResult")).to_be_empty()
+                expect(page.locator(f"#{domain}PackageSummary")).not_to_contain_text("of 15 PRESENT")
                 page.locator(f"#{domain}PackageReview").click()
 
             inspect_package("club", CLUB_PACKAGE)
@@ -229,6 +235,11 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(club_result).to_contain_text("original-authority: UNKNOWN")
             expect(club_result).to_contain_text("protected-deploy: MISSING")
             expect(club_result).to_contain_text("Verified GO: none")
+            expect(club_package_summary).to_contain_text("1 of 13 PRESENT")
+            expect(club_package_summary).to_contain_text("11 MISSING; 1 UNKNOWN")
+            expect(club_package_summary).to_contain_text(ORG)
+            expect(club_package_summary).not_to_contain_text(SHA)
+            club_package_snapshot = club_package_summary.inner_html()
             club_package_before = club_result.inner_html()
             page.get_by_label("GetACourt package check", exact=True).select_option("google-oauth")
             inspect_package("get", GET_PACKAGE)
@@ -237,6 +248,17 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(get_result).to_contain_text("Verified GO: none")
             expect(get_result).to_contain_text("separate-state-change-go: PRESENT")
             expect(get_result).not_to_contain_text(ORG)
+            expect(get_package_summary).to_contain_text("15 of 15 PRESENT")
+            expect(get_package_summary).to_contain_text("0 MISSING; 0 UNKNOWN")
+            expect(get_package_summary).to_contain_text("check google-oauth")
+            expect(get_package_summary).to_contain_text(SHA)
+            expect(get_package_summary).not_to_contain_text(ORG)
+            expect(get_package_summary).to_contain_text("independent manual review still required")
+            for item in [club_package_summary, get_package_summary]:
+                expect(item).to_contain_text("Verified GO: none. Execution NOT_RUN")
+                expect(item).to_contain_text("Existing blockers stay open")
+                expect(item.locator("button, input, form, a")).to_have_count(0)
+            assert club_package_summary.inner_html() == club_package_snapshot
             assert club_result.inner_html() == club_package_before
             assert page.locator("#clubUatBlockers").inner_html() == package_blockers
             assert len(calls) == package_calls
@@ -244,16 +266,28 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             for domain in ["club", "get"]:
                 panel = page.locator(f".{domain}-package-panel")
                 panel.screenshot(path=str(screenshots / f"fill-go-package-{domain}-desktop-FIXTURE-ONLY.png"))
+                page.locator(f".{domain}-package-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-summary-{domain}-desktop-FIXTURE-ONLY.png"))
+            club_summary_box = page.locator(".club-package-summary-panel").bounding_box()
+            get_summary_box = page.locator(".get-package-summary-panel").bounding_box()
+            assert get_summary_box["x"] > club_summary_box["x"]
+            assert club_summary_box["y"] >= page.locator("#clubUatBlockers").bounding_box()["y"]
+            assert get_summary_box["y"] >= summary.bounding_box()["y"]
             page.set_viewport_size({"width": 320, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             for domain in ["club", "get"]:
                 page.locator(f".{domain}-package-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
                 page.screenshot(path=str(screenshots / f"fill-go-package-{domain}-mobile-FIXTURE-ONLY.png"))
+                page.locator(f".{domain}-package-summary-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
+                page.screenshot(path=str(screenshots / f"fill-go-package-summary-{domain}-mobile-FIXTURE-ONLY.png"))
             bad_package = copy.deepcopy(GET_PACKAGE)
             bad_package["token"] = "PRIVATE_SECRET<img>"
             inspect_package("get", bad_package)
             expect(get_result).to_contain_text("Manifest rejected")
             expect(get_result).not_to_contain_text("PRIVATE_SECRET")
+            expect(get_package_summary).to_contain_text("rejected or unavailable")
+            expect(get_package_summary).not_to_contain_text("15 of 15 PRESENT")
+            expect(get_package_summary).not_to_contain_text("PRIVATE_SECRET")
+            assert club_package_summary.inner_html() == club_package_snapshot
             assert club_result.inner_html() == club_package_before
             inspect_package("get", GET_PACKAGE)
             assert len(calls) == package_calls
@@ -264,6 +298,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             for domain in ["club", "get"]:
                 expect(page.locator(f"#{domain}PackageResult")).to_be_empty()
                 assert page.locator(f"#{domain}PackageFile").input_value() == ""
+                expect(page.locator(f"#{domain}PackageSummary")).not_to_contain_text("PRESENT")
             expect(page.locator("#getPackageCheck")).to_have_value("")
             expect(report).to_be_empty()
             expect(summary).to_contain_text("No local report reviewed")
@@ -302,6 +337,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(candidate_drafts).to_be_empty()
             expect(club_result).to_be_empty()
             expect(get_result).to_be_empty()
+            expect(club_package_summary).to_be_empty()
+            expect(get_package_summary).to_be_empty()
             page.get_by_role("button", name="Provider evidence", exact=True).click()
             select_report(PINNED)
             page.get_by_role("button", name="Sign out", exact=True).click()
@@ -313,6 +350,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(candidate_drafts).to_be_empty()
             expect(club_result).to_be_empty()
             expect(get_result).to_be_empty()
+            expect(club_package_summary).to_be_empty()
+            expect(get_package_summary).to_be_empty()
             expect(page.locator("#acceptanceSha")).to_have_value("")
             assert page.locator("#acceptanceFile").input_value() == ""
             assert page.evaluate("sessionStorage.length") == 0

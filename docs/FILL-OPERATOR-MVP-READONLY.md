@@ -11,6 +11,13 @@
 
 ### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
 
+Continuation from Fill `0998f21`, preserving concurrent Draft changes: two
+separate read-only local package summaries now sit by the club and Get blockers.
+They reuse existing inspected manifest state for exact source/scope/time and
+PRESENT/MISSING/UNKNOWN counts; no new read, action or combined GO. All-declared
+still requires independent manual review, never authority or readiness. Loading,
+invalid/expired or changed context cannot retain old counts; blockers stay open.
+
 Continuation from Fill `1e5846d`: separate local GO-package completeness checks
 now inspect bounded sanitized manifests for club protected read-only UAT and one
 explicit Get check. Missing/UNKNOWN components stay unresolved; all PRESENT means

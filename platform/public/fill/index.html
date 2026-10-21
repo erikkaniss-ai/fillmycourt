@@ -68,6 +68,11 @@
             <h3 id="clubUatBlockerHeading">UAT blockers and unverified gates</h3>
             <p class="muted">Read-only, based on the separate summary snapshots above. This is not a complete UAT checklist, a live assessment or permission to start UAT. Unverified conditions stay unresolved; nothing can be approved or repaired here.</p>
             <div id="clubUatBlockers" role="status" aria-live="polite" aria-atomic="true"></div>
+            <section class="go-next-panel package-summary-panel club-package-summary-panel" aria-labelledby="clubPackageSummaryHeading">
+              <h4 id="clubPackageSummaryHeading">GO package snapshot — club</h4>
+              <p class="muted">Only the last local club manifest checked below. No combined readiness, verified GO or pilot permission.</p>
+              <div id="clubPackageSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
             <section class="go-next-panel club-next-panel" aria-labelledby="clubNextHeading">
               <h4 id="clubNextHeading">Next steps — club GO</h4>
               <p class="muted">Planning notes only, not an execution checklist or approval. Club UAT and pilot GO remain separate from GetACourt.</p>
@@ -94,6 +99,11 @@
             <p class="read-only-notice"><strong>No verified GO. All real checks remain NOT_RUN.</strong> Separate from the club blockers: candidate-wide evidence cannot grant club UAT/pilot GO, provider rights or deployment authority.</p>
             <p class="muted">Only summarises the local report explicitly reviewed below. No automatic file/API read, combined assessment, readiness score or action.</p>
             <div id="acceptanceSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            <section class="go-next-panel package-summary-panel get-package-summary-panel" aria-labelledby="getPackageSummaryHeading">
+              <h4 id="getPackageSummaryHeading">GO package snapshot — GetACourt</h4>
+              <p class="muted">One explicitly reviewed local Get package/check only, not club evidence, permission or a combined GO.</p>
+              <div id="getPackageSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
             <section class="go-next-panel candidate-next-panel" aria-labelledby="candidateNextHeading">
               <h4 id="candidateNextHeading">Next steps — GetACourt GO</h4>
               <p class="muted">Planning notes only. Flags describe the imported snapshot, not current authority. Nothing here can run, approve, deploy or send a request.</p>

@@ -1104,6 +1104,7 @@
   const goPackageUI = Object.fromEntries(["club", "get"].map(domain => [domain, {
     form: q("#" + domain + "PackageForm"), file: q("#" + domain + "PackageFile"),
     button: q("#" + domain + "PackageReview"), result: q("#" + domain + "PackageResult"),
+    summary: q("#" + domain + "PackageSummary"),
   }]));
   const goPackageCheck = q("#getPackageCheck");
   const goPackageState = {club: {epoch: 0, key: null}, get: {epoch: 0, key: null}};
@@ -1136,11 +1137,54 @@
       required: [...new Set([...goPackageCommon, ...check[2],
         ...(["device-location", "google-oauth"].includes(check[0]) ? ["separate-state-change-go"] : [])])]} : null;
   }
-  function clearGoPackage(domain, key = null, clearFile = true) {
+  // Presentation only of one domain's existing local result, never a GO decision.
+  function renderGoPackageSummary(domain, ctx = packageContext(domain)) {
+    const target = goPackageUI[domain].summary;
+    if (!target) return;
+    target.textContent = "";
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) return;
+    if (!acceptanceAllowed()) {
+      target.textContent = "No package summary in this scope. Owner/admin local review required; demo has no real evidence. No verified GO.";
+      return;
+    }
+    if (!ctx) {
+      target.textContent = "No current source/check context for this package. No completeness counts inferred; no verified GO.";
+      return;
+    }
+    const model = goPackageState[domain];
+    const key = [state.org, state.authEpoch, ctx.sha, ctx.check, ctx.observed].join("|");
+    const labels = {
+      not_reviewed: "No local package reviewed. No completeness counts inferred.",
+      loading: "Local package read in progress. Previous counts removed.",
+      rejected: "Local package rejected or unavailable. No completeness result retained.",
+      expired: "Local package review expired. Review a current manifest again; no counts retained.",
+    };
+    if (model.key !== key || !model.result) {
+      target.textContent = (labels[model.key === key ? model.status : "not_reviewed"] || labels.not_reviewed) + " Verified GO: none. Execution NOT_RUN.";
+      return;
+    }
+    const r = model.result;
+    if (!packageFresh(r.asOf) || r.until <= Date.now()) {
+      target.textContent = labels.expired + " Verified GO: none. Execution NOT_RUN.";
+      return;
+    }
+    const present = r.rows.filter(row => row.status === "PRESENT").length;
+    const missing = r.rows.filter(row => row.status === "MISSING").length;
+    const unknown = r.rows.filter(row => row.status === "UNKNOWN").length;
+    target.innerHTML = (domain === "club"
+      ? `<p>Club UAT only · organisation <code>${esc(state.org)}</code><br>Operations SHA: <code>${esc(ctx.sha)}</code></p>`
+      : `<p>GetACourt only · check ${esc(ctx.check)}<br>Get SHA: <code>${esc(ctx.sha)}</code></p>`) +
+      `<p>Declared components: <strong>${present} of ${r.rows.length} PRESENT</strong>; ${missing} MISSING; ${unknown} UNKNOWN.</p>` +
+      `<p>${present === r.rows.length ? "All declared — independent manual review still required." : "Incomplete declarations — missing or unknown items remain."}</p>` +
+      `<p>Local manifest: ${esc(r.asOf)}; review window ends ${esc(new Date(r.until).toISOString())}. Not live or verified approval validity.</p>` +
+      "<p>Verified GO: none. Execution NOT_RUN. Declared presence is not document or authority validation. Existing blockers stay open; club UAT/pilot, Get checks, provider rights and deploy permissions stay separate.</p>";
+  }
+  function clearGoPackage(domain, key = null, clearFile = true, status = "not_reviewed") {
     const previous = goPackageState[domain];
-    goPackageState[domain] = {epoch: previous.epoch + 1, key};
+    goPackageState[domain] = {epoch: previous.epoch + 1, key, status};
     if (clearFile && goPackageUI[domain].file) goPackageUI[domain].file.value = "";
     if (goPackageUI[domain].result) goPackageUI[domain].result.textContent = "";
+    renderGoPackageSummary(domain);
   }
   function syncGoPackages() {
     if (goPackageCheck) {
@@ -1153,10 +1197,11 @@
       if (key !== previous.key || (!key && (previous.result || previous.loading || ui.file?.files?.length))) clearGoPackage(domain, key);
       const current = goPackageState[domain];
       if (current.result && (!packageFresh(current.result.asOf) || current.result.until <= Date.now())) {
-        clearGoPackage(domain, key);
+        clearGoPackage(domain, key, true, "expired");
         if (ui.result) ui.result.textContent = "Manifest review window expired. Review a current manifest again. No verified GO.";
       }
       if (ui.button) ui.button.disabled = !ctx || Boolean(goPackageState[domain].loading);
+      renderGoPackageSummary(domain, ctx);
     }
   }
   function inspectGoPackage(data, domain, ctx) {
@@ -1187,6 +1232,7 @@
     }
     const files = ui.file?.files;
     if (files?.length !== 1 || !Number.isInteger(files[0].size) || files[0].size < 1 || files[0].size > 32768) {
+      goPackageState[domain].status = "rejected";renderGoPackageSummary(domain, ctx);
       ui.result.textContent = "Select one sanitized manifest JSON, at most 32 KiB. Never supply raw approvals, documents, URLs, personal data or credentials. Nothing is uploaded.";
       return;
     }
@@ -1196,6 +1242,7 @@
       return goPackageState[domain].epoch === epoch && goPackageState[domain].key === key && ui.file.files?.[0] === file;
     };
     goPackageState[domain].loading = true;ui.button.disabled = true;
+    goPackageState[domain].status = "loading";renderGoPackageSummary(domain, ctx);
     ui.result.textContent = "Reading sanitized local manifest only. No previous completeness result retained.";
     try {
       const text = await file.text();
@@ -1203,6 +1250,7 @@
       if (typeof text !== "string" || text.length > 32768) throw Error("INVALID_MANIFEST");
       const result = inspectGoPackage(JSON.parse(text), domain, ctx);
       goPackageState[domain].result = result;
+      goPackageState[domain].status = "reviewed";
       const present = result.rows.filter(row => row.status === "PRESENT").length;
       ui.result.innerHTML = `<p>${domain === "club" ? "Club protected UAT" : "GetACourt " + esc(ctx.check)} · SHA <code>${esc(ctx.sha)}</code></p>` +
         (domain === "club" ? `<p>Organisation: <code>${esc(state.org)}</code></p>` : "") +
@@ -1212,7 +1260,10 @@
         '<ul class="go-package-items">' + result.rows.map(row => `<li>${esc(row.id)}: ${esc(row.status)}</li>`).join("") + '</ul>' +
         "<p>Existing blockers stay open. Club UAT, pilot, Get checks, provider rights and deployment permissions are not interchangeable. No sending, approval, execution or repair.</p>";
     } catch {
-      if (current()) ui.result.textContent = "Manifest rejected: incompatible, unsafe, expired or foreign scope. No completeness result or verified GO. Nothing sent.";
+      if (current()) {
+        goPackageState[domain].status = "rejected";
+        ui.result.textContent = "Manifest rejected: incompatible, unsafe, expired or foreign scope. No completeness result or verified GO. Nothing sent.";
+      }
     } finally {
       if (current()) {goPackageState[domain].loading = false;syncGoPackages();}
     }

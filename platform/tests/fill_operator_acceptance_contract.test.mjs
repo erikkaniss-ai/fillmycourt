@@ -65,6 +65,7 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
   return {get,nav,storage,calls,controls,open,select,review,ops,check,selectPackage,setNow:value=>{clockNow=value;},
     packageReview:domain=>get("#"+domain+"PackageForm").run("submit"),
     packageResult:domain=>get("#"+domain+"PackageResult").innerHTML||get("#"+domain+"PackageResult").textContent,
+    packageSummary:domain=>get("#"+domain+"PackageSummary").innerHTML||get("#"+domain+"PackageSummary").textContent,
     clubSteps:()=>get("#clubNextSteps").innerHTML||get("#clubNextSteps").textContent,
     candidateSteps:()=>get("#candidateNextSteps").innerHTML||get("#candidateNextSteps").textContent,
     clubDraft:()=>get("#clubGoRequest").innerHTML||get("#clubGoRequest").textContent,
@@ -366,6 +367,7 @@ test("Local manifest check is explicit and scoped; no context or denied/demo rol
     for(const domain of ["club","get"]){
       await h.selectPackage(domain,{}, {size:100,text:async()=>{reads++;return "{}";}});await h.packageReview(domain);
       assert.match(h.packageResult(domain),/No current owner\/admin source context/);
+      assert.doesNotMatch(h.packageSummary(domain),/of \d+ PRESENT|MISSING;|UNKNOWN\.|79977c8/);
     }
     assert.equal(reads,0);
   }
@@ -419,6 +421,7 @@ test("Manifest rejects foreign domains/orgs/SHA/check/actions, expiry, unknown o
     await h.selectPackage("get",getPackage);await h.packageReview("get");assert.match(h.packageResult("get"),/All required/);
     const d=structuredClone(getPackage);mutate(d);await h.selectPackage("get",d);await h.packageReview("get");
     assert.match(h.packageResult("get"),/Manifest rejected/);assert.doesNotMatch(h.packageResult("get"),/SECRET|<img|All required/);
+    assert.match(h.packageSummary("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageSummary("get"),/SECRET|<img|of \d+ PRESENT/);
   }
   for(const change of [d=>d.organisationId=OTHER,d=>d.sourceSha=SHA,d=>d.checkId="club-pilot",d=>d.actions.push("provider-fetch")]){
     const d=structuredClone(clubPackage);change(d);await h.selectPackage("club",d);await h.packageReview("club");assert.match(h.packageResult("club"),/Manifest rejected/);
@@ -434,6 +437,7 @@ test("Bounded files only, no automatic read; file exceptions are redacted and ma
   await h.selectPackage("get",{}, {size:100,text:async()=>{throw Error("SECRET");}});await h.packageReview("get");assert.doesNotMatch(h.packageResult("get"),/SECRET/);
   await h.selectPackage("get",getPackage);await h.packageReview("get");h.setNow(NOW+60*60*1000);
   await h.get("#operationsSha").run("input");assert.match(h.packageResult("get"),/review window expired/);
+  assert.match(h.packageSummary("get"),/review expired/);assert.doesNotMatch(h.packageSummary("get"),/of \d+ PRESENT/);
   assert.equal(h.get("#getPackageFile").files.length,0);
 });
 for(const action of ["club","tab","logout","401","get-sha","get-file","check","ops-sha","refresh"])
@@ -449,12 +453,15 @@ test(`Late manifest completion cannot rehydrate a superseded package: ${action}`
   if(action==="refresh"){await h.get("#refreshButton").run("click");await settle();}
   wait.resolve(JSON.stringify(domain==="club"?clubPackage:getPackage));await running;
   assert.equal(h.packageResult(domain),"");assert.equal(h.get("#"+domain+"PackageFile").files.length,0);
+  assert.doesNotMatch(h.packageSummary(domain),/of \d+ PRESENT|MISSING;|UNKNOWN\./);
+  if(["tab","logout","401"].includes(action))assert.equal(h.packageSummary(domain),"");
 });
 test("Late manifest failure cannot erase a newer result; Get edits do not erase club package",async()=>{
   const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");const club=h.packageResult("club"),old=deferred();
   await h.selectPackage("get",{}, {size:100,text:()=>old.promise});const running=h.packageReview("get");await settle();
-  await h.selectPackage("get",getPackage);await h.packageReview("get");const current=h.packageResult("get");old.reject(Error("SECRET"));await running;
-  assert.equal(h.packageResult("get"),current);await h.select();assert.equal(h.packageResult("club"),club);assert.equal(h.packageResult("get"),"");
+  await h.selectPackage("get",getPackage);await h.packageReview("get");const current=h.packageResult("get"),summary=h.packageSummary("get"),clubSummary=h.packageSummary("club");old.reject(Error("SECRET"));await running;
+  assert.equal(h.packageResult("get"),current);assert.equal(h.packageSummary("get"),summary);
+  await h.select();assert.equal(h.packageResult("club"),club);assert.equal(h.packageSummary("club"),clubSummary);assert.equal(h.packageResult("get"),"");
 });
 test("Manifest inspection stays local, has labelled independent regions and no network, credential, clipboard or approval transport",()=>{
   const segment=source.slice(source.indexOf("  const goPackageCommon ="),source.indexOf("  async function load()"));
@@ -464,4 +471,60 @@ test("Manifest inspection stays local, has labelled independent regions and no n
   assert.match(html,/Declared completeness is not permission/);
   assert.match(html,/<span id="getPackageCheckLabel">GetACourt package check<\/span>/);
   assert.match(html,/id="getPackageCheck"[^>]*aria-labelledby="getPackageCheckLabel"/);
+});
+
+test("Package summaries start without invented counts and selection alone never reads a manifest",async()=>{
+  const h=await harness();await h.open();
+  for(const d of ["club","get"])assert.match(h.packageSummary(d),/No current source\/check context/);
+  await h.ops();await h.select();await h.review();await h.check();
+  for(const d of ["club","get"])assert.match(h.packageSummary(d),/No local package reviewed/);
+  let reads=0;const calls=h.calls.length;
+  await h.selectPackage("get",{}, {size:100,text:async()=>{reads++;return JSON.stringify(getPackage);}});
+  assert.equal(reads,0);assert.doesNotMatch(h.packageSummary("get"),/of \d+ PRESENT/);
+  await h.packageReview("get");assert.equal(reads,1);assert.equal(h.calls.length,calls);
+  await h.get("#provenanceAge").run("input");assert.equal(reads,1);assert.equal(h.calls.length,calls);
+});
+test("Adjacent summaries preserve exact separate counts, source/check/time and blockers without combined authority",async()=>{
+  const h=await packageHarness(),blockers=h.get("#clubUatBlockers").innerHTML,candidate=h.summary(),calls=h.calls.length;
+  await h.selectPackage("club",clubPackage);await h.packageReview("club");const club=h.packageSummary("club");
+  assert.match(club,/1 of 13 PRESENT/);assert.match(club,/11 MISSING; 1 UNKNOWN/);assert.match(club,/Incomplete declarations/);
+  assert.match(club,new RegExp(ORG));assert.match(club,/Operations SHA/);assert.doesNotMatch(club,new RegExp(SHA));
+  await h.selectPackage("get",getPackage);await h.packageReview("get");const get=h.packageSummary("get");
+  assert.match(get,/15 of 15 PRESENT/);assert.match(get,/0 MISSING; 0 UNKNOWN/);assert.match(get,/check google-oauth/);
+  assert.match(get,new RegExp(SHA));assert.doesNotMatch(get,new RegExp(ORG));assert.match(get,/2026-10-21T10:20:00Z/);
+  for(const summary of [club,get]){assert.match(summary,/Verified GO: none/);assert.match(summary,/Execution NOT_RUN/);assert.match(summary,/Existing blockers stay open/);assert.doesNotMatch(summary,/<(?:button|form|input|a)\b/);}
+  assert.match(get,/All declared — independent manual review still required/);
+  assert.equal(h.packageSummary("club"),club);assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);assert.equal(h.summary(),candidate);
+  assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
+test("Mixed package items are counted independently of report missing-GO flags; missing inventory is not clearance",async()=>{
+  const h=await packageHarness(),d=structuredClone(getPackage);d.items[0].state="UNKNOWN";d.items[1].state="MISSING";d.items.pop();
+  await h.selectPackage("get",d);await h.packageReview("get");assert.match(h.packageSummary("get"),/12 of 15 PRESENT/);
+  assert.match(h.packageSummary("get"),/2 MISSING; 1 UNKNOWN/);assert.match(h.summary(),/missing \/ invalid: 7 of 7/);
+  assert.match(h.get("#clubUatBlockers").innerHTML,/Owner UAT GO/);
+});
+test("Loading and failed local files drop summary counts immediately; late completion cannot keep old metadata",async()=>{
+  const h=await packageHarness();await h.selectPackage("get",getPackage);await h.packageReview("get");const old=deferred();
+  await h.selectPackage("get",{}, {size:100,text:()=>old.promise});const run=h.packageReview("get");await settle();
+  assert.match(h.packageSummary("get"),/read in progress/);assert.doesNotMatch(h.packageSummary("get"),/of \d+ PRESENT|79977c8/);
+  old.reject(Error("SECRET"));await run;assert.match(h.packageSummary("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageSummary("get"),/SECRET|of \d+ PRESENT/);
+});
+test("Completed summaries and files clear on scope loss; a new club has no carried-over package counts",async()=>{
+  for(const action of ["club","tab","logout","401"]){
+    const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");await h.selectPackage("get",getPackage);await h.packageReview("get");
+    if(action==="club"){h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();}
+    if(action==="tab")await h.nav[0].run("click");if(action==="logout")await h.get("#signOut").run("click");
+    if(action==="401"){h.controls.deny=true;await h.get("#refreshButton").run("click");await settle();}
+    for(const d of ["club","get"]){assert.doesNotMatch(h.packageSummary(d),/of \d+ PRESENT|79977c8/);if(action!=="club")assert.equal(h.packageSummary(d),"");}
+  }
+});
+test("Package summary presentation has distinct accessible regions by blockers and no reads, side effects or shared decision",()=>{
+  const html=readFileSync("platform/public/fill/index.html","utf8");
+  for(const d of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+d+'PackageSummaryHeading"'));assert.match(html,new RegExp('id="'+d+'PackageSummary" role="status" aria-live="polite" aria-atomic="true"'));}
+  assert.ok(html.indexOf('id="clubPackageSummary"')>html.indexOf('id="clubUatBlockers"'));
+  assert.ok(html.indexOf('id="clubPackageSummary"')<html.indexOf('id="clubNextSteps"'));
+  assert.ok(html.indexOf('id="getPackageSummary"')>html.indexOf('id="acceptanceSummary"'));
+  assert.ok(html.indexOf('id="getPackageSummary"')<html.indexOf('id="candidateNextSteps"'));
+  const segment=source.slice(source.indexOf("  function renderGoPackageSummary("),source.indexOf("  function clearGoPackage("));
+  assert.doesNotMatch(segment,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|\.addEventListener|setTimeout|setInterval|uatBlockers|acceptanceSummary|reviewSummary\s*=/);
 });
