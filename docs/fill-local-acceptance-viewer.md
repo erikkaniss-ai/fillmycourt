@@ -1,5 +1,44 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Unsent GO request templates — continuation from Fill27fe097
+
+Each scope column has its own labelled template section. Native keyboard-accessible
+disclosures contain escaped, selectable, read-only text with a permanent **UNSENT
+DRAFT / NOT GO** warning. There is no editor, recipient, send/copy button, mail link,
+clipboard call, transport, persistence, approval record or new read. Templates do
+not populate an execution queue or change any blocker or permission.
+
+The club template requests independent review for **protected read-only provenance
+UAT only**, not pilot GO. It uses only the current organisation and, when available,
+the last-read scoped expected Operations SHA, explicitly labelled unapproved and
+not independently attested. An unreviewed/edited/denied/incompatible Operations
+read leaves an explicit required-SHA placeholder; typing a SHA does not fill it.
+Exact existing protected deploy/runtime identity, two synthetic organisations,
+consenting testers/roles, GET route and negative-access scope, approved age policy,
+club-wide coverage, original approver/delegation, evidence/blockers and
+approval/expiry/revocation/stop conditions remain required independent evidence.
+It excludes pilot execution, live provider access, deploy, provisioning and repairs.
+
+GetACourt templates are selected **only** for exact missing-GO flags in the valid
+explicitly reviewed local snapshot. Each check has a separate request with the
+reviewed Get SHA/time and the pinned exact action/evidence allowlists. They do not
+borrow the club identity or Operations revision. Unknown deployment/authority,
+consent, expiry or evidence means STOP; a new deploy needs separate deployment GO.
+OAuth/location requests explicitly require their own state-change GO, without
+running anything. No missing flag selects no new request, not verified permission.
+Club UAT/pilot GO, worker activation, provider rights and deployment authority are
+never inherited from a request or local report.
+
+Owner/admin review scope is required for both template surfaces. Demo/denied scopes
+have no templates. Club/auth/tab/current401 resets clear bound text; candidate file
+selection, edits, loading, invalid/expired reports and late reads cannot retain or
+restore previous candidate drafts. Expiry is checked on each existing summary
+render, not a live monitor or timer. Club and Get state remain independent.
+Node contracts cover these cases; loopback Chromium also verifies keyboard
+disclosures, exact draft actions, no controls/network/storage and readable desktop
+and 320px text. New images: `fill-go-request-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`.
+These are synthetic browser checks, not hosted or physical-device acceptance.
+
 ## Separate next-GO preparation lists — continuation from Fill0654e84
 
 The two existing scope columns now each have a labelled **Next steps** list.

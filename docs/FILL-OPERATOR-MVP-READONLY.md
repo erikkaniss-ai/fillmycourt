@@ -11,6 +11,15 @@
 
 ### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
 
+Continuation from Fill `27fe097`: separate owner/admin read-only unsent GO request
+templates now sit under the club and Get planning lists. Club requests cover only
+protected provenance UAT (not pilot GO); Get requests select per-check missing-GO
+flags and exact pinned actions from the current reviewed local report. Required
+unknowns stay placeholders, not inferred approval. Last-read SHA values are not
+approved or independently attested. No recipient, editor, send/clipboard action,
+storage, new request, permission or execution is added. Existing scope/expiry and
+late-result clearing remain; club/Get authority is never shared.
+
 Continuation from Fill `0654e84`: club and GetACourt now have separate read-only
 next-GO preparation lists. They describe missing evidence, approval/delegation,
 exact source/deploy scope, consent/expiry and stop conditions, never execution.

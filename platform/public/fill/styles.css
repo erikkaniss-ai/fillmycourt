@@ -165,4 +165,8 @@
 .go-next-panel { border-top:1px solid var(--line); margin-top:20px; padding-top:4px; overflow-wrap:anywhere; }
 .go-next-list { padding-left:22px; }
 .go-next-list li { margin:12px 0; }
+.go-request { border:1px solid var(--line); border-radius:9px; padding:12px; margin:12px 0; min-width:0; }
+.go-request summary { cursor:pointer; font-weight:700; overflow-wrap:anywhere; }
+.go-request summary:focus-visible, .go-request-text:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+.go-request-text { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; user-select:text; margin-bottom:0; }
 @media(max-width:720px) { .sidebar nav { flex-wrap:wrap; } }

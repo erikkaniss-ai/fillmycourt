@@ -104,6 +104,35 @@ test("Demo preparation notes never invent real club GO",async()=>{
   assert.equal(h.get("#clubNextSteps").innerHTML,"");assert.equal(h.calls.length,0);
 });
 
+test("Club request uses only last-read scoped Operations SHA as unverified, clears it on edits/errors and never treats a pass as GO",async()=>{
+  const h=await harness();await h.open();const draft=()=>h.get("#clubGoRequest").innerHTML;
+  assert.doesNotMatch(draft(),new RegExp(SHA));
+  await h.check();assert.match(draft(),new RegExp(SHA));assert.match(draft(),/NOT approved or independently attested/);
+  assert.match(draft(),/unresolved blockers/);assert.match(draft(),/this draft clears none/);
+  h.get("#operationsSha").value=NEXT;await h.get("#operationsSha").run("input");
+  assert.doesNotMatch(draft(),new RegExp(SHA));assert.doesNotMatch(draft(),new RegExp(NEXT));
+  for(const response of [()=>denied(403),()=>ok(result({extra:"PRIVATE<img>"}))]){
+    await h.check();h.controls.preflight=response;await h.check();
+    assert.doesNotMatch(draft(),new RegExp(SHA));assert.doesNotMatch(draft(),/PRIVATE|<img/);
+  }
+  assert.ok(h.calls.every(c=>c.method==="GET"));assert.equal(h.storage.size,1);
+});
+test("Old Operations responses cannot restore a SHA into a new club request or a closed scope",async()=>{
+  for(const action of ["club","tab","logout","edit"]){
+    const h=await harness();await h.open();const wait=pending();h.controls.preflight=()=>wait.promise;
+    const running=h.check();await settle();
+    if(action==="club"){h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();}
+    if(action==="tab")await h.nav[0].run("click");
+    if(action==="logout")await h.get("#signOut").run("click");
+    if(action==="edit"){h.get("#operationsSha").value=NEXT;await h.get("#operationsSha").run("input");}
+    wait.resolve(ok(result()));await running;const draft=h.get("#clubGoRequest").innerHTML;
+    assert.doesNotMatch(draft,new RegExp(SHA));
+    if(["tab","logout"].includes(action))assert.equal(draft,"");
+    if(action==="club"){assert.match(draft,new RegExp(OTHER));assert.doesNotMatch(draft,new RegExp(ORG));}
+  }
+  const demo=await harness(true);await demo.open();assert.equal(demo.get("#clubGoRequest").innerHTML,"");
+});
+
 test("Explicit Operations SHA and click only; no default, remembered revision, or automatic preflight",async()=>{
   const h=await harness();await h.open();
   assert.equal(h.get("#operationsSha").value,"");

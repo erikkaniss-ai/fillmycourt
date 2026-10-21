@@ -73,6 +73,11 @@
               <p class="muted">Planning notes only, not an execution checklist or approval. Club UAT and pilot GO remain separate from GetACourt.</p>
               <div id="clubNextSteps" role="status" aria-live="polite" aria-atomic="true"></div>
             </section>
+            <section class="go-next-panel club-request-panel" aria-labelledby="clubGoRequestHeading">
+              <h4 id="clubGoRequestHeading">GO request template — club</h4>
+              <p class="muted">Read-only unsent draft for protected club UAT, not pilot GO. Select text manually if needed; nothing is sent, saved or approved.</p>
+              <div id="clubGoRequest"></div>
+            </section>
           </section>
           <section class="acceptance-summary" aria-labelledby="acceptanceSummaryHeading">
             <p class="eyebrow">GETACOURT CANDIDATE · SEPARATE SCOPE</p>
@@ -84,6 +89,11 @@
               <h4 id="candidateNextHeading">Next steps — GetACourt GO</h4>
               <p class="muted">Planning notes only. Flags describe the imported snapshot, not current authority. Nothing here can run, approve, deploy or send a request.</p>
               <div id="candidateNextSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
+            <section class="go-next-panel candidate-request-panel" aria-labelledby="candidateGoRequestsHeading">
+              <h4 id="candidateGoRequestsHeading">GO request templates — GetACourt</h4>
+              <p class="muted">Read-only unsent drafts selected only by missing-GO flags in the current local report. Each check needs separate authority; no combined GO or sending control.</p>
+              <div id="candidateGoRequests"></div>
             </section>
           </section>
           </div>

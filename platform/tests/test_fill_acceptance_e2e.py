@@ -65,6 +65,13 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             summary = page.locator("#acceptanceSummary")
             club_steps = page.locator("#clubNextSteps")
             candidate_steps = page.locator("#candidateNextSteps")
+            club_draft = page.locator("#clubGoRequest")
+            candidate_drafts = page.locator("#candidateGoRequests")
+            expect(club_draft.locator('[data-go-template="club-uat"]')).to_have_count(1)
+            expect(club_draft).to_contain_text(ORG)
+            expect(club_draft).to_contain_text("[REQUIRED: exact approved Operations SHA")
+            expect(candidate_drafts.locator("details")).to_have_count(0)
+            club_draft_before = club_draft.inner_html()
             expect(club_steps.locator('[data-club-next="club-uat-go"]')).to_have_count(1)
             expect(club_steps.locator('[data-club-next="club-pilot-go"]')).to_have_count(1)
             expect(candidate_steps.locator('[data-candidate-go]')).to_have_count(0)
@@ -98,6 +105,16 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(candidate_steps).to_contain_text("exact SHA/deploy/action scope")
             expect(candidate_steps.locator("button, input, form, a")).to_have_count(0)
             expect(club_steps.locator("button, input, form, a")).to_have_count(0)
+            expect(candidate_drafts.locator("details")).to_have_count(7)
+            assert club_draft.inner_html() == club_draft_before
+            for item in PINNED["checks"]:
+                draft = candidate_drafts.locator(f'[data-go-template="{item["id"]}"]')
+                expect(draft).to_contain_text(SHA)
+                expect(draft).to_contain_text(", ".join(item["requiredGoActions"]))
+                expect(draft).to_contain_text("UNSENT DRAFT · NOT GO")
+            for drafts in [club_draft, candidate_drafts]:
+                expect(drafts.locator("button, input, textarea, form, a, [contenteditable]")).to_have_count(0)
+            expect(candidate_drafts).not_to_contain_text(ORG)
             assert len(calls) == before
             assert page.evaluate("localStorage.length") == 0
             assert page.evaluate("sessionStorage.length") == 1
@@ -110,8 +127,30 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             assert abs(candidate_box["y"] - club_box["y"]) < 10
             page.screenshot(path=str(screenshots / "fill-gate-summary-desktop-FIXTURE-ONLY.png"))
             page.locator(".review-gate-columns").screenshot(path=str(screenshots / "fill-go-next-desktop-FIXTURE-ONLY.png"))
+            # Native disclosure only: keyboard expansion does not send, save or grant GO.
+            club_toggle = club_draft.locator("summary")
+            club_toggle.focus()
+            page.keyboard.press("Enter")
+            expect(club_draft.locator("details")).to_have_attribute("open", "")
+            expect(club_draft.locator("pre")).to_be_visible()
+            oauth_draft = candidate_drafts.locator('[data-go-template="google-oauth"]')
+            oauth_draft.locator("summary").click()
+            expect(oauth_draft.locator("pre")).to_be_visible()
+            expect(oauth_draft).to_contain_text("Separate explicit state-change GO REQUIRED")
+            expect(oauth_draft).to_contain_text("any new deploy needs separate deployment GO")
+            page.locator(".club-request-panel").screenshot(path=str(screenshots / "fill-go-request-club-desktop-FIXTURE-ONLY.png"))
+            page.locator(".candidate-request-panel").screenshot(path=str(screenshots / "fill-go-request-get-desktop-FIXTURE-ONLY.png"))
+            assert len(calls) == before
+            assert page.evaluate("sessionStorage.length") == 1
             page.set_viewport_size({"width": 320, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+            for name, panel in [("club", ".club-request-panel"), ("get", ".candidate-request-panel")]:
+                page.locator(panel).evaluate("e=>e.scrollIntoView({block:'start'})")
+                page.screenshot(path=str(screenshots / f"fill-go-request-{name}-mobile-FIXTURE-ONLY.png"))
+            for draft in [club_draft, oauth_draft]:
+                text = draft.locator("pre")
+                assert text.evaluate("e=>e.scrollWidth <= e.clientWidth")
+                assert text.evaluate("e=>!e.isContentEditable && getComputedStyle(e).whiteSpace==='pre-wrap'")
             page.locator(".acceptance-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
             page.screenshot(path=str(screenshots / "fill-acceptance-mobile-FIXTURE-ONLY.png"))
             page.locator(".acceptance-summary").evaluate("e=>e.scrollIntoView({block:'start'})")
@@ -122,6 +161,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             page.screenshot(path=str(screenshots / "fill-gate-summary-mobile-FIXTURE-ONLY.png"))
             page.locator(".candidate-next-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
             page.screenshot(path=str(screenshots / "fill-go-next-mobile-FIXTURE-ONLY.png"))
+            club_toggle.click()
+            expect(club_draft.locator("details")).not_to_have_attribute("open", "")
 
             bad = copy.deepcopy(PINNED)
             bad["checks"][0]["blockers"].append("PRIVATE_SECRET<img src=x onerror=alert(1)>")
@@ -133,6 +174,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(summary).not_to_contain_text("7 checks:")
             expect(candidate_steps.locator('[data-candidate-go]')).to_have_count(0)
             expect(candidate_steps).not_to_contain_text(SHA)
+            expect(candidate_drafts.locator("details")).to_have_count(0)
+            expect(candidate_drafts).not_to_contain_text(SHA)
             complete = copy.deepcopy(PINNED)
             for item in complete["checks"]:
                 item["blockers"] = []
@@ -146,6 +189,9 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(summary).to_contain_text("Verified GO: none")
             expect(candidate_steps.locator('[data-candidate-go]')).to_have_count(0)
             expect(candidate_steps.locator('[data-candidate-next="candidate-unverified-go"]')).to_contain_text("no GO is verified")
+            expect(candidate_drafts.locator("details")).to_have_count(0)
+            expect(candidate_drafts).to_contain_text("No verified GO; do not execute")
+            assert club_draft.inner_html() == club_draft_before
             assert club_steps.inner_html() == club_steps_before
             assert page.locator("#clubUatBlockers").inner_html() == club_before
 
@@ -157,6 +203,10 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(club_steps).not_to_contain_text(ORG)
             expect(candidate_steps.locator('[data-candidate-go]')).to_have_count(0)
             expect(candidate_steps).not_to_contain_text(SHA)
+            expect(candidate_drafts.locator("details")).to_have_count(0)
+            expect(candidate_drafts).not_to_contain_text(SHA)
+            expect(club_draft).to_contain_text(OTHER)
+            expect(club_draft).not_to_contain_text(ORG)
             expect(page.locator("#acceptanceSha")).to_have_value("")
             assert page.locator("#acceptanceFile").input_value() == ""
             select_report(PINNED)
@@ -167,6 +217,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(page.locator("#acceptanceReview")).to_be_disabled()
             expect(summary).to_contain_text("Signed-in owner/admin review is required")
             expect(summary).not_to_contain_text(SHA)
+            expect(club_draft.locator("details")).to_have_count(0)
+            expect(candidate_drafts.locator("details")).to_have_count(0)
             page.locator("#orgSelect").select_option(ORG)
             expect(page.locator("#acceptanceReview")).to_be_enabled()
             select_report(PINNED)
@@ -175,6 +227,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(summary).to_be_empty()
             expect(club_steps).to_be_empty()
             expect(candidate_steps).to_be_empty()
+            expect(club_draft).to_be_empty()
+            expect(candidate_drafts).to_be_empty()
             page.get_by_role("button", name="Provider evidence", exact=True).click()
             select_report(PINNED)
             page.get_by_role("button", name="Sign out", exact=True).click()
@@ -182,6 +236,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(summary).to_be_empty()
             expect(club_steps).to_be_empty()
             expect(candidate_steps).to_be_empty()
+            expect(club_draft).to_be_empty()
+            expect(candidate_drafts).to_be_empty()
             expect(page.locator("#acceptanceSha")).to_have_value("")
             assert page.locator("#acceptanceFile").input_value() == ""
             assert page.evaluate("sessionStorage.length") == 0

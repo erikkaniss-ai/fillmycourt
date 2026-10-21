@@ -51,6 +51,8 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
   return {get,nav,storage,calls,controls,open,select,review,setNow:value=>{clockNow=value;},
     clubSteps:()=>get("#clubNextSteps").innerHTML||get("#clubNextSteps").textContent,
     candidateSteps:()=>get("#candidateNextSteps").innerHTML||get("#candidateNextSteps").textContent,
+    clubDraft:()=>get("#clubGoRequest").innerHTML||get("#clubGoRequest").textContent,
+    candidateDrafts:()=>get("#candidateGoRequests").innerHTML||get("#candidateGoRequests").textContent,
     summary:()=>get("#acceptanceSummary").innerHTML||get("#acceptanceSummary").textContent,
     report:()=>get("#acceptanceReport").innerHTML,message:()=>get("#acceptanceMessage").textContent};
 }
@@ -101,6 +103,7 @@ test("Unsafe, stale, foreign, contradictory, secret-bearing or malformed reports
     assert.doesNotMatch(h.message(),/SECRET|<img/);
     assert.match(h.summary(),/rejected or unavailable/);assert.doesNotMatch(h.summary(),/SECRET|<img|7 checks:/);
     assert.doesNotMatch(h.candidateSteps(),/SECRET|<img|data-candidate-go=/);
+    assert.doesNotMatch(h.candidateDrafts(),/SECRET|<img|data-go-template=|79977c8/);
   }
   for(const bad of ["{", "null", "[]", "{}"]){await h.select(bad);await h.review();assert.equal(h.report(),"");}
   for(const value of [null, " ".repeat(65537)]){
@@ -123,6 +126,7 @@ test(`No file read without owner/admin authenticated scope: ${JSON.stringify(opt
   assert.equal(reads,0);assert.equal(h.report(),"");
   assert.doesNotMatch(h.summary(),new RegExp(SHA));assert.doesNotMatch(h.summary(),/7 checks:/);
   assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
+  for(const html of [h.clubDraft(),h.candidateDrafts()])assert.doesNotMatch(html,/data-go-template=/);
 });
 for(const action of ["club","tab","logout","sha","file","refresh","401"])
 test(`Late file completion after ${action} cannot restore stale scope`,async()=>{
@@ -139,6 +143,8 @@ test(`Late file completion after ${action} cannot restore stale scope`,async()=>
   assert.equal(h.report(),"");assert.equal(h.message(),"");
   assert.doesNotMatch(h.summary(),new RegExp(SHA));assert.doesNotMatch(h.summary(),/7 checks:/);
   assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
+  assert.doesNotMatch(h.candidateDrafts(),new RegExp(SHA));assert.doesNotMatch(h.candidateDrafts(),/data-go-template=/);
+  if(["logout","401","tab"].includes(action))assert.equal(h.clubDraft(),"");
   if(["club","tab","logout","refresh","401"].includes(action)){
     assert.equal(h.get("#acceptanceSha").value,"");assert.equal(h.get("#acceptanceFile").files.length,0);
   }
@@ -147,10 +153,11 @@ test(`Late file completion after ${action} cannot restore stale scope`,async()=>
 test("Late failure cannot erase a newer valid local report; current failure is redacted",async()=>{
   const h=await harness();await h.open();const old=deferred();
   await h.select(golden,SHA,{size:100,text:()=>old.promise});const running=h.review();await settle();
-  await h.select();await h.review();const current=h.report(),summary=h.summary(),steps=h.candidateSteps();old.reject(Error("SECRET"));await running;
+  await h.select();await h.review();const current=h.report(),summary=h.summary(),steps=h.candidateSteps(),drafts=h.candidateDrafts();old.reject(Error("SECRET"));await running;
   assert.equal(h.report(),current);
   assert.equal(h.summary(),summary);
   assert.equal(h.candidateSteps(),steps);
+  assert.equal(h.candidateDrafts(),drafts);
   await h.select(golden,SHA,{size:100,text:async()=>{throw Error("SECRET");}});await h.review();
   assert.equal(h.report(),"");assert.doesNotMatch(h.message(),/SECRET/);
   assert.match(h.summary(),/rejected or unavailable/);
@@ -187,6 +194,7 @@ test("Operations parameter edits leave candidate snapshot independent; expiry is
   h.setNow(NOW+25*60*60*1000);await h.get("#operationsSha").run("input");
   assert.match(h.summary(),/report expired/);assert.doesNotMatch(h.summary(),/7 checks:|7 of 7/);
   assert.doesNotMatch(h.candidateSteps(),new RegExp(SHA));assert.doesNotMatch(h.candidateSteps(),/data-candidate-go=/);
+  assert.doesNotMatch(h.candidateDrafts(),new RegExp(SHA));assert.doesNotMatch(h.candidateDrafts(),/data-go-template=/);
   assert.match(h.get("#clubUatBlockers").innerHTML,/Owner UAT GO/);
 });
 test("New club summary starts unreviewed; reimport cannot reuse the previous club's counts",async()=>{
@@ -270,4 +278,67 @@ test("Local viewer has labels/no transport/storage/runner, remains in both manda
   assert.doesNotMatch(segment,/\bfetch\s*\(|\bapi\s*\(|Storage\.|setInterval|setTimeout|FormData|serviceWorker|\.submit\(/);
   const ci=readFileSync(".github/workflows/platform-ci.yml","utf8");
   assert.equal((ci.match(/node --test platform\/tests\/fill_operator_acceptance_contract.test.mjs/g)||[]).length,2);
+});
+
+test("Unsent club template has explicit unknowns, no candidate template before opt-in review and no side effects",async()=>{
+  const h=await harness({name:"PRIVATE<img>"});await h.open();const count=h.calls.length;
+  assert.match(h.clubDraft(),/data-go-template="club-uat"/);assert.match(h.clubDraft(),new RegExp(ORG));
+  assert.match(h.clubDraft(),/UNSENT DRAFT · NOT GO/);assert.match(h.clubDraft(),/REQUIRED: exact approved Operations SHA/);
+  assert.match(h.clubDraft(),/Two authorised synthetic organisations/);assert.match(h.clubDraft(),/wrong-role\/cross-org access-denial/);
+  assert.match(h.clubDraft(),/pilot execution or pilot GO/);assert.match(h.clubDraft(),/expiry \/ revocation/);
+  assert.doesNotMatch(h.clubDraft(),/PRIVATE|<img|79977c8/);assert.doesNotMatch(h.candidateDrafts(),/data-go-template=/);
+  await h.select();assert.doesNotMatch(h.candidateDrafts(),/data-go-template=/);
+  assert.equal(h.calls.length,count);assert.equal(h.storage.size,1);
+});
+test("Each missing Get GO selects an unsent per-check template with exact SHA/actions, not a combined request",async()=>{
+  const h=await harness();await h.open();const club=h.clubDraft(),count=h.calls.length;
+  await h.select();await h.review();const drafts=h.candidateDrafts();
+  assert.deepEqual([...drafts.matchAll(/data-go-template="([^"]+)"/g)].map(m=>m[1]),golden.checks.map(c=>c.id));
+  for(const check of golden.checks){
+    const block=drafts.split('data-go-template="'+check.id+'"')[1].split("</details>")[0];
+    assert.match(block,new RegExp(SHA));assert.ok(block.includes(check.requiredGoActions.join(", ")));
+    assert.ok(block.includes(check.requiredEvidence.join(", ")));assert.match(block,/one check per separate GO/);
+    assert.match(block,/UNSENT REQUEST DRAFT/);assert.match(block,/verified GO NONE/);
+    assert.match(block,/Approver \/ delegation: \[REQUIRED/);assert.match(block,/any new deploy needs separate deployment GO/);
+    assert.match(block,/expiry \/ revocation/);assert.match(block,/neither sends this draft nor verifies or records GO/);
+    assert.match(block,check.requiresStateChangeGO?/Separate explicit state-change GO REQUIRED/:/OAuth and device-location state changes are excluded/);
+  }
+  assert.doesNotMatch(drafts,new RegExp(ORG));assert.equal(h.clubDraft(),club);
+  assert.equal(h.calls.length,count);assert.equal(h.storage.size,1);
+});
+test("Mixed and zero missing flags select only missing-GO drafts and never turn complete records into authority",async()=>{
+  const h=await harness();await h.open();const data=structuredClone(golden);
+  data.checks[1].blockers=["EVIDENCE_REQUIRED:source-ci"];
+  data.checks.slice(2).forEach(c=>{c.blockers=[];c.preflight="READY_FOR_MANUAL_GO_REVIEW";});
+  await h.select(data);await h.review();
+  assert.deepEqual([...h.candidateDrafts().matchAll(/data-go-template="([^"]+)"/g)].map(m=>m[1]),["hosted-perimeter"]);
+  data.checks[0].blockers=[];data.checks[0].preflight="READY_FOR_MANUAL_GO_REVIEW";
+  await h.select(data);await h.review();assert.doesNotMatch(h.candidateDrafts(),/data-go-template=/);
+  assert.match(h.candidateDrafts(),/existing original approvals still need independent review/);
+  assert.match(h.candidateDrafts(),/No verified GO; do not execute/);
+});
+test("Completed request templates clear on a new club, tab, logout and current session expiry",async()=>{
+  for(const action of ["club","tab","logout","401"]){
+    const h=await harness();await h.open();await h.select();await h.review();
+    if(action==="club"){h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();}
+    if(action==="tab")await h.nav[0].run("click");
+    if(action==="logout")await h.get("#signOut").run("click");
+    if(action==="401"){h.controls.deny=true;await h.get("#refreshButton").run("click");await settle();}
+    assert.doesNotMatch(h.candidateDrafts(),/data-go-template=/);assert.doesNotMatch(h.candidateDrafts(),new RegExp(SHA));
+    if(action==="club"){assert.match(h.clubDraft(),new RegExp(OTHER));assert.doesNotMatch(h.clubDraft(),new RegExp(ORG));}
+    else assert.equal(h.clubDraft(),"");
+  }
+});
+test("Templates are escaped selectable disclosures, not editable approvals, send controls or a shared authority surface",()=>{
+  const html=readFileSync("platform/public/fill/index.html","utf8"),css=readFileSync("platform/public/fill/styles.css","utf8");
+  for(const id of ["clubGoRequestHeading","candidateGoRequestsHeading"])assert.match(html,new RegExp('aria-labelledby="'+id+'"'));
+  const helper=source.slice(source.indexOf("  function goRequestText("),source.indexOf("  // Club-only planning"));
+  assert.match(helper,/esc\(lines.join/);assert.match(helper,/<summary>/);assert.match(helper,/tabindex="0" aria-label=/);
+  const club=source.slice(source.indexOf("  function renderClubGoRequest("),source.indexOf("  function setReviewSummary("));
+  const candidate=source.slice(source.indexOf("  function renderCandidateGoRequests("),source.indexOf("  // Independent candidate-wide presentation"));
+  assert.doesNotMatch(club,/acceptanceSnapshot|acceptanceCatalog|acceptanceSha|candidateGoRequests/);
+  assert.doesNotMatch(candidate,/state\.reviewSummary|clubGoRequest|operationsSha|uatBlockers/);
+  for(const segment of [helper,club,candidate])assert.doesNotMatch(segment,/<(?:button|input|textarea|form|a)\b|contenteditable|mailto:|clipboard|Storage|\.addEventListener|\bapi\(|\bfetch\(|\.submit\(/);
+  assert.match(css,/\.go-request-text \{ white-space:pre-wrap; overflow-wrap:anywhere/);
+  assert.match(css,/summary:focus-visible/);
 });

@@ -37,6 +37,7 @@
     acceptanceMessage: q("#acceptanceMessage"), acceptanceReport: q("#acceptanceReport"),
     acceptanceSummary: q("#acceptanceSummary"),
     clubNextSteps: q("#clubNextSteps"), candidateNextSteps: q("#candidateNextSteps"),
+    clubGoRequest: q("#clubGoRequest"), candidateGoRequests: q("#candidateGoRequests"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -452,6 +453,7 @@
       el.reviewSummary.textContent = "";
       if (el.uatBlockers) el.uatBlockers.textContent = "";
       if (el.clubNextSteps) el.clubNextSteps.textContent = "";
+      if (el.clubGoRequest) el.clubGoRequest.textContent = "";
       return;
     }
     const scoped = key => {
@@ -538,8 +540,16 @@
       '<li data-unassessed="club_provenance_coverage">Club-wide provenance coverage — not assessed by a single-page viewer.</li></ul>';
   }
 
+  // Selectable text only: no editor, recipient, clipboard, transport or authority.
+  function goRequestText(id, title, lines) {
+    return `<details class="go-request" data-go-template="${esc(id)}"><summary>${esc(title)}</summary>` +
+      '<p class="read-only-notice">UNSENT DRAFT · NOT GO. Unfilled or unverified fields mean STOP. No approval is recorded here.</p>' +
+      `<pre class="go-request-text" tabindex="0" aria-label="${esc(title)} — read-only text">${esc(lines.join("\n"))}</pre></details>`;
+  }
+
   // Club-only planning from the two scoped reads; no candidate GO enters this list.
   function renderClubNextSteps(preflight, provenance) {
+    renderClubGoRequest(preflight);
     if (!el.clubNextSteps) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.clubNextSteps.textContent = "";
@@ -562,6 +572,34 @@
     el.clubNextSteps.innerHTML = `<p>Club-only planning scope: <code>${esc(state.org)}</code>. Club GO is not verified here.</p>` +
       '<ol class="go-next-list">' + steps.map(([id, text]) =>
         `<li data-club-next="${id}">${esc(text)}</li>`).join("") + "</ol>";
+  }
+
+  function renderClubGoRequest(preflight) {
+    if (!el.clubGoRequest) return;
+    el.clubGoRequest.textContent = "";
+    if (state.view !== "provenance" || !state.org || !state.token || state.demo) return;
+    if (!state.orgs.some(org => org.id === state.org && ["owner", "admin"].includes(org.role))) {
+      el.clubGoRequest.textContent = "Owner/admin scope required. No club request template in this scope.";
+      return;
+    }
+    const observed = preflight?.org === state.org && preflight.auth === state.authEpoch &&
+      ["passed", "blocked"].includes(preflight.status) && operationsSHA.test(preflight.expected);
+    el.clubGoRequest.innerHTML = goRequestText("club-uat", "View unsent club UAT GO request template", [
+      "UNSENT REQUEST DRAFT — NOT AN APPROVAL",
+      "Subject: Request separate club GO — protected read-only provenance UAT only",
+      "Selected organisation: " + state.org,
+      "Operations SHA: " + (observed ? preflight.expected + " (last-read expected value, NOT approved or independently attested)" : "[REQUIRED: exact approved Operations SHA; not the Fill or Get SHA]"),
+      "Approver / delegation: [REQUIRED: independently verify original authority; no recipient assigned]",
+      "Existing protected nonproduction deploy ID / origin and exact SHA binding: [REQUIRED]",
+      "Independent runtime identity, isolation and access receipts: [REQUIRED; self-reported metadata is insufficient]",
+      "Two authorised synthetic organisations / consenting testers and roles: [REQUIRED; no personal data or credentials here]",
+      "Requested scope: existing-record GET-only Operations preflight and provenance review; two-org isolation, unauthenticated and wrong-role/cross-org access-denial cases only.",
+      "Exact route allowlist, connection, approved receipt-age policy and club-wide coverage: [REQUIRED: verify separately; one page is not club coverage]",
+      "Current evidence references and unresolved blockers: [REQUIRED: review separately; this draft clears none]",
+      "Approval time / expiry / revocation record / stop conditions: [REQUIRED; stop on mismatch, missing evidence, denied access or changed scope]",
+      "Excluded: pilot execution or pilot GO, provider requests/credentials/availability, provisioning, repair, deploy, production, OAuth/location state changes, worker activation, bookings/payments and outreach.",
+      "Request independent review only. Do not start UAT before separately documented exact-scope GO. This MVP neither sends this draft nor verifies or records GO.",
+    ]);
   }
 
   function setReviewSummary(key, status, details = {}) {
@@ -733,6 +771,7 @@
   }
   // Candidate-only planning, not an execution queue or a grant of authority.
   function renderCandidateNextSteps(snapshot = null, status = "not_reviewed") {
+    renderCandidateGoRequests(snapshot, status);
     if (!el.candidateNextSteps) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.candidateNextSteps.textContent = "";
@@ -766,6 +805,40 @@
       : "<p>No current candidate-specific plan from a reviewed snapshot. Planning only; no verified Get GO.</p>") +
       '<ol class="go-next-list">' + steps.map(([id, text]) =>
         `<li data-candidate-next="${id}">${esc(text)}</li>`).join("") + specific + "</ol>";
+  }
+
+  function renderCandidateGoRequests(snapshot, status) {
+    if (!el.candidateGoRequests) return;
+    el.candidateGoRequests.textContent = "";
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) return;
+    if (!acceptanceAllowed() || status !== "reviewed" || !snapshot) {
+      el.candidateGoRequests.textContent = "No current owner/admin-reviewed candidate snapshot. Review a fresh local report first; no candidate-specific request template is inferred.";
+      return;
+    }
+    const drafts = snapshot.rows.map((row, index) => {
+      if (!row.missingGo) return "";
+      const [id, label, kinds, actions] = acceptanceCatalog[index];
+      return goRequestText(id, "View unsent GetACourt GO request — " + label, [
+        "UNSENT REQUEST DRAFT — NOT AN APPROVAL",
+        "Subject: Request separate GetACourt GO — " + label,
+        "Get SHA: " + snapshot.sha + " (imported local snapshot, NOT independently attested)",
+        "Report time: " + snapshot.asOf + "; execution NOT_RUN; verified GO NONE.",
+        "Check: " + id + "; one check per separate GO, not a combined release request.",
+        "Exact requested action allowlist: " + actions.join(", "),
+        "Required existing evidence kinds: " + kinds.join(", "),
+        "Approver / delegation: [REQUIRED: independently verify original authority; no recipient assigned]",
+        "Existing protected nonproduction deploy ID / origin bound to this exact Get SHA: [REQUIRED; mismatch or absence means STOP; any new deploy needs separate deployment GO]",
+        "Independent source/CI, isolation/access and check-specific evidence references: [REQUIRED; flags and CI are not authority]",
+        "Consenting tester / test account / device and exact scope: [REQUIRED; no personal data, tokens or credentials here]",
+        "Approval time / expiry / revocation record / stop conditions: [REQUIRED; stop on mismatch, missing evidence, denied access or changed scope]",
+        ["device-location", "google-oauth"].includes(id)
+          ? "Separate explicit state-change GO REQUIRED for this check; existing consent/configuration and exact state-changing actions must be independently verified before execution."
+          : "OAuth and device-location state changes are excluded; they require their own separate explicit GO.",
+        "Excluded: club UAT/pilot GO, provider requests/credentials/availability, provisioning or configuration changes, worker activation, deploy, production, bookings/payments and outreach.",
+        "Request independent review only. Do not run checks before separately documented exact-scope GO. This MVP neither sends this draft nor verifies or records GO.",
+      ]);
+    }).join("");
+    el.candidateGoRequests.innerHTML = drafts || "<p>No missing-GO flag in this snapshot. No new per-check request is selected; existing original approvals still need independent review. No verified GO; do not execute.</p>";
   }
   // Independent candidate-wide presentation; never feeds club UAT/Operations state.
   function renderAcceptanceSummary() {
