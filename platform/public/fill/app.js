@@ -35,6 +35,7 @@
     acceptanceForm: q("#acceptanceForm"), acceptanceSha: q("#acceptanceSha"),
     acceptanceFile: q("#acceptanceFile"), acceptanceReview: q("#acceptanceReview"),
     acceptanceMessage: q("#acceptanceMessage"), acceptanceReport: q("#acceptanceReport"),
+    acceptanceSummary: q("#acceptanceSummary"),
   };
 
   // Use the venue's Lisbon-local calendar date, not UTC's day (which can lag).
@@ -444,6 +445,7 @@
   // Presentation of the two existing manual reads only. No request, combined
   // readiness decision, page accumulation, storage or inferred freshness here.
   function renderReviewSummary() {
+    renderAcceptanceSummary();
     if (!el.reviewSummary) return;
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
       el.reviewSummary.textContent = "";
@@ -695,13 +697,57 @@
     EXACT_SCOPED_GO_REQUIRED: "Exact scoped GO record missing or invalid",
     TESTER_CONSENT_MISMATCH: "Tester consent does not match the GO record",
   };
-  let acceptanceEpoch = 0;
+  let acceptanceEpoch = 0, acceptanceSnapshot = null;
   function acceptanceAllowed() {
     return !state.demo && Boolean(state.token) && state.view === "provenance" &&
       state.orgs.some(org => org.id === state.org && ["owner", "admin"].includes(org.role));
   }
+  // Independent candidate-wide presentation; never feeds club UAT/Operations state.
+  function renderAcceptanceSummary() {
+    if (!el.acceptanceSummary) return;
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) {
+      el.acceptanceSummary.textContent = "";
+      return;
+    }
+    if (!acceptanceAllowed()) {
+      el.acceptanceSummary.textContent = "No local candidate report in this scope. Signed-in owner/admin review is required; demo has no real evidence. No verified GO.";
+      return;
+    }
+    const snapshot = acceptanceSnapshot?.org === state.org && acceptanceSnapshot.auth === state.authEpoch
+      ? acceptanceSnapshot : null;
+    const labels = {
+      not_reviewed: "No local report reviewed. Candidate checks and GO remain unverified; no counts inferred.",
+      loading: "Local file read in progress. No previous snapshot or GO count retained.",
+      unavailable: "Local report rejected or unavailable. No completed snapshot or verified GO.",
+    };
+    if (snapshot?.status !== "reviewed") {
+      el.acceptanceSummary.textContent = labels[snapshot?.status] || labels.not_reviewed;
+      return;
+    }
+    const observed = Date.parse(snapshot.asOf), now = Date.now();
+    if (snapshot.sha !== el.acceptanceSha.value || !Number.isFinite(now) ||
+        observed > now || now - observed > 24 * 60 * 60 * 1000) {
+      el.acceptanceSummary.textContent = "No current local candidate snapshot: SHA changed or report expired. Review the file again; no verified GO.";
+      return;
+    }
+    const blocked = snapshot.rows.filter(row => row.blocked).length;
+    const missing = snapshot.rows.filter(row => row.missingGo).length;
+    el.acceptanceSummary.innerHTML = `<p>GetACourt SHA: <code>${esc(snapshot.sha)}</code></p>` +
+      `<p>Report time: ${esc(snapshot.asOf)}. Imported local snapshot, not live or independently attested.</p>` +
+      `<p>7 checks: <strong>${blocked} blocked</strong>; ${7 - blocked} complete for manual GO review only. Executed: 0.</p>` +
+      `<p><strong>GO records flagged missing / invalid: ${missing} of 7.</strong> Verified GO: none. Absence of a missing-record flag is not permission.</p>` +
+      '<ul class="acceptance-summary-list">' + snapshot.rows.map((row, index) =>
+        `<li>${esc(acceptanceCatalog[index][1])}: ${row.blocked ? "blocked" : "manual GO review only"}; ` +
+        `${row.missingGo ? "GO record missing / invalid" : "GO not verified"}. NOT_RUN.</li>`).join("") + "</ul>" +
+      "<p>Counts describe this candidate report only, not club readiness. Club UAT/pilot GO, provider rights and deployment authority stay separate.</p>";
+  }
+  function setAcceptanceSnapshot(status, details = {}) {
+    acceptanceSnapshot = {...details, status, org: state.org, auth: state.authEpoch};
+    renderAcceptanceSummary();
+  }
   function resetAcceptance(clearInputs = false) {
     acceptanceEpoch++;
+    acceptanceSnapshot = null;
     if (el.acceptanceReport) el.acceptanceReport.textContent = "";
     if (el.acceptanceMessage) el.acceptanceMessage.textContent = "";
     if (clearInputs) {
@@ -709,6 +755,7 @@
       if (el.acceptanceFile) el.acceptanceFile.value = "";
     }
     if (el.acceptanceReview) el.acceptanceReview.disabled = !acceptanceAllowed();
+    renderAcceptanceSummary();
   }
   function validAcceptanceReport(data, expected, now = Date.now()) {
     const exact = (value, keys) => value && typeof value === "object" && !Array.isArray(value) &&
@@ -754,6 +801,7 @@
       acceptanceAllowed() && el.acceptanceSha.value === expected && el.acceptanceFile.files?.[0] === file;
     el.acceptanceReview.disabled = true;
     el.acceptanceMessage.textContent = "Reading local report only…";
+    setAcceptanceSnapshot("loading");
     try {
       const text = await file.text();
       if (!current()) return;
@@ -774,8 +822,14 @@
             `<p>Required evidence: ${esc(kinds.join(", "))}.</p><p>Exact GO action scope: ${esc(actions.join(", "))}.</p></li>`;
         }).join("") + "</ul>";
       el.acceptanceMessage.textContent = "Local snapshot reviewed. No verified GO, hosted acceptance or pilot approval. No file was uploaded and no check was run.";
+      setAcceptanceSnapshot("reviewed", {sha: data.reviewedSha, asOf: data.asOf,
+        rows: data.checks.map(item => ({blocked: item.preflight === "BLOCKED",
+          missingGo: item.blockers.includes("EXACT_SCOPED_GO_REQUIRED")}))});
     } catch {
-      if (current()) el.acceptanceMessage.textContent = "Report unavailable, incompatible, stale or for another SHA. No readiness is inferred. Do not include credentials or raw evidence.";
+      if (current()) {
+        setAcceptanceSnapshot("unavailable");
+        el.acceptanceMessage.textContent = "Report unavailable, incompatible, stale or for another SHA. No readiness is inferred. Do not include credentials or raw evidence.";
+      }
     } finally { if (current()) el.acceptanceReview.disabled = false; }
   }
   el.acceptanceForm?.addEventListener("submit", event => {

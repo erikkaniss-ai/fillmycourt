@@ -11,6 +11,12 @@
 
 ### Local hosted / device / OAuth preflight report (21 October 2026; no deploy)
 
+Continuation from Fill `12506dd`: a separately labelled candidate-wide snapshot
+now sits beside club UAT blockers (stacked on mobile). It shows reviewed Get
+SHA/time, seven check statuses and missing-GO flags without joining club evidence
+or authorising anything. No snapshot means no invented counts; even zero missing
+flags remains "Verified GO: none". No extra requests/storage or automatic reads.
+
 The Provider evidence tab now includes a local, owner/admin-scoped viewer for
 the sanitized report-v1 contract from Get `79977c8`. It shows seven NOT_RUN
 checks, missing evidence and exact scoped GO requirements. No file is uploaded,

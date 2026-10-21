@@ -60,6 +60,10 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             page.goto(f"http://127.0.0.1:{server.server_port}/fill/", wait_until="networkidle")
             page.get_by_role("button", name="Provider evidence", exact=True).click()
             expect(page.locator("#acceptanceReview")).to_be_enabled()
+            expect(page.locator("#clubUatBlockers")).to_contain_text("No supported connections returned")
+            club_before = page.locator("#clubUatBlockers").inner_html()
+            summary = page.locator("#acceptanceSummary")
+            expect(summary).to_contain_text("No local report reviewed")
             before = len(calls)
 
             def select_report(value):
@@ -77,15 +81,32 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(report.locator(".acceptance-checks > li")).to_have_count(7)
             expect(report.get_by_text("Missing / invalid exact scoped GO in this snapshot.", exact=True)).to_have_count(7)
             expect(report).to_contain_text("create-test-user-session")
+            expect(summary).to_contain_text("7 blocked")
+            expect(summary).to_contain_text("GO records flagged missing / invalid: 7 of 7")
+            expect(summary).to_contain_text("Verified GO: none")
+            expect(summary.locator(".acceptance-summary-list > li")).to_have_count(7)
+            assert page.locator("#clubUatBlockers").inner_html() == club_before
             assert len(calls) == before
             assert page.evaluate("localStorage.length") == 0
             assert page.evaluate("sessionStorage.length") == 1
             page.locator(".acceptance-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
             page.screenshot(path=str(screenshots / "fill-acceptance-desktop-FIXTURE-ONLY.png"))
+            page.locator(".review-gate-columns").evaluate("e=>e.scrollIntoView({block:'start'})")
+            club_box = page.locator(".review-gate-columns .uat-blockers").bounding_box()
+            candidate_box = page.locator(".acceptance-summary").bounding_box()
+            assert candidate_box["x"] > club_box["x"]
+            assert abs(candidate_box["y"] - club_box["y"]) < 10
+            page.screenshot(path=str(screenshots / "fill-gate-summary-desktop-FIXTURE-ONLY.png"))
             page.set_viewport_size({"width": 320, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
             page.locator(".acceptance-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
             page.screenshot(path=str(screenshots / "fill-acceptance-mobile-FIXTURE-ONLY.png"))
+            page.locator(".acceptance-summary").evaluate("e=>e.scrollIntoView({block:'start'})")
+            club_box = page.locator(".review-gate-columns .uat-blockers").bounding_box()
+            candidate_box = page.locator(".acceptance-summary").bounding_box()
+            assert candidate_box["y"] > club_box["y"]
+            assert abs(candidate_box["x"] - club_box["x"]) < 10
+            page.screenshot(path=str(screenshots / "fill-gate-summary-mobile-FIXTURE-ONLY.png"))
 
             bad = copy.deepcopy(PINNED)
             bad["checks"][0]["blockers"].append("PRIVATE_SECRET<img src=x onerror=alert(1)>")
@@ -93,6 +114,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(report).to_be_empty()
             expect(page.locator("#acceptanceMessage")).to_contain_text("Report unavailable")
             expect(page.locator("#acceptanceMessage")).not_to_contain_text("PRIVATE_SECRET")
+            expect(summary).to_contain_text("rejected or unavailable")
+            expect(summary).not_to_contain_text("7 checks:")
             complete = copy.deepcopy(PINNED)
             for item in complete["checks"]:
                 item["blockers"] = []
@@ -101,9 +124,15 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(report.get_by_text("Ready for manual GO review only", exact=True)).to_have_count(7)
             expect(report).to_contain_text("No verified GO")
             expect(page.locator("#clubUatBlockers")).to_contain_text("Owner UAT GO")
+            expect(summary).to_contain_text("0 blocked")
+            expect(summary).to_contain_text("missing / invalid: 0 of 7")
+            expect(summary).to_contain_text("Verified GO: none")
+            assert page.locator("#clubUatBlockers").inner_html() == club_before
 
             page.locator("#orgSelect").select_option(OTHER)
             expect(report).to_be_empty()
+            expect(summary).to_contain_text("No local report reviewed")
+            expect(summary).not_to_contain_text(SHA)
             expect(page.locator("#acceptanceSha")).to_have_value("")
             assert page.locator("#acceptanceFile").input_value() == ""
             select_report(PINNED)
@@ -112,15 +141,19 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             page.locator("#orgSelect").select_option(DENIED)
             expect(report).to_be_empty()
             expect(page.locator("#acceptanceReview")).to_be_disabled()
+            expect(summary).to_contain_text("Signed-in owner/admin review is required")
+            expect(summary).not_to_contain_text(SHA)
             page.locator("#orgSelect").select_option(ORG)
             expect(page.locator("#acceptanceReview")).to_be_enabled()
             select_report(PINNED)
             page.get_by_role("button", name="Today", exact=True).click()
             expect(report).to_be_empty()
+            expect(summary).to_be_empty()
             page.get_by_role("button", name="Provider evidence", exact=True).click()
             select_report(PINNED)
             page.get_by_role("button", name="Sign out", exact=True).click()
             expect(report).to_be_empty()
+            expect(summary).to_be_empty()
             expect(page.locator("#acceptanceSha")).to_have_value("")
             assert page.locator("#acceptanceFile").input_value() == ""
             assert page.evaluate("sessionStorage.length") == 0

@@ -1,5 +1,34 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Adjacent summary — continuation from Fill12506dd
+
+A separate candidate-wide summary now sits **beside** the selected-club UAT
+blockers on desktop, stacked as a separate labelled section on narrow screens.
+It presents only the last explicitly reviewed local report: full Get SHA/time,
+blocked vs complete-for-manual-review counts, exact count/list of GO records
+flagged missing or invalid, seven NOT_RUN rows and "Verified GO: none".
+Zero missing-record flags never means any GO was verified or granted.
+
+There is no combined readiness score or joined club/candidate assessment. The
+summary retains only validated scalar metadata and per-row blocked/missing-GO
+booleans, bound to the current club/auth context. It never writes the club's
+Operations/provenance state, blockers, permissions or pilot status. The two
+surfaces have different headings, scope warnings and live-status regions.
+
+No initial count is invented before review. File selection, parameter edits,
+new loading, invalid/stale/foreign reports and scope/session changes remove old
+counts immediately. Late reads/failures cannot restore or replace a newer
+summary. Existing local rerenders recheck report age/SHA without fetching or
+renewing it: an expired snapshot is not shown as current. No timer/polling,
+automatic report read, raw file retention, storage or extra API was introduced.
+The detailed viewer is still a historical snapshot, never execution authority.
+
+Verification extends both mandatory Node jobs and the existing loopback Chromium
+test: mixed candidate results, zero missing flags without GO, loading/rejection,
+expiry, two clubs, role denial, logout, no extra transport/storage and independent
+club blockers. New desktop/320px `fill-gate-summary-*-FIXTURE-ONLY.png` captures
+show the two scopes beside one another or stacked; they are not hosted/device UAT.
+
 Continue from Get `79977c8672db84e6c062a804268dd9123e04f480` and Fill
 `cf77b35259c25979ff661bb273765a80e17bbbda`, existing Draft PR #8 only.
 Get Draft PR #5 is unchanged; do not merge its unrelated product/CI history here.
