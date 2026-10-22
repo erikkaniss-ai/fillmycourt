@@ -5,8 +5,21 @@
   "use strict";
   const supply=globalThis.GACProviderSupplyContract;
   if(!supply)throw Error("Synthetic supply contract is required.");
+  const lifecycle=globalThis.GACConnectedConsentLifecycle;
+  if(!lifecycle)throw Error("Fixture-only lifecycle contract is required.");
   const providers=supply.registry();
   const state={provider:"playtomic",audience:"player",consent:"not_requested"};
+  let consentState=lifecycle.create({
+    provider:"playtomic",owner_type:"player",owner_ref:"demo-player-01",
+    connection_ref:"demo-connection-01",at:new Date().toISOString()
+  });
+  function step(action,extra={}) {
+    consentState=lifecycle.transition(consentState,{
+      action,at:new Date().toISOString(),...extra
+    });
+    state.consent=lifecycle.inspect(consentState).consent_state;
+    render();
+  }
   const byId=id=>document.getElementById(id);
   const providerHost=byId("providers");
   const status=byId("status");
@@ -15,6 +28,8 @@
   const next=byId("next");
   const consentBtn=byId("consentButton");
   const revokeBtn=byId("withdrawButton");
+  const expireBtn=byId("expireButton");
+  const reconnectBtn=byId("reconnectButton");
   const result=byId("result");
   const requestLog=byId("requestLog");
   const allProviders=new Set(providers.map(p=>p.id));
@@ -30,13 +45,19 @@
     if(!allProviders.has(id))return;
     state.provider=id;
     state.consent="not_requested";
-    render();
+    step("switch_scope",{
+      provider:id,owner_type:state.audience,
+      owner_ref:state.audience==="player"?"demo-player-01":"demo-organization-01"
+    });
   }
   function selectAudience(type) {
     if(type!=="player"&&type!=="club")return;
     state.audience=type;
     state.consent="not_requested";
-    render();
+    step("switch_scope",{
+      provider:state.provider,owner_type:type,
+      owner_ref:type==="player"?"demo-player-01":"demo-organization-01"
+    });
   }
   function makeButton(provider) {
     const b=document.createElement("button");
@@ -115,7 +136,11 @@
         ? "Demo consent noted locally. Provider account NOT connected."
         : state.consent==="withdrawn"
           ? "Demo consent withdrawn. Provider account NOT connected."
-          : "Provider account NOT connected.";
+          : state.consent==="expired"
+            ? "Demo consent expired. Provider account NOT connected."
+            : state.consent==="reconnect_requested"
+              ? "Demo reconnect requested locally. Provider account NOT connected."
+              : "Provider account NOT connected.";
     status.textContent=label;
     description.textContent=state.audience==="club"
       ? "A venue may separately obtain licensed read access for its own courts. This is not permission to use a player's third-party account."
@@ -138,7 +163,10 @@
     requestLog.textContent="Provider HTTP requests: "+outcome.provider_requests+
       " · Booking actions: 0 · Persistent storage: none";
     consentBtn.disabled=state.audience!=="player"||state.consent==="noted";
-    revokeBtn.disabled=state.audience!=="player"||state.consent!=="noted";
+    revokeBtn.disabled=state.audience!=="player"||
+      !["noted","expired","reconnect_requested"].includes(state.consent);
+    expireBtn.disabled=state.audience!=="player"||state.consent!=="noted";
+    reconnectBtn.disabled=state.audience!=="player"||state.consent!=="expired";
     byId("scopeMessage").textContent=state.audience==="club"
       ? "A player's consent cannot authorize club data access."
       : "Demo-only consent is not real OAuth, provider authorization or a saved account.";
@@ -148,11 +176,21 @@
   byId("clubMode").addEventListener("click",()=>selectAudience("club"));
   consentBtn.addEventListener("click",()=>{
     if(state.audience!=="player"||state.consent==="noted")return;
-    state.consent="noted";render();
+    step("note_demo_consent");
+  });
+  expireBtn.addEventListener("click",()=>{
+    if(state.audience!=="player"||state.consent!=="noted")return;
+    step("expire");
+  });
+  reconnectBtn.addEventListener("click",()=>{
+    if(state.audience!=="player"||state.consent!=="expired")return;
+    step("request_reconnect");
   });
   revokeBtn.addEventListener("click",()=>{
-    if(state.audience!=="player"||state.consent!=="noted")return;
-    state.consent="withdrawn";render();
+    if(state.audience!=="player"||
+       !["noted","expired","reconnect_requested"].includes(state.consent))return;
+    state.consent="withdrawn";
+    step("withdraw");
   });
   render();
 })();
