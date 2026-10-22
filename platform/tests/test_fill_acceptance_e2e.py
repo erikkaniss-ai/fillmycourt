@@ -238,6 +238,33 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             package_blockers = page.locator("#clubUatBlockers").inner_html()
             club_result, get_result = page.locator("#clubPackageResult"), page.locator("#getPackageResult")
 
+            def assert_theme_notes(domain, expected):
+                snapshot = page.locator(f"#{domain}PackageStepsSummary")
+                expect(snapshot.locator("[data-package-theme]")).to_have_count(len(expected))
+                # Controls are siblings of live status text, never inside an atomic live region.
+                expect(snapshot.locator('[role="status"] details')).to_have_count(0)
+                for theme_id, components in expected.items():
+                    theme = snapshot.locator(f'[data-package-theme="{theme_id}"]')
+                    toggle = theme.locator(":scope > summary")
+                    notes = theme.locator("[data-package-theme-notes]")
+                    assert theme.evaluate("e=>e.open") is False
+                    assert theme.get_attribute("name") is None
+                    expect(toggle).to_contain_text("Club —" if domain == "club" else "GetACourt —")
+                    assert toggle.get_attribute("aria-describedby") == f"{domain}PackageDisclosureHelp"
+                    expect(notes).to_be_hidden()
+                    toggle.focus()
+                    toggle.press("Enter")
+                    expect(notes).to_be_visible()
+                    expect(toggle).to_be_focused()
+                    assert theme.evaluate("e=>e.open") is True
+                    actual = notes.locator("[data-package-step]").evaluate_all("es=>Object.fromEntries(es.map(e=>[e.dataset.packageStep,e.dataset.packageStepState]))")
+                    assert actual == components
+                    expect(notes).to_contain_text("Verified GO: none. Execution NOT_RUN")
+                    expect(notes.locator("button, input, form, a")).to_have_count(0)
+                    toggle.press("Space")
+                    expect(notes).to_be_hidden()
+                    assert theme.evaluate("e=>e.open") is False
+
             def inspect_package(domain, value):
                 page.locator(f"#{domain}PackageFile").set_input_files({
                     "name": "SANITIZED-FIXTURE-ONLY.json", "mimeType": "application/json", "buffer": json.dumps(value).encode(),
@@ -281,6 +308,12 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(club_preparation_summary.locator("[data-package-preparation-group]")).to_have_count(4)
             expect(club_preparation_summary.locator('[data-package-preparation-group="runtime-isolation"]')).to_contain_text("4 MISSING; 0 UNKNOWN")
             expect(club_preparation_summary.locator('[data-package-preparation-group="authority-source"]')).to_contain_text("0 MISSING; 1 UNKNOWN")
+            assert_theme_notes("club", {
+                "authority-source": {"original-authority": "UNKNOWN"},
+                "runtime-isolation": dict.fromkeys(["protected-deploy", "independent-runtime", "isolation", "two-synthetic-orgs"], "MISSING"),
+                "consent-device": {"tester-consent": "MISSING"},
+                "evidence-scope-stop": dict.fromkeys(["scope-allowlist", "current-evidence", "unresolved-blockers", "expiry-revocation-stop", "connection-freshness", "club-wide-coverage"], "MISSING"),
+            })
             club_preparation_summary_before = club_preparation_summary.inner_html()
             expect(club_disclosure).to_be_visible()
             assert club_disclosure.evaluate("e=>e.open") is False
@@ -348,6 +381,22 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(get_preparation_summary.locator("[data-package-preparation-group]")).to_have_count(2)
             expect(get_preparation_summary.locator('[data-package-preparation-group="authority-source"]')).to_contain_text("1 MISSING; 1 UNKNOWN")
             expect(get_preparation_summary.locator('[data-package-preparation-group="consent-device"]')).to_contain_text("1 MISSING; 0 UNKNOWN")
+            assert_theme_notes("get", {
+                "authority-source": {"original-authority": "UNKNOWN", "source-binding": "MISSING"},
+                "consent-device": {"separate-state-change-go": "MISSING"},
+            })
+            club_theme = club_preparation_summary.locator('[data-package-theme="authority-source"]')
+            get_theme = get_preparation_summary.locator('[data-package-theme="authority-source"]')
+            club_theme.locator(":scope > summary").click()
+            expect(club_theme.locator("[data-package-theme-notes]")).to_be_visible()
+            # Explicit opposite-domain rereview must not destroy this native DOM/focus choice.
+            inspect_package("get", mixed_package)
+            assert club_theme.evaluate("e=>e.open") is True
+            get_theme.locator(":scope > summary").click()
+            expect(get_theme.locator("[data-package-theme-notes]")).to_be_visible()
+            assert club_theme.evaluate("e=>e.open") is True
+            get_theme.locator(":scope > summary").click()
+            club_theme.locator(":scope > summary").click()
             expect(get_disclosure).to_be_visible()
             assert get_disclosure.evaluate("e=>e.open") is False
             expect(get_preparation).to_be_hidden()
@@ -434,6 +483,20 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 # Capture the complete card at the actual 320px layout; viewport
                 # scroll rounding must not crop a wrapped heading or final warning.
                 page.locator(f".{domain}-package-preparation-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-preparation-summary-{domain}-mobile-FIXTURE-ONLY.png"))
+            for width, device in [(1440, "desktop"), (320, "mobile")]:
+                page.set_viewport_size({"width": width, "height": 1000})
+                for domain in ["club", "get"]:
+                    snapshot = page.locator(f"#{domain}PackageStepsSummary")
+                    for theme_id in ["authority-source", "consent-device"]:
+                        snapshot.locator(f'[data-package-theme="{theme_id}"] > summary').click()
+                        expect(snapshot.locator(f'[data-package-theme-notes="{theme_id}"]')).to_be_visible()
+                    assert snapshot.locator("details[open]").count() == 2
+                    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+                    page.locator(f".{domain}-package-preparation-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-themes-{domain}-{device}-FIXTURE-ONLY.png"))
+                    for theme_id in ["authority-source", "consent-device"]:
+                        snapshot.locator(f'[data-package-theme="{theme_id}"] > summary').click()
+                        expect(snapshot.locator(f'[data-package-theme-notes="{theme_id}"]')).to_be_hidden()
+                assert_preparation_beside_own_blockers()
             bad_package = copy.deepcopy(GET_PACKAGE)
             bad_package["token"] = "PRIVATE_SECRET<img>"
             club_preparation_toggle.click()
@@ -464,6 +527,18 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             assert club_package_summary.inner_html() == club_package_snapshot
             assert club_result.inner_html() == club_package_before
             inspect_package("get", GET_PACKAGE)
+            # Expiry is revalidated on an actual native theme opening, without a timer/network read.
+            page.evaluate("Date.now = () => Date.parse('2026-10-21T11:30:00Z')")
+            club_theme.locator(":scope > summary").click()
+            expect(club_preparation_summary.locator("[data-package-theme]")).to_have_count(0)
+            expect(get_preparation_summary.locator("[data-package-theme]")).to_have_count(0)
+            expect(club_preparation_summary).to_contain_text("expired")
+            expect(get_preparation_summary).to_contain_text("expired")
+            assert len(calls) == package_calls
+            page.evaluate("Date.now = () => Date.parse('2026-10-21T10:30:00Z')")
+            # Re-review the club fixture so the following organisation-change checks
+            # still invalidate a real current reviewed result, not merely expired text.
+            inspect_package("club", CLUB_PACKAGE)
             assert len(calls) == package_calls
             assert page.evaluate("localStorage.length") == 0
             assert page.evaluate("sessionStorage.length") == 1

@@ -1216,15 +1216,18 @@
       ? `<p>Club preparation only · organisation <code>${esc(organisation)}</code><br>Operations SHA: <code>${esc(ctx.sha)}</code>. Not pilot or GetACourt GO.</p>`
       : `<p>GetACourt preparation only · check ${esc(ctx.check)}<br>Get SHA: <code>${esc(ctx.sha)}</code>. Not club UAT or pilot GO.</p>`;
     const limits = "<p>Local declarations only, not work completed, verified evidence or readiness. Independent original-evidence and authority review still required. Verified GO: none. Execution NOT_RUN. Existing blockers stay open; do not execute.</p>";
-    if (!unresolved.length) return scope + "<p>No missing-part preparation notes inferred from this manifest. Absence of notes is not approval.</p>" + limits;
+    const live = content => '<div role="status" aria-live="polite" aria-atomic="true">' + content + '</div>';
+    if (!unresolved.length) return live(scope + "<p>No missing-part preparation notes inferred from this manifest. Absence of notes is not approval.</p>" + limits);
     const missing = unresolved.filter(row => row.status === "MISSING").length;
     const unknown = unresolved.filter(row => row.status === "UNKNOWN").length;
-    return scope + `<p>Preparation notes: <strong>${unresolved.length}</strong>; ${missing} MISSING; ${unknown} UNKNOWN. UNKNOWN remains unresolved, not proven absence.</p>` +
-      "<p>Themes only — not an execution order, assignment or evidence collection:</p>" +
+    return live(scope + `<p>Preparation notes: <strong>${unresolved.length}</strong>; ${missing} MISSING; ${unknown} UNKNOWN. UNKNOWN remains unresolved, not proven absence.</p>` +
+      "<p>Themes only — not an execution order, assignment or evidence collection. Expand a theme for the same local notes filtered to that theme; the full-notes view remains separate.</p>" + limits) +
       '<ul class="go-package-items">' + themes.map(([id, label, ids]) => {
         const items = unresolved.filter(row => ids.includes(row.id));
-        return items.length ? `<li data-package-preparation-group="${id}">${esc(label)}: ${items.filter(row => row.status === "MISSING").length} MISSING; ${items.filter(row => row.status === "UNKNOWN").length} UNKNOWN.</li>` : "";
-      }).join("") + "</ul>" + limits;
+        return items.length ? `<li data-package-preparation-group="${id}"><details class="go-package-disclosure go-package-theme" data-package-theme="${id}">` +
+          `<summary aria-describedby="${domain}PackageDisclosureHelp" data-package-theme-count="${id}">${domain === "club" ? "Club" : "GetACourt"} — ${esc(label)}: ${items.filter(row => row.status === "MISSING").length} MISSING; ${items.filter(row => row.status === "UNKNOWN").length} UNKNOWN.</summary>` +
+          `<div data-package-theme-notes="${id}">${goPackageStepsHTML(items, domain)}</div></details></li>` : "";
+      }).join("") + "</ul>";
   }
   // Presentation only of one domain's existing local result, never a GO decision.
   function renderGoPackageSummary(domain, ctx = packageContext(domain)) {
@@ -1240,10 +1243,10 @@
       if (missingTarget) missingTarget.textContent = message ? message + " No missing-part list inferred." : "";
       if (stepsTarget) stepsTarget.textContent = message ? message + " No missing-part preparation notes inferred." : "";
       if (stepsSummaryTarget) stepsSummaryTarget.textContent = message ? message + " No preparation summary inferred." : "";
+      goPackageUI[domain].stepsSummaryHTML = null;
       if (message) closeDisclosure();
     };
-    empty("");
-    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) { closeDisclosure(); return; }
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) { empty(""); closeDisclosure(); return; }
     if (!acceptanceAllowed()) {
       empty("No package summary in this scope. Owner/admin local review required; demo has no real evidence. No verified GO.");
       return;
@@ -1281,7 +1284,13 @@
       "<p>Verified GO: none. Execution NOT_RUN. Declared presence is not document or authority validation. Existing blockers stay open; club UAT/pilot, Get checks, provider rights and deploy permissions stay separate.</p>";
     if (missingTarget) missingTarget.innerHTML = goPackageMissingHTML(r.rows);
     if (stepsTarget) stepsTarget.innerHTML = goPackageStepsHTML(r.rows, domain);
-    if (stepsSummaryTarget) stepsSummaryTarget.innerHTML = goPackageStepsSummaryHTML(r.rows, domain, ctx, state.org);
+    const summaryHTML = goPackageStepsSummaryHTML(r.rows, domain, ctx, state.org);
+    // Cache only the rendered markup, not native open state or evidence. Do not
+    // replace still-current DOM: native theme choices/focus must survive sync.
+    if (stepsSummaryTarget && goPackageUI[domain].stepsSummaryHTML !== summaryHTML) {
+      stepsSummaryTarget.innerHTML = summaryHTML;
+      goPackageUI[domain].stepsSummaryHTML = summaryHTML;
+    }
     // Native view-only disclosure: never open automatically or retain an invalid scope.
     // A still-current opposite-domain result keeps its own user's open/closed choice.
     if (disclosure) {
@@ -1387,6 +1396,10 @@
     ui.file?.addEventListener("change", () => {clearGoPackage(domain, goPackageState[domain].key, false);syncGoPackages();});
     // Opening is a local guard recheck only, never a new evidence/file/API read.
     ui.disclosure?.addEventListener("toggle", () => { if (ui.disclosure.open) syncGoPackages(); });
+    // Native toggle does not bubble; capture only opening our local theme details.
+    ui.stepsSummary?.addEventListener("toggle", event => {
+      if (event.target?.matches("details[data-package-theme]") && event.target.open) syncGoPackages();
+    }, true);
   }
   goPackageCheck?.addEventListener("change", () => {clearGoPackage("get");syncGoPackages();});
 

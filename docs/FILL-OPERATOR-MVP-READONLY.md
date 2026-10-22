@@ -459,3 +459,18 @@ independence, default/invalid clearing, no extra network/storage and desktop/320
 evidence. Preparation remains unverified planning, not provider rights, execution or
 pilot acceptance. Workflow/gate unchanged; no sending/deploy/production/provider
 requests or Control Tower change. See `docs/fill-local-acceptance-viewer.md`.
+
+### Read-only preparation themes — continued from 85b060f
+
+Non-empty themes in each adjacent club/Get snapshot now disclose only their own
+MISSING/UNKNOWN steps, using the same fixed notes renderer and local reviewed
+result. Native closed Enter/Space controls remain independent from each other and
+the full-notes view. PRESENT/empty themes yield no controls and no GO. Scope,
+freshness, invalid-file and late-result guards clear themed DOM; a transient markup
+cache preserves still-current native focus/open state, never stores it. Opening
+only rechecks existing local state, without a file/API/document/provider read.
+Controls are outside atomic live-status text. Node and loopback Chromium extend
+filtered counts/catalogs, native keyboard/focus, independence, expiry and actual
+desktop/320px evidence. No new schema, transport, execution, sending, deploy,
+production, provider request or Control Tower change. Source/CI only; hosted/device/
+OAuth NOT_RUN, verified GO none, pilot GO NOT_GRANTED. See the boundary notes above.

@@ -1,5 +1,36 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Read-only preparation themes — continuation from Fill85b060f
+
+Each non-empty review theme in the separate club/Get preparation snapshots now
+has a native closed disclosure. Its summary names its domain and fixed theme,
+with distinct MISSING/UNKNOWN counts; opening shows only that theme's unresolved
+rows through the existing fixed, escaped notes renderer. PRESENT and zero-note
+themes expose no disclosure. UNKNOWN remains unresolved, not proven absence.
+The existing full-notes disclosure remains an alternative view of the same local
+result, not another source, work queue, authority or readiness score.
+
+Theme controls sit outside the inner atomic live-status text, support native
+Enter/Space and visible focus, and may be opened independently, including multiple
+themes. Still-current renders preserve the actual DOM/open/focus choice using only
+a transient rendered-markup cache, never persisted open state. Opening captures
+the native toggle only to recheck existing local scope/result/freshness; no file,
+API, document or provider read, new schema/parser, timer or evidence collection.
+All existing source/check/org/auth/file/tab/role/expiry/late-result guards apply;
+invalid results remove themed DOM and cached markup, and cannot restore old notes.
+All-PRESENT/no notes still grants nothing. Independent original-evidence and
+authority review required; verified GO none, execution NOT_RUN, blockers stay open.
+
+Node covers exact filtered rows/counts, all seven Get catalogs, club-only extras,
+native closed semantics, no replacement of valid DOM, no new reads/storage and
+expiry/late-result safety. CI loopback Chromium additionally tests actual keyboard
+and focus, independent simultaneous themes and opposite-domain rereview, expiry
+on opening, denied/scope clearing and actual1440/320px layout. Four new
+`fill-go-package-themes-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png` captures show
+two open themes; previous full-notes/collapsed and safety checks remain enabled.
+Fictional source/CI evidence only, not hosted, physical-device or OAuth acceptance.
+No sending, deploy, production, real provider requests or Control Tower changes.
+
 ## Read-only preparation disclosure — continuation from Fill493a0e7
 
 Each adjacent club/Get preparation snapshot now has its own native keyboard-usable

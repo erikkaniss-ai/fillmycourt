@@ -24,9 +24,9 @@ function node(dataset={}){
   let value="",html="",text="";const handlers=new Map();
   return {dataset,hidden:false,disabled:false,files:[],classList:{toggle(){}},
     get value(){return value;},set value(v){value=v;if(v==="")this.files=[];},
-    get innerHTML(){return html;},set innerHTML(v){html=v;text="";},
+    htmlWrites:0,get innerHTML(){return html;},set innerHTML(v){html=v;text="";this.htmlWrites++;},
     get textContent(){return text;},set textContent(v){text=v;html="";},
-    addEventListener:(event,fn)=>handlers.set(event,fn),run:event=>handlers.get(event)?.({preventDefault(){}})};
+    addEventListener:(event,fn)=>handlers.set(event,fn),run:(event,extra={})=>handlers.get(event)?.({preventDefault(){},...extra})};
 }
 async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"}={}){
   let clockNow=NOW;
@@ -677,7 +677,7 @@ test("Preparation panels are accessible separate read-only regions; fixed escape
   assert.doesNotMatch(helper,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|state\.|goPackageState|<button|<form|<input|<a /);
 });
 
-const preparationGroups=html=>[...html.matchAll(/data-package-preparation-group="([^"]+)">[^<]*: (\d+) MISSING; (\d+) UNKNOWN\./g)].map(m=>({id:m[1],missing:Number(m[2]),unknown:Number(m[3])}));
+const preparationGroups=html=>[...html.matchAll(/data-package-theme-count="([^"]+)">[^<]*: (\d+) MISSING; (\d+) UNKNOWN\./g)].map(m=>({id:m[1],missing:Number(m[2]),unknown:Number(m[3])}));
 
 test("Preparation snapshots never infer counts before explicit review; club notes retain exact scope and separate theme counts",async()=>{
   const h=await harness();await h.open();
@@ -729,9 +729,12 @@ test("Every unresolved component in all seven Get catalogs appears in exactly on
       assert.equal(groups.reduce((n,g)=>n+g.missing,0),status==="MISSING"?ids.length:0);assert.equal(groups.reduce((n,g)=>n+g.unknown,0),status==="UNKNOWN"?ids.length:0);
       assert.match(result,new RegExp("check "+c.id));assert.doesNotMatch(result,/undefined|Operations SHA:|organisation <code>/);
       assert.equal(stepIDs(h.packageSteps("get"),status).length,ids.length);
+      assert.deepEqual(stepIDs(result,status).sort(),[...ids].sort());
     }
     for(const unresolved of ids){d.items=ids.map(id=>({id,state:id===unresolved?"UNKNOWN":"PRESENT"}));await h.selectPackage("get",d);await h.packageReview("get");
       const groups=preparationGroups(h.packageStepsSummary("get"));assert.equal(groups.length,1,unresolved);assert.equal(groups[0].missing,0);assert.equal(groups[0].unknown,1);
+      assert.deepEqual(stepIDs(h.packageStepsSummary("get"),"UNKNOWN"),[unresolved]);
+      assert.doesNotMatch(h.packageStepsSummary("get"),/data-package-step-state="PRESENT"/);
     }
   }
 });
@@ -746,7 +749,8 @@ test("Loading/failure/source expiry remove previous preparation summary counts a
 
 test("Preparation snapshot regions are labelled, escaped and pure presentation of the same guarded local result",()=>{
   const html=readFileSync("platform/public/fill/index.html","utf8");
-  for(const d of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+d+'PackageStepsSummaryHeading"'));assert.match(html,new RegExp('id="'+d+'PackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"'));assert.ok(html.indexOf('id="'+d+'PackageStepsSummary"')<html.indexOf('id="'+d+'PackageSteps"'));}
+  // Native controls live outside the inner live-status text, not inside an atomic live region.
+  for(const d of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+d+'PackageStepsSummaryHeading"'));assert.match(html,new RegExp('<div id="'+d+'PackageStepsSummary"></div>'));assert.ok(html.indexOf('id="'+d+'PackageStepsSummary"')<html.indexOf('id="'+d+'PackageSteps"'));}
   const helper=source.slice(source.indexOf("  function goPackageStepsSummaryHTML("),source.indexOf("  // Presentation only of one domain"));
   for(const literal of ["esc(organisation)","esc(ctx.sha)","esc(ctx.check)","esc(label)"])assert.ok(helper.includes(literal));
   assert.doesNotMatch(helper,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|state\.|goPackageState|<button|<form|<input|<a |\.addEventListener|\.submit\(/);
@@ -761,7 +765,7 @@ test("One accessible preparation snapshot is immediately beside its own blockers
     const start=html.indexOf(panel),end=html.indexOf('<section class="go-next-panel package-summary-panel '+domain+'-package-summary-panel"',start),region=html.slice(start,end);
     assert.match(region,new RegExp('<h4 id="'+domain+'PackageStepsSummaryHeading">'));
     assert.match(region,/Nothing is sent, approved or executed here/);
-    assert.match(region,new RegExp(marker+' role="status" aria-live="polite" aria-atomic="true"'));
+    assert.match(region,new RegExp('<div '+marker+'></div>'));
     assert.doesNotMatch(region,/<(?:button|input|form|a)\b/);
     assert.ok(start<html.indexOf('id="'+domain+'PackageSummary"'));
     assert.ok(start<html.indexOf('id="'+domain+'PackageStepsHeading"'));
@@ -851,4 +855,60 @@ test("Late failed local review cannot hide or close a newer current opened discl
   const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");h.disclosure("get").open=true;
   const notes=h.packageSteps("get"),summary=h.packageStepsSummary("get");wait.reject(Error("SECRET"));await running;
   assert.equal(h.disclosure("get").hidden,false);assert.equal(h.disclosure("get").open,true);assert.equal(h.packageSteps("get"),notes);assert.equal(h.packageStepsSummary("get"),summary);
+});
+
+const themeSections=html=>[...html.matchAll(/<details class="go-package-disclosure go-package-theme" data-package-theme="([^"]+)">([\s\S]*?)<\/details>/g)].map(m=>({id:m[1],html:m[2]}));
+const themeOpening={target:{open:true,matches:selector=>selector==="details[data-package-theme]"}};
+
+test("Snapshot themes are independent closed native disclosures with only their own unresolved fixed notes",async()=>{
+  const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");
+  const sections=themeSections(h.packageStepsSummary("club"));assert.equal(sections.length,4);
+  const expected={"authority-source":["original-authority"],"runtime-isolation":["protected-deploy","independent-runtime","isolation","two-synthetic-orgs"],"consent-device":["tester-consent"],"evidence-scope-stop":["scope-allowlist","current-evidence","unresolved-blockers","expiry-revocation-stop","connection-freshness","club-wide-coverage"]};
+  for(const t of sections){
+    assert.deepEqual([...stepIDs(t.html,"MISSING"),...stepIDs(t.html,"UNKNOWN")].sort(),expected[t.id].sort());
+    assert.match(t.html,/summary aria-describedby="clubPackageDisclosureHelp"/);assert.match(t.html,/>Club — /);
+    assert.match(t.html,/Verified GO: none\. Execution NOT_RUN/);assert.doesNotMatch(t.html,/data-package-step="source-binding"|data-package-step-state="PRESENT"|<button|<input|<form|<a /);
+  }
+  const result=h.packageStepsSummary("club");assert.equal((result.match(/role="status"/g)||[]).length,1);
+  assert.ok(result.indexOf('</div><ul')<result.indexOf('<details'));
+  assert.doesNotMatch(result,/<details[^>]*\b(?:open|name)=/);
+  const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";d.items[1].state="MISSING";d.items.pop();await h.selectPackage("get",d);await h.packageReview("get");
+  const getThemes=themeSections(h.packageStepsSummary("get"));assert.deepEqual(getThemes.map(t=>t.id),["authority-source","consent-device"]);
+  for(const t of getThemes){assert.match(t.html,/summary aria-describedby="getPackageDisclosureHelp"/);assert.match(t.html,/>GetACourt — /);assert.doesNotMatch(t.html,/two-synthetic-orgs|club-wide-coverage|connection-freshness/);}
+  assert.deepEqual(stepIDs(getThemes[0].html,"MISSING"),["source-binding"]);assert.match(getThemes[0].html,/exact Get SHA and this single selected check/);
+  assert.deepEqual(stepIDs(getThemes[1].html,"MISSING"),["separate-state-change-go"]);
+});
+
+test("Local theme openings never replace current DOM, reread a file, change blockers or affect the other domain",async()=>{
+  const h=await packageHarness();let reads=0;
+  for(const domain of ["club","get"]){const d=structuredClone(domain==="club"?clubPackage:getPackage);if(domain==="get")d.items[0].state="UNKNOWN";
+    await h.selectPackage(domain,d,{size:100,text:async()=>{reads++;return JSON.stringify(d);}});await h.packageReview(domain);}
+  const nodes=["club","get"].map(d=>h.get("#"+d+"PackageStepsSummary")),writes=nodes.map(n=>n.htmlWrites);
+  const snapshots=nodes.map(n=>n.innerHTML),calls=h.calls.length,blockers=h.get("#clubUatBlockers").innerHTML,candidate=h.summary();
+  for(const domain of ["club","get"]){await h.get("#"+domain+"PackageStepsSummary").run("toggle",themeOpening);h.disclosure(domain).open=true;await h.disclosure(domain).run("toggle");}
+  assert.deepEqual(nodes.map(n=>n.htmlWrites),writes);assert.deepEqual(nodes.map(n=>n.innerHTML),snapshots);
+  assert.equal(reads,2);assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);assert.equal(h.summary(),candidate);assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);
+  await h.check("hosted-ui");assert.equal(nodes[0].htmlWrites,writes[0]);assert.equal(nodes[0].innerHTML,snapshots[0]);assert.equal(themeSections(h.packageStepsSummary("get")).length,0);
+});
+
+test("Opening a theme rechecks local expiry and clears all affected hidden notes without a new read",async()=>{
+  const h=await packageHarness();for(const domain of ["club","get"]){const d=structuredClone(domain==="club"?clubPackage:getPackage);d.items=[];await h.selectPackage(domain,d);await h.packageReview(domain);}
+  const calls=h.calls.length;h.setNow(NOW+60*60*1000);await h.get("#getPackageStepsSummary").run("toggle",themeOpening);
+  for(const domain of ["club","get"]){assert.equal(themeSections(h.packageStepsSummary(domain)).length,0);assert.doesNotMatch(h.packageStepsSummary(domain),/data-package-step=|Operations SHA:|Get SHA:/);assert.equal(h.disclosure(domain).hidden,true);}
+  assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
+
+test("Theme presentation is not restored by invalidated local completion and never suppresses a newer result",async()=>{
+  const h=await packageHarness(),old=deferred();await h.selectPackage("get",{},{size:100,text:()=>old.promise});const pending=h.packageReview("get");await settle();
+  const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");
+  const n=h.get("#getPackageStepsSummary"),markup=n.innerHTML,writes=n.htmlWrites;await n.run("toggle",themeOpening);old.resolve(JSON.stringify(d));await pending;
+  assert.equal(n.innerHTML,markup);assert.equal(n.htmlWrites,writes);assert.equal(themeSections(markup).length,1);
+  await h.get("#acceptanceSha").run("input");await n.run("toggle",themeOpening);assert.equal(themeSections(h.packageStepsSummary("get")).length,0);
+});
+
+test("Theme toggle capture guards only native local openings and adds no execution or persisted state",()=>{
+  assert.match(source,/stepsSummary\?\.addEventListener\("toggle", event => \{[\s\S]*?event\.target\?\.matches\("details\[data-package-theme\]"\) && event\.target\.open\) syncGoPackages\(\);\s*\}, true\)/);
+  const handler=source.slice(source.indexOf('ui.stepsSummary?.addEventListener("toggle"'),source.indexOf('goPackageCheck?.addEventListener("change"'));
+  assert.doesNotMatch(handler,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|\.open\s*=/);
+  assert.match(readFileSync("platform/public/fill/styles.css","utf8"),/\.go-package-theme > summary/);
 });
