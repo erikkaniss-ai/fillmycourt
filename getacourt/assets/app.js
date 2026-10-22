@@ -30,6 +30,10 @@
     bookingIdentityLabel:q("#bookingIdentityLabel"), bookingIdentityNote:q("#bookingIdentityNote"),
     bookingIdentityAction:q("#bookingIdentityAction"), bookingPaymentStatus:q("#bookingPaymentStatus"),
     myWatches:q("#myWatchesButton"), watchesDialog:q("#watchesDialog"), watchesList:q("#watchesList"),
+    importButton:q("#importBookingsButton"),importDialog:q("#importDialog"),
+    importForm:q("#importForm"),importFile:q("#importFile"),importProvider:q("#importProvider"),
+    importOwnData:q("#importOwnData"),importStatus:q("#importStatus"),importItems:q("#importItems"),
+    importClear:q("#importClear"),closeImport:q("#closeImportButton"),importSubmit:q("#importSubmit"),
     closeWatches:q("#closeWatchesButton"), watchAlerts:q("#watchAlerts"),
     watchPrompt:q("#watchPrompt"), watchPromptTitle:q("#watchPromptTitle"), watchPromptText:q("#watchPromptText"),
     watchPromptButton:q("#watchPromptButton"), watchDialog:q("#watchDialog"), watchForm:q("#watchForm"),
@@ -37,6 +41,7 @@
     watchRadius:q("#watchRadius"), watchIndoor:q("#watchIndoor"), closeWatch:q("#closeWatchButton")
   };
 
+  const personalImports=window.GACPersonalBookingImports?.createStore();
   const now = new Date();
   const today = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
   el.date.value=today; el.date.min=today;
@@ -67,6 +72,12 @@
     try{return JSON.parse(localStorage.getItem("gac.session")||"null");}catch{return null;}
   }
   function clearPrivateViews(){
+    personalImports?.clear();
+    if(el.importItems)el.importItems.replaceChildren();
+    if(el.importFile)el.importFile.value="";
+    if(el.importOwnData)el.importOwnData.checked=false;
+    if(el.importStatus)el.importStatus.textContent="No personal calendar imported in this session.";
+    if(el.importDialog?.open)el.importDialog.close();
     state.profile=null;
     state.routines=[];
     state.watchNotifications=[];
@@ -692,6 +703,65 @@
       renderBookings(bookings);el.bookingsDialog.showModal();
     }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not load bookings.");}
   }
+  async function openPersonalImports(){
+    if(!(await requireSignedIn()))return;
+    if(!personalImports){toast("Personal calendar import is unavailable.");return;}
+    const epoch=state.authEpoch,viewer=jwtPayload(state.session?.accessToken||"").sub;
+    if(!viewer)return;
+    renderPersonalImports(viewer);
+    if(epoch===state.authEpoch && state.session && el.importDialog)
+      el.importDialog.showModal();
+  }
+  function renderPersonalImports(viewer){
+    if(!personalImports||!el.importItems)return;
+    el.importItems.replaceChildren();
+    for(const booking of personalImports.list(viewer)){
+      const li=document.createElement("li");
+      li.className="booking-item";
+      const title=document.createElement("strong"),meta=document.createElement("p");
+      title.textContent=booking.title;
+      meta.textContent=new Date(booking.startsAt).toLocaleString([],{
+        weekday:"short",day:"numeric",month:"short",year:"numeric",
+        hour:"2-digit",minute:"2-digit"
+      })+" · "+booking.venue+" · "+booking.provider+" (user-imported, unverified)";
+      li.append(title,meta);el.importItems.append(li);
+    }
+  }
+  async function importPersonalCalendar(e){
+    e.preventDefault();
+    const epoch=state.authEpoch;
+    const token=await accessToken();
+    if(!token || !state.session || epoch!==state.authEpoch){openAuth("Sign in to review your own calendar.");return;}
+    const viewer=jwtPayload(token).sub, file=el.importFile?.files?.[0];
+    if(!viewer||!file||!el.importOwnData?.checked){
+      el.importStatus.textContent="Choose your own .ics calendar and confirm ownership.";return;
+    }
+    if(!/\.ics$/i.test(file.name)||file.size>window.GACPersonalBookingImports.MAX_BYTES){
+      el.importStatus.textContent="Choose a .ics file no larger than 128 KiB.";return;
+    }
+    el.importSubmit.disabled=true;
+    try{
+      const content=await file.text();
+      if(epoch!==state.authEpoch||viewer!==jwtPayload(state.session?.accessToken||"").sub)return;
+      const count=personalImports.importIcs({
+        ownerRef:viewer,provider:el.importProvider.value,content
+      });
+      el.importFile.value="";
+      el.importStatus.textContent=count+" calendar events loaded locally. No provider account connected, no available courts verified. Sign-out clears the data.";
+      renderPersonalImports(viewer);
+    }catch{
+      if(epoch===state.authEpoch)el.importStatus.textContent="Could not read this calendar: only valid UTC .ics events are supported. Nothing was uploaded.";
+    }finally{
+      if(epoch===state.authEpoch)el.importSubmit.disabled=false;
+    }
+  }
+  function clearPersonalCalendar(){
+    personalImports?.clear();
+    el.importItems?.replaceChildren();
+    if(el.importFile)el.importFile.value="";
+    if(el.importOwnData)el.importOwnData.checked=false;
+    if(el.importStatus)el.importStatus.textContent="Imported data cleared from this session.";
+  }
   function renderBookings(bookings){
     if(!bookings.length){el.bookingsList.innerHTML='<div class="empty-state"><h3>No bookings yet</h3><p>Your GetACourt bookings will appear here.</p></div>';return;}
     el.bookingsList.innerHTML=bookings.map(b=>'<article class="booking-item" data-id="'+esc(b.bookingId)+'"><div class="booking-item-head"><div><h3>'+esc((b.venue||{}).name||"Court booking")+'</h3><p>'+esc((b.slot||{}).date)+' · '+esc((b.slot||{}).displayTime||(b.slot||{}).time)+' · '+esc((b.slot||{}).duration)+' min</p><p>'+esc(b.reference||b.bookingId)+'</p></div><span class="booking-status">'+esc(b.status||"confirmed")+'</span></div>'+(b.status==="confirmed"?'<button class="cancel-button" type="button">Cancel booking</button>':"")+'</article>').join("");
@@ -869,6 +939,10 @@
   el.dialog.addEventListener("close",()=>{clearInterval(state.timer);reset();});
   el.myBookings.addEventListener("click",loadBookings);
   el.closeBookings.addEventListener("click",()=>el.bookingsDialog.close());
+  el.importButton?.addEventListener("click",openPersonalImports);
+  el.closeImport?.addEventListener("click",()=>el.importDialog.close());
+  el.importForm?.addEventListener("submit",importPersonalCalendar);
+  el.importClear?.addEventListener("click",clearPersonalCalendar);
   el.myWatches?.addEventListener("click",()=>loadWatches(true));
   el.closeWatches?.addEventListener("click",()=>el.watchesDialog.close());
   el.watchPromptButton?.addEventListener("click",openWatchDialog);
