@@ -242,7 +242,38 @@
       <button class="dialog-close" id="closeBookingsButton" aria-label="Close">×</button>
       <p class="eyebrow">YOUR PLAY</p>
       <h2 id="bookingsHeading">My bookings</h2>
+      <p class="payment-note">Only GetACourt bookings appear below. You can also review your own calendar bookings from other apps without sharing their passwords.</p>
+      <button class="ghost-button" id="importBookingsButton" type="button">Import my calendar bookings (.ics)</button>
       <div id="bookingsList" class="bookings-list"></div>
+    </div>
+  </dialog>
+
+  <dialog class="bookings-dialog" id="importDialog" aria-labelledby="importHeading">
+    <div class="dialog-shell bookings-shell">
+      <button class="dialog-close" id="closeImportButton" type="button" aria-label="Close imported bookings">×</button>
+      <p class="eyebrow">MY EXTERNAL BOOKINGS</p>
+      <h2 id="importHeading">Import your own booking calendar</h2>
+      <p class="payment-note">Sign in to GetACourt first. Choose an .ics calendar file you obtained yourself. Your file is read locally on this device, never uploaded or stored, and cleared when you sign out. This is <strong>not</strong> a Playtomic, TieSports or MATCHi login or real-time sync.</p>
+      <form id="importForm">
+        <div class="checkout-grid">
+          <label class="field"><span>Where did you get the calendar?</span>
+            <select id="importProvider">
+              <option value="playtomic">Playtomic</option>
+              <option value="tiesports">TieSports / TiePlayer</option>
+              <option value="matchi">MATCHi</option>
+              <option value="other">My calendar / other provider</option>
+            </select>
+          </label>
+          <label class="field"><span>My calendar file (.ics, max 128 KiB)</span>
+            <input id="importFile" type="file" accept=".ics,text/calendar" required />
+          </label>
+        </div>
+        <label class="consent"><input id="importOwnData" type="checkbox" required /> <span>I confirm this file contains my own bookings, not a club customer export. I understand its contents are unverified and cannot establish free court availability.</span></label>
+        <button id="importSubmit" class="confirm-button" type="submit">Review my calendar locally</button>
+      </form>
+      <p class="payment-note" id="importStatus" role="status" aria-live="polite">No external booking calendar imported in this session.</p>
+      <ul id="importItems" class="bookings-list" aria-label="Imported user calendar bookings"></ul>
+      <button id="importClear" class="ghost-button" type="button">Clear imported bookings</button>
     </div>
   </dialog>
 
@@ -333,6 +364,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous" defer></script>
   <script src="assets/auth-pkce.js" defer></script>
   <script src="assets/commercial-signals.js" defer></script>
+  <script src="assets/personal-booking-import.js" defer></script>
   <script src="assets/app.js" defer></script>
 </body>
 </html>
