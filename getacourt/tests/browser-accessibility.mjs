@@ -40,7 +40,7 @@ const server=createServer(async(req,res)=>{
   }
   const requested=url.pathname==="/"?"/index.html":url.pathname;
   const relative=requested.slice(1);
-  if(!/^(index\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|icon-(?:192|512)\.png))$/.test(relative)){
+  if(!/^(index\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png))$/.test(relative)){
     sendJson(res,404,{error:"NOT_FOUND"});return;
   }
   try{
@@ -163,7 +163,7 @@ try{
     // actions or sign-in are triggered by opening an empty native dialog.
     for(const dialogId of [
       "venueDialog","bookingDialog","bookingsDialog",
-      "watchesDialog","watchDialog","profileDialog"
+      "watchesDialog","watchDialog","profileDialog","importDialog"
     ]){
       await page.evaluate(id=>document.getElementById(id).showModal(),dialogId);
       const v=await evaluateAxe();
