@@ -443,3 +443,18 @@ asserts direct siblings, actual desktop/320px geometry, no overflow or controls,
 and preserves all existing denial/expiry/late-result and fixture-only safety checks.
 No new reads, state, transport, GO, deploy or provider access. Hosted/device/OAuth
 acceptance remains NOT_RUN and pilot GO NOT_GRANTED; Control Tower untouched.
+
+### Read-only preparation disclosure — continued from 493a0e7
+
+Existing detailed preparation notes now appear once inside independent native
+disclosures in the adjacent club/Get snapshots. Current unresolved owner/admin local
+results expose closed disclosures; opening is explicit, view-only and keyboard
+usable, without reads, storage, requests, checks or GO. All PRESENT/no notes exposes
+no disclosure and grants nothing. Existing renderer guards close/hide affected
+disclosures and clear old notes on changed/invalid/expired context; a still-current
+opposite domain retains its user's open choice. No auto-open or persisted UI state.
+Tests extend scope/late-result safety and actual Chromium keyboard/collapse,
+independence, default/invalid clearing, no extra network/storage and desktop/320px
+evidence. Preparation remains unverified planning, not provider rights, execution or
+pilot acceptance. Workflow/gate unchanged; no sending/deploy/production/provider
+requests or Control Tower change. See `docs/fill-local-acceptance-viewer.md`.

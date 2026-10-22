@@ -70,8 +70,16 @@
             <div id="clubUatBlockers" role="status" aria-live="polite" aria-atomic="true"></div>
             <section class="package-preparation-summary-panel club-package-preparation-summary-panel" aria-labelledby="clubPackageStepsSummaryHeading">
               <h4 id="clubPackageStepsSummaryHeading">Preparation snapshot — club</h4>
-              <p class="muted">Read-only local club UAT preparation, not pilot or GetACourt GO. Nothing is sent, approved or executed here.</p>
+              <p id="clubPackageDisclosureHelp" class="muted">Read-only local club UAT preparation, not pilot or GetACourt GO. Nothing is sent, approved or executed here.</p>
               <div id="clubPackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+              <details id="clubPackageStepsDisclosure" class="go-package-disclosure" hidden>
+                <summary aria-describedby="clubPackageDisclosureHelp">Show read-only preparation notes — club</summary>
+                <section class="package-preparation-panel club-package-preparation-panel" aria-labelledby="clubPackageStepsHeading">
+                  <h5 id="clubPackageStepsHeading">Missing-part preparation — club</h5>
+                  <p class="muted">Read-only planning for this club UAT manifest only, not pilot or GetACourt GO. No collection, sending, assignment or execution. UNKNOWN stays unresolved; nothing here verifies approval.</p>
+                  <div id="clubPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+                </section>
+              </details>
             </section>
             <section class="go-next-panel package-summary-panel club-package-summary-panel" aria-labelledby="clubPackageSummaryHeading">
               <h4 id="clubPackageSummaryHeading">GO package snapshot — club</h4>
@@ -81,11 +89,6 @@
                 <h5 id="clubPackageMissingHeading">Missing parts — club</h5>
                 <p class="muted">Local club declarations only: MISSING and UNKNOWN are separate unresolved states, not an action list or permission. Verified GO: none. Execution NOT_RUN. Existing blockers stay open.</p>
                 <div id="clubPackageMissing" role="status" aria-live="polite" aria-atomic="true"></div>
-              </section>
-              <section class="package-preparation-panel club-package-preparation-panel" aria-labelledby="clubPackageStepsHeading">
-                <h5 id="clubPackageStepsHeading">Missing-part preparation — club</h5>
-                <p class="muted">Read-only planning for this club UAT manifest only, not pilot or GetACourt GO. No collection, sending, assignment or execution. UNKNOWN stays unresolved; nothing here verifies approval.</p>
-                <div id="clubPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
               </section>
             </section>
             <section class="go-next-panel club-next-panel" aria-labelledby="clubNextHeading">
@@ -116,8 +119,16 @@
             <div id="acceptanceSummary" role="status" aria-live="polite" aria-atomic="true"></div>
             <section class="package-preparation-summary-panel get-package-preparation-summary-panel" aria-labelledby="getPackageStepsSummaryHeading">
               <h4 id="getPackageStepsSummaryHeading">Preparation snapshot — GetACourt</h4>
-              <p class="muted">Read-only preparation for one local Get check, not club UAT, pilot or combined GO. Nothing is sent, approved or executed here.</p>
+              <p id="getPackageDisclosureHelp" class="muted">Read-only preparation for one local Get check, not club UAT, pilot or combined GO. Nothing is sent, approved or executed here.</p>
               <div id="getPackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+              <details id="getPackageStepsDisclosure" class="go-package-disclosure" hidden>
+                <summary aria-describedby="getPackageDisclosureHelp">Show read-only preparation notes — GetACourt</summary>
+                <section class="package-preparation-panel get-package-preparation-panel" aria-labelledby="getPackageStepsHeading">
+                  <h5 id="getPackageStepsHeading">Missing-part preparation — GetACourt</h5>
+                  <p class="muted">Read-only planning for this one Get check only, never club UAT or pilot GO. No collection, sending, assignment or execution. Device, OAuth and location permissions remain separate.</p>
+                  <div id="getPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+                </section>
+              </details>
             </section>
             <section class="go-next-panel package-summary-panel get-package-summary-panel" aria-labelledby="getPackageSummaryHeading">
               <h4 id="getPackageSummaryHeading">GO package snapshot — GetACourt</h4>
@@ -127,11 +138,6 @@
                 <h5 id="getPackageMissingHeading">Missing parts — GetACourt</h5>
                 <p class="muted">This local Get check only, never club evidence or combined GO. Declared presence never verifies authority. Verified GO: none. Execution NOT_RUN.</p>
                 <div id="getPackageMissing" role="status" aria-live="polite" aria-atomic="true"></div>
-              </section>
-              <section class="package-preparation-panel get-package-preparation-panel" aria-labelledby="getPackageStepsHeading">
-                <h5 id="getPackageStepsHeading">Missing-part preparation — GetACourt</h5>
-                <p class="muted">Read-only planning for this one Get check only, never club UAT or pilot GO. No collection, sending, assignment or execution. Device, OAuth and location permissions remain separate.</p>
-                <div id="getPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
               </section>
             </section>
             <section class="go-next-panel candidate-next-panel" aria-labelledby="candidateNextHeading">

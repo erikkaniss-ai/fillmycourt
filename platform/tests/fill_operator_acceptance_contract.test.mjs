@@ -69,6 +69,7 @@ async function harness({role="owner",signedIn=true,demo=false,name="SYNTHETIC A"
     packageMissing:domain=>get("#"+domain+"PackageMissing").innerHTML||get("#"+domain+"PackageMissing").textContent,
     packageSteps:domain=>get("#"+domain+"PackageSteps").innerHTML||get("#"+domain+"PackageSteps").textContent,
     packageStepsSummary:domain=>get("#"+domain+"PackageStepsSummary").innerHTML||get("#"+domain+"PackageStepsSummary").textContent,
+    disclosure:domain=>get("#"+domain+"PackageStepsDisclosure"),
     clubSteps:()=>get("#clubNextSteps").innerHTML||get("#clubNextSteps").textContent,
     candidateSteps:()=>get("#candidateNextSteps").innerHTML||get("#candidateNextSteps").textContent,
     clubDraft:()=>get("#clubGoRequest").innerHTML||get("#clubGoRequest").textContent,
@@ -374,6 +375,7 @@ test("Local manifest check is explicit and scoped; no context or denied/demo rol
       assert.doesNotMatch(h.packageMissing(domain),/data-package-component=|data-package-part=/);
       assert.doesNotMatch(h.packageSteps(domain),/data-package-step=/);
       assert.doesNotMatch(h.packageStepsSummary(domain),/Preparation notes:|data-package-preparation-group=|Operations SHA:|Get SHA:/);
+      assert.equal(h.disclosure(domain).hidden,true);assert.equal(h.disclosure(domain).open,false);
     }
     assert.equal(reads,0);
   }
@@ -431,6 +433,7 @@ test("Manifest rejects foreign domains/orgs/SHA/check/actions, expiry, unknown o
     assert.match(h.packageMissing("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageMissing("get"),/SECRET|<img|data-package-component=/);
     assert.match(h.packageSteps("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageSteps("get"),/SECRET|<img|data-package-step=/);
     assert.match(h.packageStepsSummary("get"),/rejected or unavailable/);assert.doesNotMatch(h.packageStepsSummary("get"),/SECRET|<img|Preparation notes:|data-package-preparation-group=|Get SHA:/);
+    assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
   }
   for(const change of [d=>d.organisationId=OTHER,d=>d.sourceSha=SHA,d=>d.checkId="club-pilot",d=>d.actions.push("provider-fetch")]){
     const d=structuredClone(clubPackage);change(d);await h.selectPackage("club",d);await h.packageReview("club");assert.match(h.packageResult("club"),/Manifest rejected/);
@@ -469,6 +472,7 @@ test(`Late manifest completion cannot rehydrate a superseded package: ${action}`
   assert.doesNotMatch(h.packageMissing(domain),/data-package-component=/);
   assert.doesNotMatch(h.packageSteps(domain),/data-package-step=/);
   assert.doesNotMatch(h.packageStepsSummary(domain),/Preparation notes:|data-package-preparation-group=|Operations SHA:|Get SHA:/);
+  assert.equal(h.disclosure(domain).hidden,true);assert.equal(h.disclosure(domain).open,false);
   if(["tab","logout","401"].includes(action))assert.equal(h.packageSummary(domain),"");
   if(["tab","logout","401"].includes(action))assert.equal(h.packageMissing(domain),"");
   if(["tab","logout","401"].includes(action))assert.equal(h.packageSteps(domain),"");
@@ -667,7 +671,7 @@ test("Previous preparation identities clear before new local read, on failure an
 
 test("Preparation panels are accessible separate read-only regions; fixed escaped helper has no transport or authority side effects",()=>{
   const html=readFileSync("platform/public/fill/index.html","utf8");
-  for(const d of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+d+'PackageStepsHeading"'));assert.match(html,new RegExp('id="'+d+'PackageSteps" role="status" aria-live="polite" aria-atomic="true"'));assert.ok(html.indexOf('id="'+d+'PackageSteps"')>html.indexOf('id="'+d+'PackageMissing"'));}
+  for(const d of ["club","get"]){assert.match(html,new RegExp('aria-labelledby="'+d+'PackageStepsHeading"'));assert.match(html,new RegExp('id="'+d+'PackageSteps" role="status" aria-live="polite" aria-atomic="true"'));assert.ok(html.indexOf('id="'+d+'PackageSteps"')>html.indexOf('id="'+d+'PackageStepsSummary"'));}
   const helper=source.slice(source.indexOf("  function goPackageStepsHTML("),source.indexOf("  // Presentation only of one domain"));
   for(const literal of ["esc(row.id)","esc(row.status)","esc(goPackagePartLabels","esc(notes[row.id]"])assert.ok(helper.includes(literal));
   assert.doesNotMatch(helper,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|state\.|goPackageState|<button|<form|<input|<a /);
@@ -754,14 +758,15 @@ test("One accessible preparation snapshot is immediately beside its own blockers
     const marker='id="'+domain+'PackageStepsSummary"',panel='<section class="package-preparation-summary-panel '+domain+'-package-preparation-summary-panel"';
     assert.equal(html.split(marker).length-1,1);assert.equal(html.split('id="'+domain+'PackageStepsSummaryHeading"').length-1,1);
     assert.match(html,new RegExp('id="'+anchor+'"[^>]*><\\/div>\\s*'+panel));
-    const start=html.indexOf(panel),end=html.indexOf("</section>",start),region=html.slice(start,end+10);
+    const start=html.indexOf(panel),end=html.indexOf('<section class="go-next-panel package-summary-panel '+domain+'-package-summary-panel"',start),region=html.slice(start,end);
     assert.match(region,new RegExp('<h4 id="'+domain+'PackageStepsSummaryHeading">'));
     assert.match(region,/Nothing is sent, approved or executed here/);
     assert.match(region,new RegExp(marker+' role="status" aria-live="polite" aria-atomic="true"'));
     assert.doesNotMatch(region,/<(?:button|input|form|a)\b/);
     assert.ok(start<html.indexOf('id="'+domain+'PackageSummary"'));
     assert.ok(start<html.indexOf('id="'+domain+'PackageStepsHeading"'));
-    assert.match(html.slice(end+10),new RegExp('^\\s*<section class="go-next-panel package-summary-panel '+domain+'-package-summary-panel"'));
+    assert.match(region,/<\/details>\s*<\/section>\s*$/);
+    assert.match(html.slice(end),new RegExp('^<section class="go-next-panel package-summary-panel '+domain+'-package-summary-panel"'));
   }
   assert.match(css,/\.package-preparation-summary-panel h4 \{ font-size:14px; margin:0 0 8px/);
 });
@@ -777,4 +782,72 @@ test("Adjacent preparation snapshots preserve separate results and blockers acro
   assert.doesNotMatch(h.packageStepsSummary("get"),/Preparation notes:|Get SHA:|data-package-preparation-group=/);
   assert.equal(h.packageStepsSummary("club"),club);assert.equal(h.packageSteps("club"),notes);assert.equal(h.packageMissing("club"),missing);assert.equal(h.packageSummary("club"),summary);
   assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);assert.equal(h.summary(),candidate);assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
+
+test("Summary disclosures use native independent closed details and one existing read-only notes region per domain",()=>{
+  const html=readFileSync("platform/public/fill/index.html","utf8"),css=readFileSync("platform/public/fill/styles.css","utf8");
+  for(const d of ["club","get"]){
+    const marker='id="'+d+'PackageStepsDisclosure"';assert.equal(html.split(marker).length-1,1);assert.equal(html.split('id="'+d+'PackageSteps"').length-1,1);
+    const start=html.indexOf('<details '+marker),end=html.indexOf('</details>',start),region=html.slice(start,end);
+    assert.match(region,new RegExp('^<details '+marker+' class="go-package-disclosure" hidden>'));
+    assert.doesNotMatch(region,/<details[^>]*\b(?:open|name)=?|<(?:button|input|form|a)\b/);
+    assert.match(region,new RegExp('<summary aria-describedby="'+d+'PackageDisclosureHelp">Show read-only preparation notes — '+(d==="club"?"club":"GetACourt")));
+    assert.match(region,new RegExp('id="'+d+'PackageSteps" role="status" aria-live="polite" aria-atomic="true"'));
+    assert.ok(start>html.indexOf('id="'+d+'PackageStepsSummary"'));
+    assert.ok(end<html.indexOf('id="'+d+'PackageSummary"'));
+  }
+  assert.match(css,/\.go-package-disclosure > summary:focus-visible/);
+  const render=source.slice(source.indexOf("  function renderGoPackageSummary("),source.indexOf("  function clearGoPackage("));
+  assert.doesNotMatch(render,/\.open\s*=\s*true|\.addEventListener|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval/);
+});
+
+test("Only current unresolved owner/admin packages expose a closed disclosure; opposite scope preserves its native open choice",async()=>{
+  for(const role of ["owner","admin"]){
+    const h=await harness({role});await h.open();for(const d of ["club","get"]){assert.equal(h.disclosure(d).hidden,true);assert.equal(h.disclosure(d).open,false);}
+    await h.ops();await h.select();await h.review();await h.check();const calls=h.calls.length,blockers=h.get("#clubUatBlockers").innerHTML,candidate=h.summary();
+    await h.selectPackage("club",clubPackage);await h.packageReview("club");assert.equal(h.disclosure("club").hidden,false);assert.equal(h.disclosure("club").open,false);
+    // Model a native user toggle; Chromium separately verifies keyboard behaviour.
+    h.disclosure("club").open=true;const club=h.packageSteps("club");await h.selectPackage("get",getPackage);await h.packageReview("get");
+    assert.equal(h.disclosure("club").open,true);assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
+    const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");
+    assert.equal(h.disclosure("get").hidden,false);assert.equal(h.disclosure("get").open,false);h.disclosure("get").open=true;
+    await h.check("hosted-ui");assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);assert.equal(h.disclosure("club").open,true);
+    assert.equal(h.packageSteps("club"),club);assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);assert.equal(h.summary(),candidate);assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+  }
+});
+
+test("Opened disclosures close and hide on invalidated scope; the unaffected package keeps its own state",async()=>{
+  for(const action of ["club","tab","logout","401","get-sha","get-file","check","ops-sha","refresh"]){
+    const h=await packageHarness(),d=structuredClone(getPackage);d.items=[];
+    await h.selectPackage("club",clubPackage);await h.packageReview("club");await h.selectPackage("get",d);await h.packageReview("get");
+    for(const domain of ["club","get"]){assert.equal(h.disclosure(domain).hidden,false);h.disclosure(domain).open=true;}
+    if(action==="club"){h.get("#orgSelect").value=OTHER;await h.get("#orgSelect").run("change");await settle();}
+    if(action==="tab")await h.nav[0].run("click");if(action==="logout")await h.get("#signOut").run("click");
+    if(action==="401"){h.controls.deny=true;await h.get("#refreshButton").run("click");await settle();}
+    if(action==="get-sha"){h.get("#acceptanceSha").value="b".repeat(40);await h.get("#acceptanceSha").run("input");}
+    if(action==="get-file")await h.select();if(action==="check")await h.check("hosted-ui");
+    if(action==="ops-sha"){h.get("#operationsSha").value="b".repeat(40);await h.get("#operationsSha").run("input");}
+    if(action==="refresh"){await h.get("#refreshButton").run("click");await settle();}
+    for(const domain of ["club","get"]){const invalid=!["get-sha","get-file","check","ops-sha"].includes(action)||(action==="ops-sha"?domain==="club":domain==="get");
+      assert.equal(h.disclosure(domain).hidden,invalid,action+domain);assert.equal(h.disclosure(domain).open,!invalid,action+domain);
+      if(invalid)assert.doesNotMatch(h.packageSteps(domain),/data-package-step=/);
+    }
+  }
+});
+
+test("New/loading/rejected/expired files cannot retain or reopen a previous disclosure",async()=>{
+  const h=await packageHarness(),d=structuredClone(getPackage);d.items=[];
+  await h.selectPackage("get",d);await h.packageReview("get");h.disclosure("get").open=true;
+  const wait=deferred();await h.selectPackage("get",{}, {size:100,text:()=>wait.promise});assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
+  const run=h.packageReview("get");await settle();assert.equal(h.disclosure("get").hidden,true);
+  wait.reject(Error("SECRET"));await run;assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
+  await h.selectPackage("get",d);await h.packageReview("get");assert.equal(h.disclosure("get").open,false);h.disclosure("get").open=true;
+  h.setNow(NOW+60*60*1000);await h.get("#operationsSha").run("input");assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
+});
+
+test("Late failed local review cannot hide or close a newer current opened disclosure",async()=>{
+  const h=await packageHarness(),wait=deferred();await h.selectPackage("get",{}, {size:100,text:()=>wait.promise});const running=h.packageReview("get");await settle();
+  const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");h.disclosure("get").open=true;
+  const notes=h.packageSteps("get"),summary=h.packageStepsSummary("get");wait.reject(Error("SECRET"));await running;
+  assert.equal(h.disclosure("get").hidden,false);assert.equal(h.disclosure("get").open,true);assert.equal(h.packageSteps("get"),notes);assert.equal(h.packageStepsSummary("get"),summary);
 });

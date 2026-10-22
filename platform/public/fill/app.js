@@ -1108,6 +1108,7 @@
     missing: q("#" + domain + "PackageMissing"),
     steps: q("#" + domain + "PackageSteps"),
     stepsSummary: q("#" + domain + "PackageStepsSummary"),
+    disclosure: q("#" + domain + "PackageStepsDisclosure"),
   }]));
   const goPackageCheck = q("#getPackageCheck");
   const goPackageState = {club: {epoch: 0, key: null}, get: {epoch: 0, key: null}};
@@ -1232,14 +1233,17 @@
     const missingTarget = goPackageUI[domain].missing;
     const stepsTarget = goPackageUI[domain].steps;
     const stepsSummaryTarget = goPackageUI[domain].stepsSummary;
+    const disclosure = goPackageUI[domain].disclosure;
+    const closeDisclosure = () => { if (disclosure) { disclosure.open = false; disclosure.hidden = true; } };
     const empty = message => {
       target.textContent = message;
       if (missingTarget) missingTarget.textContent = message ? message + " No missing-part list inferred." : "";
       if (stepsTarget) stepsTarget.textContent = message ? message + " No missing-part preparation notes inferred." : "";
       if (stepsSummaryTarget) stepsSummaryTarget.textContent = message ? message + " No preparation summary inferred." : "";
+      if (message) closeDisclosure();
     };
     empty("");
-    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) return;
+    if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) { closeDisclosure(); return; }
     if (!acceptanceAllowed()) {
       empty("No package summary in this scope. Owner/admin local review required; demo has no real evidence. No verified GO.");
       return;
@@ -1278,6 +1282,12 @@
     if (missingTarget) missingTarget.innerHTML = goPackageMissingHTML(r.rows);
     if (stepsTarget) stepsTarget.innerHTML = goPackageStepsHTML(r.rows, domain);
     if (stepsSummaryTarget) stepsSummaryTarget.innerHTML = goPackageStepsSummaryHTML(r.rows, domain, ctx, state.org);
+    // Native view-only disclosure: never open automatically or retain an invalid scope.
+    // A still-current opposite-domain result keeps its own user's open/closed choice.
+    if (disclosure) {
+      disclosure.hidden = missing + unknown === 0;
+      if (disclosure.hidden) disclosure.open = false;
+    }
   }
   function clearGoPackage(domain, key = null, clearFile = true, status = "not_reviewed") {
     const previous = goPackageState[domain];
