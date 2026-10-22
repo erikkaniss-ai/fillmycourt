@@ -13,6 +13,9 @@ test("Fixture page is isolated from live app with explicit refusal to claim conn
   assert.match(html,/not active GetACourt integrations/);
   assert.match(html,/provider-supply-contract\.js/);
   assert.match(html,/connected-accounts-demo\.js/);
+  assert.match(html,/href="\.\/connected-accounts-demo\.css"/);
+  assert.doesNotMatch(html,/<style\b|\sstyle="/);
+  assert.match(readFileSync("getacourt/qa/connected-accounts-demo.css","utf8"),/\.provider\{/);
   assert.match(html,/content="noindex,nofollow,noarchive"/);
   assert.match(html,/connect-src 'none'/);
   assert.match(html,/form-action 'none'/);
