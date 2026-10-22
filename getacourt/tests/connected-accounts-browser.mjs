@@ -16,6 +16,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const allowed=new Map([
   ["/qa/connected-accounts-demo.html","text/html; charset=utf-8"],
   ["/qa/connected-accounts-demo.js","text/javascript; charset=utf-8"],
+  ["/qa/connected-accounts-lifecycle.js","text/javascript; charset=utf-8"],
   ["/qa/connected-accounts-demo.css","text/css; charset=utf-8"],
   ["/assets/provider-supply-contract.js","text/javascript; charset=utf-8"]
 ]);
@@ -84,6 +85,17 @@ try{
     assert.match(await page.locator("#status").innerText(),/NOT connected/);
     assert.equal(await page.locator("#consentButton").isDisabled(),true);
     assert.equal(await page.locator("#withdrawButton").isEnabled(),true);
+    assert.equal(await page.locator("#expireButton").isEnabled(),true);
+    await page.locator("#expireButton").click();
+    assert.match(await page.locator("#status").innerText(),/Demo consent expired/);
+    assert.match(await page.locator("#status").innerText(),/NOT connected/);
+    assert.equal(await page.locator("#expireButton").isDisabled(),true);
+    assert.equal(await page.locator("#reconnectButton").isEnabled(),true);
+    await page.locator("#reconnectButton").click();
+    assert.match(await page.locator("#status").innerText(),/Demo reconnect requested locally/);
+    assert.match(await page.locator("#status").innerText(),/NOT connected/);
+    assert.equal(await page.locator("#reconnectButton").isDisabled(),true);
+    assert.equal(await page.locator("#withdrawButton").isEnabled(),true);
 
     await page.locator("#withdrawButton").click();
     assert.match(await page.locator("#status").innerText(),/Demo consent withdrawn/);
@@ -95,6 +107,8 @@ try{
     assert.match(await page.locator("#status").innerText(),/Club-owned supply rights remain unverified/);
     assert.equal(await page.locator("#consentButton").isDisabled(),true);
     assert.equal(await page.locator("#withdrawButton").isDisabled(),true);
+    assert.equal(await page.locator("#expireButton").isDisabled(),true);
+    assert.equal(await page.locator("#reconnectButton").isDisabled(),true);
     assert.match(await page.locator("#scopeMessage").innerText(),/player.s consent cannot authorize club data/);
     await page.locator('[data-provider="playtomic"]').click();
     assert.match(await page.locator("#description").innerText(),/not permission to use a player.s third-party account/);
