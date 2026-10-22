@@ -7,58 +7,7 @@
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'">
   <title>Connected Accounts | GetACourt fixture-only UX</title>
-  <style>
-    :root{color-scheme:light;--navy:#071e33;--blue:#1267e5;--cyan:#35a7ff;--paper:#f4f8fd;--white:#fff;--ink:#142e44;--sub:#455b70;--line:#c4d5e6}
-    *{box-sizing:border-box}
-    html{scroll-behavior:auto}
-    body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.52 system-ui,-apple-system,Segoe UI,sans-serif}
-    button{font:inherit;cursor:pointer}
-    button:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
-    button:disabled{cursor:not-allowed;opacity:.55}
-    .skip{position:absolute;left:12px;top:-80px;background:#fff;padding:10px;z-index:10}
-    .skip:focus{top:12px}
-    .top{background:var(--navy);color:#fff;padding:20px max(18px,calc((100% - 1120px)/2))}
-    .topline{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
-    .wordmark{font-size:1.17rem;font-weight:800;letter-spacing:.02em}
-    .fixture{border:1px solid #9ad8ff;background:#123954;border-radius:999px;padding:5px 11px;font-size:.79rem;font-weight:650}
-    .lead{padding:32px 0 22px}
-    .lead h1{margin:0 0 8px;font-size:clamp(1.6rem,3.7vw,2.45rem);line-height:1.16;letter-spacing:-.03em}
-    .lead p{max-width:730px;color:#d8eaf9;margin:0}
-    main{max-width:1156px;margin:auto;padding:24px 18px 76px}
-    .warning{background:#fff;border-left:5px solid var(--blue);padding:13px 16px;margin:0 0 24px;border-radius:8px;box-shadow:0 2px 14px #08233c09}
-    .warning strong{color:var(--navy)}
-    .layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.26fr);align-items:start;gap:22px}
-    .panel{background:var(--white);border:1px solid #dce7f2;border-radius:16px;padding:22px;min-width:0;box-shadow:0 5px 18px #0f3c6510}
-    h2{font-size:1.22rem;color:var(--navy);margin:0 0 6px}
-    h3{font-size:1rem;color:var(--navy);margin:23px 0 8px}
-    .muted,.small{color:var(--sub)}
-    .small{font-size:.91rem}
-    .list{display:grid;gap:10px;margin-top:18px}
-    .provider{width:100%;border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;background:#fff;padding:13px 12px}
-    .provider:hover{border-color:var(--blue)}
-    .provider.selected{background:#edf5ff;border-color:var(--blue);box-shadow:inset 4px 0 0 var(--blue)}
-    .providerName{font-weight:720;color:var(--navy)}
-    .providerBadge{font-size:.75rem;white-space:nowrap;color:#43576c}
-    .modes{display:flex;flex-wrap:wrap;gap:8px;margin-top:17px}
-    .mode{border:1px solid var(--line);border-radius:9px;padding:9px 13px;background:white;color:var(--navy)}
-    .mode.selected{background:var(--navy);color:white;border-color:var(--navy)}
-    .overview{border:1px solid var(--line);background:var(--paper);border-radius:12px;padding:16px;margin-top:17px}
-    .eyebrow{margin:0;color:#355878;font-weight:800;letter-spacing:.07em;text-transform:uppercase;font-size:.76rem}
-    #providerTitle{font-size:1.57rem;margin:4px 0 0;line-height:1.2}
-    #status{font-weight:750;color:var(--navy);margin:8px 0}
-    ul{margin:8px 0 0;padding-left:20px}
-    li{padding:3px 0}
-    .controls{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 4px}
-    .action{border:1px solid var(--blue);background:var(--blue);color:white;padding:10px 15px;border-radius:9px;font-weight:700}
-    .secondary{background:white;color:var(--navy);border-color:var(--line)}
-    .outcome{margin-top:18px;background:#ebf3fb;border:1px solid #c1d9ed;border-radius:11px;padding:16px}
-    #result{margin:5px 0 4px;font-weight:760}
-    #requestLog{margin:0;font-size:.91rem}
-    .foot{padding-top:27px;max-width:850px;color:var(--sub);font-size:.88rem}
-    @media(max-width:760px){.layout{grid-template-columns:1fr}.panel{padding:18px}.lead{padding-top:23px}}
-    @media(max-width:370px){.provider{align-items:flex-start;flex-direction:column;gap:2px}.lead h1{font-size:1.55rem}.topline{align-items:flex-start}}
-    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
-  </style>
+  <link rel="stylesheet" href="./connected-accounts-demo.css">
   <script src="../assets/provider-supply-contract.js" defer></script>
   <script src="./connected-accounts-demo.js" defer></script>
 </head>
@@ -107,7 +56,7 @@
         </div>
         <p id="scopeMessage" class="small muted">Demo-only consent is not real OAuth, provider authorization or a saved account.</p>
         <section class="outcome" aria-labelledby="outcomeHeading">
-          <h3 id="outcomeHeading" style="margin-top:0">Availability contract</h3>
+          <h3 id="outcomeHeading" >Availability contract</h3>
           <p id="result" role="status" aria-live="polite">Availability: UNKNOWN · 0 slots</p>
           <p id="requestLog">Provider HTTP requests: 0 · Booking actions: 0 · Persistent storage: none</p>
         </section>
