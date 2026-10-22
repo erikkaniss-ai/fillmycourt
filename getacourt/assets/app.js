@@ -73,7 +73,9 @@
     try{return JSON.parse(localStorage.getItem("gac.session")||"null");}catch{return null;}
   }
   function clearPrivateViews(){
-    personalImports?.clear();
+    // Older isolated auth tests invoke this function without bootstrapping
+    // optional import modules. In the app it always clears user-bound data.
+    if(typeof personalImports!=="undefined")personalImports?.clear();
     if(el.importItems)el.importItems.replaceChildren();
     if(el.importFile)el.importFile.value="";
     if(el.importOwnData)el.importOwnData.checked=false;
