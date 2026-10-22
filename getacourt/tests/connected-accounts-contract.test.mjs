@@ -13,6 +13,9 @@ test("Fixture page is isolated from live app with explicit refusal to claim conn
   assert.match(html,/not active GetACourt integrations/);
   assert.match(html,/provider-supply-contract\.js/);
   assert.match(html,/connected-accounts-demo\.js/);
+  assert.match(html,/connected-accounts-lifecycle\.js/);
+  assert.match(html,/id="expireButton"/);
+  assert.match(html,/id="reconnectButton"/);
   assert.match(html,/href="\.\/connected-accounts-demo\.css"/);
   assert.doesNotMatch(html,/<style\b|\sstyle="/);
   assert.match(readFileSync("getacourt/qa/connected-accounts-demo.css","utf8"),/\.provider\{/);
@@ -27,6 +30,10 @@ test("Demo source calls only pure fail-closed supply contract, never any remote 
   assert.match(source,/supply\.planExternalAccount/);
   assert.match(source,/supply\.planProviderSupply/);
   assert.match(source,/supply\.searchAvailableSlots/);
+  assert.match(source,/lifecycle\.transition/);
+  assert.match(source,/lifecycle\.inspect/);
+  assert.match(source,/step\("request_reconnect"\)/);
+  assert.match(source,/step\("expire"\)/);
   assert.match(source,/state\.consent="withdrawn"/);
   assert.match(source,/state\.consent="not_requested"/);
   assert.match(source,/NOT connected/);
