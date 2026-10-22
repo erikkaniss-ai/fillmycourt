@@ -527,9 +527,15 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             assert club_package_summary.inner_html() == club_package_snapshot
             assert club_result.inner_html() == club_package_before
             inspect_package("get", GET_PACKAGE)
+            # File.text() is asynchronous: finish that review before advancing the
+            # clock, or its completion can correctly invalidate the club first.
+            expect(get_result).to_contain_text("15 of 15")
+            expect(get_package_summary).to_contain_text("15 of 15 PRESENT")
+            club_theme.locator(":scope > summary").focus()
+            expect(club_theme.locator(":scope > summary")).to_be_focused()
             # Expiry is revalidated on an actual native theme opening, without a timer/network read.
             page.evaluate("Date.now = () => Date.parse('2026-10-21T11:30:00Z')")
-            club_theme.locator(":scope > summary").click()
+            page.keyboard.press("Enter")
             expect(club_preparation_summary.locator("[data-package-theme]")).to_have_count(0)
             expect(get_preparation_summary.locator("[data-package-theme]")).to_have_count(0)
             expect(club_preparation_summary).to_contain_text("expired")
