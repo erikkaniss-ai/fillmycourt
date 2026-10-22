@@ -37,3 +37,23 @@ Next implementation slice requires approved official provider OAuth/redirect doc
 ## CI / isolation
 
 Mandatory Platform CI runs `platform/tests/getacourt_provider_supply_contract.test.mjs` in both fast and full regression jobs. Tests verify actor/organization isolation, unsupported keys/credential rejection, forged plans, no real HTTP/storage, no unlicensed supply, no booking actions, exact UTC/DST preservation and invalid window denial. Protected Get draft remains `[skip netlify]`, no Netlify deployment. Existing production/main, Railway and Supabase configurations untouched.
+
+
+## Phase 1 — isolated fixture-only Connected Accounts UX (22 October 2026)
+
+This Phase 1 **demo-only UX**, not provider activation, lives exclusively at `getacourt/qa/connected-accounts-demo.html`. It is deliberately not linked or loaded by `getacourt/index.html` or `getacourt/assets/app.js`, and is not published into any protected staging/production URL by this source slice.
+
+- The interface draws provider research candidates from `provider-supply-contract.js`: Playtomic, TieSports/TiePlayer, MATCHi, Racket ID and SmashPro. Every provider visibly says **Not verified**, never Connected.
+- Two explicit views separate a fictional player-account linking concept from a club-owned supply licence. Switching views resets all in-memory consent demonstration state; neither view can inherit the other's rights.
+- Demonstration buttons can mark and withdraw **demo consent only**. They are disabled for club-supply rights; no email, real player ID, passwords, tokens or personal data are collected, no OAuth redirect or booking endpoint exists. Every status retains **NOT connected**.
+- The availability result is computed using only an in-memory fictitious plan and the pure neutral `searchAvailableSlots` contract, returning **UNKNOWN / 0 slots / 0 provider requests**, not real club availability or a price quote.
+- The page has no form, storage, worker, media, external assets, analytics, integration or network transport. Its CSP sets `connect-src 'none'`, `form-action 'none'`, local `script-src 'self'` and local `style-src 'self'`. CSS is external, not inlined; `noindex` and `no-referrer` are present.
+- Native focusable buttons, clear `aria-pressed` single-select states, keyboard skip link, polite status updates, disabled controls and a local consent-withdraw action are present. No provider-owned sign-in or official permission is simulated as completed.
+
+**Verification:** `getacourt/tests/connected-accounts-contract.test.mjs` and `getacourt/tests/connected-accounts-browser.mjs` are mandatory in Platform CI. The integrated, pinned Chromium/axe-core run tests 320/390/768/1440 widths, minimum 44 px provider targets, no horizontal overflow, keyboard interaction, provider transitions, demo consent/revocation and club scope, no invented supply, zero external egress, zero storage and WCAG 2.2 A/AA tag audits. Fixture-only screenshots are uploaded to the existing `getacourt-integrated-fixture-only` CI artifact. Human assistive technology/physical mobile acceptance and real OAuth remain NOT_RUN.
+
+**CSP QA correction:** Initial integrated Chromium at 320 px exposed WCAG target-size errors because `style-src 'self'` correctly refused a previous inline stylesheet. The fix moved all styling to `getacourt/qa/connected-accounts-demo.css` without relaxing CSP and the final integrated browser suite passed 4/4 viewports. Never weaken or disable axe audits to make this demo pass.
+
+To review locally, serve the repository `getacourt/` folder using a loopback static server and open `/qa/connected-accounts-demo.html`. Do not use `file://` as the acceptance reference because of modern script/CSP semantics. This source-only demo is deliberately not registered as a menu item or feature in the consumer application.
+
+**Still gated:** named official player-delegation method, provider-approved availability license for GetACourt, exact club/provider scopes, contract/DPA, token-vault security, expiration/revocation, user consent, real app integration, approvals and hosted physical-device testing. Issue #11 remains OPEN for those stages. No provider account login, external request, vendor contact, credential, production or main merge permitted by this UI.
