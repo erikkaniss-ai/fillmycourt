@@ -59,6 +59,9 @@ try{
     assert.ok(overflow.content<=overflow.view+1,width+" horizontal overflow "+JSON.stringify(overflow));
 
     assert.equal(await page.locator("#providers button").count(),5,width+" candidate providers");
+    const touchHeights=await page.locator("#providers button").evaluateAll(buttons=>
+      buttons.map(b=>b.getBoundingClientRect().height));
+    assert.ok(touchHeights.every(h=>h>=44),width+" all provider buttons have accessible touch targets: "+touchHeights);
     assert.equal(await page.locator("#providers button[aria-pressed=true]").count(),1);
     assert.match(await page.locator("#status").innerText(),/NOT connected/);
     assert.match(await page.locator("#result").innerText(),/UNKNOWN.*0 slots/);
