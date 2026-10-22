@@ -38,6 +38,8 @@ jobs:
         run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs getacourt/tests/connected-accounts-activation-gate.test.mjs getacourt/tests/personal-booking-import.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
       - name: Offline hosted-device-OAuth preflight contracts (no hosted or production traffic)
         run: node --test getacourt/tests/acceptance-preflight.test.mjs
+      - name: Personal browser companion permission and revocation contracts
+        run: node --test getacourt/tests/personal-playtomic-reader.test.mjs
       - name: Record fail-closed preflight against exact candidate (NOT RUN, not hosted acceptance)
         env:
           GAC_REVIEW_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -96,6 +98,11 @@ jobs:
           node --test platform/control-tower/test/control_tower.test.mjs
       - name: Fast Get JS syntax and authorization boundaries
         run: |
+          node --test getacourt/tests/personal-playtomic-reader.test.mjs
+          node --check getacourt/browser-companion/background.js
+          node --check getacourt/browser-companion/capture.js
+          node --check getacourt/browser-companion/popup.js
+          node --check getacourt/assets/personal-sources.js
           node --check getacourt/assets/app.js
           node --check getacourt/assets/auth-pkce.js
           node --check getacourt/assets/commercial-signals.js
@@ -167,6 +174,8 @@ jobs:
           node --test platform/tests/getacourt_provider_supply_contract.test.mjs
       - name: Personal provider-account readiness contracts (no live API)
         run: node --test platform/tests/getacourt_provider_account_lab.test.mjs
+      - name: Personal browser companion permission and revocation contracts
+        run: node --test getacourt/tests/personal-playtomic-reader.test.mjs
       - name: Connected Accounts fixture-only UI and rights evidence contracts
         run: |
           node --check getacourt/qa/connected-accounts-demo.js
