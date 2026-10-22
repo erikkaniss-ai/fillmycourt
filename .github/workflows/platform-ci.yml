@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: '22'
       - name: Integrated accessibility, offline privacy and current-RC boundary contracts
-        run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
+        run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/tests/connected-accounts-contract.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
       - name: Offline hosted-device-OAuth preflight contracts (no hosted or production traffic)
         run: node --test getacourt/tests/acceptance-preflight.test.mjs
       - name: Record fail-closed preflight against exact candidate (NOT RUN, not hosted acceptance)
@@ -64,6 +64,11 @@ jobs:
           GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
           GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
         run: node getacourt/tests/browser-accessibility.mjs
+      - name: Isolated Connected Accounts UX Chromium and WCAG — fixture only
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+          GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
+        run: node getacourt/tests/connected-accounts-browser.mjs
       - name: Integrated unregistered module offline network-loss and exact-cache proof
         env:
           GAC_OFFLINE_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
@@ -96,6 +101,7 @@ jobs:
           node --check getacourt/assets/commercial-signals.js
           node --check getacourt/assets/provider-connection-foundation.js
           node --check getacourt/assets/provider-account-test-lab.js
+          node --check getacourt/qa/connected-accounts-demo.js
           node --experimental-strip-types --test \
             platform/tests/getacourt_booking_source_guard.test.mjs \
             platform/tests/getacourt_date_contract.test.mjs \
@@ -111,6 +117,7 @@ jobs:
             platform/tests/getacourt_provider_connection_foundation.test.mjs \
             platform/tests/getacourt_provider_supply_contract.test.mjs \
             platform/tests/getacourt_provider_account_lab.test.mjs \
+            getacourt/tests/connected-accounts-contract.test.mjs \
             platform/tests/getacourt_ci_dispatch_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
@@ -154,6 +161,10 @@ jobs:
           node --test platform/tests/getacourt_provider_supply_contract.test.mjs
       - name: Personal provider-account readiness contracts (no live API)
         run: node --test platform/tests/getacourt_provider_account_lab.test.mjs
+      - name: Connected Accounts fixture-only UI source contracts
+        run: |
+          node --check getacourt/qa/connected-accounts-demo.js
+          node --test getacourt/tests/connected-accounts-contract.test.mjs
       - name: GetACourt native-only booking source guard contracts
         run: node --test platform/tests/getacourt_booking_source_guard.test.mjs
       - name: Install isolated QA-08 browser runner (no deploy)
