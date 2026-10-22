@@ -1,5 +1,31 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Preparation beside blockers — continuation from Fillb5a1ef0
+
+The existing read-only preparation snapshots now sit immediately after their own
+blocker/scope snapshot: club UAT blockers and the separate Get preflight/missing-GO
+summary. Each is a direct labelled sibling before the detailed package summary,
+missing-part list and preparation notes, not buried inside those details. The same
+IDs, one copy per domain and H4 headings preserve accessible navigation; local
+scope/no-sending/no-approval/no-execution warnings remain visible even before review.
+
+This is placement only. Application JavaScript, source binding, validated local
+result, counters/themes, role/scope/expiry/late-result guards and blockers are
+unchanged. No duplication, new state/score/authority, extra read, storage, transport,
+control, sending, deployment or provider request. Club organisation/Operations UAT,
+Get SHA/single check, pilot and separate state-change permissions remain distinct.
+UNKNOWN is unresolved; no notes or all PRESENT still cannot issue GO or clear a
+blocker. Verified GO none; execution NOT_RUN.
+
+Node checks unique accessible placement and independent results/no extra reads on
+review/check reset. All prior denial/stale/unsafe/late-result cases remain required.
+CI loopback Chromium verifies the actual DOM parent, immediate preceding blocker,
+following detailed package, horizontal alignment and bounded vertical gap at1440px
+and320px, plus no overflow/controls/network/storage. Full-card desktop/mobile
+`fill-go-package-preparation-summary-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png`
+screenshots remain fictional source/CI evidence, not hosted/device/OAuth acceptance.
+Existing exact-SHA owner-GO deployment gate is unchanged; no new GO is recorded.
+
 ## Preparation snapshots — continuation from Fill21f53fd
 
 Each separate club/Get preparation panel now starts with a labelled read-only

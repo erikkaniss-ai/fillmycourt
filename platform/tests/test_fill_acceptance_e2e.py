@@ -346,7 +346,26 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 expect(item.locator("button, input, form, a")).to_have_count(0)
             assert page.locator("#clubUatBlockers").inner_html() == package_blockers
             assert len(calls) == package_calls
+
+            def assert_preparation_beside_own_blockers():
+                for domain, anchor, parent in [("club", "clubUatBlockers", "uat-blockers"), ("get", "acceptanceSummary", "acceptance-summary")]:
+                    panel = page.locator(f".{domain}-package-preparation-summary-panel")
+                    expect(panel).to_have_count(1)
+                    expect(page.locator(f"#{domain}PackageStepsSummary")).to_have_count(1)
+                    expect(panel.locator(f"h4#{domain}PackageStepsSummaryHeading")).to_have_count(1)
+                    assert panel.evaluate("(e,a)=>e.parentElement.classList.contains(a.parent) && e.previousElementSibling.id===a.anchor && e.nextElementSibling.classList.contains(a.next)", {
+                        "parent": parent, "anchor": anchor, "next": f"{domain}-package-summary-panel",
+                    })
+                    expect(panel).to_contain_text("Nothing is sent, approved or executed here")
+                    expect(panel.locator("button, input, form, a")).to_have_count(0)
+                    box, blocker_box = panel.bounding_box(), page.locator(f"#{anchor}").bounding_box()
+                    assert abs(box["x"] - blocker_box["x"]) <= 1
+                    assert 0 <= box["y"] - (blocker_box["y"] + blocker_box["height"]) <= 48
+                    detail_box = page.locator(f".{domain}-package-summary-panel").bounding_box()
+                    assert box["y"] + box["height"] <= detail_box["y"]
+
             page.set_viewport_size({"width": 1440, "height": 1000})
+            assert_preparation_beside_own_blockers()
             for domain in ["club", "get"]:
                 panel = page.locator(f".{domain}-package-panel")
                 panel.screenshot(path=str(screenshots / f"fill-go-package-{domain}-desktop-FIXTURE-ONLY.png"))
@@ -361,6 +380,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             assert get_summary_box["y"] >= summary.bounding_box()["y"]
             page.set_viewport_size({"width": 320, "height": 900})
             assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
+            assert_preparation_beside_own_blockers()
             for domain in ["club", "get"]:
                 page.locator(f".{domain}-package-panel").evaluate("e=>e.scrollIntoView({block:'start'})")
                 page.screenshot(path=str(screenshots / f"fill-go-package-{domain}-mobile-FIXTURE-ONLY.png"))

@@ -430,3 +430,16 @@ controls, sending or execution. Source/CI tests include all seven Get catalogs,
 scope/late-result/denied/stale clearing, exact totals and fictional desktop/320px
 Chromium snapshots. Hosted/device/OAuth acceptance remains NOT_RUN; pilot GO
 NOT_GRANTED. Existing deployment gate and Control Tower are not changed.
+
+### Preparation snapshots beside blockers — continued from b5a1ef0
+
+The same two read-only preparation snapshots are moved directly after club UAT
+blockers and the independent Get preflight/missing-GO snapshot, before each detailed
+package. One labelled H4 region per domain, no duplicate summaries or renderer.
+Static warnings retain local scope and no sending/approval/execution. Application
+JavaScript and all counts, guards, underlying notes and blockers are unchanged.
+Node checks unique semantic placement and independent local results; CI Chromium
+asserts direct siblings, actual desktop/320px geometry, no overflow or controls,
+and preserves all existing denial/expiry/late-result and fixture-only safety checks.
+No new reads, state, transport, GO, deploy or provider access. Hosted/device/OAuth
+acceptance remains NOT_RUN and pilot GO NOT_GRANTED; Control Tower untouched.

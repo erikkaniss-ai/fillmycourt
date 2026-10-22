@@ -68,6 +68,11 @@
             <h3 id="clubUatBlockerHeading">UAT blockers and unverified gates</h3>
             <p class="muted">Read-only, based on the separate summary snapshots above. This is not a complete UAT checklist, a live assessment or permission to start UAT. Unverified conditions stay unresolved; nothing can be approved or repaired here.</p>
             <div id="clubUatBlockers" role="status" aria-live="polite" aria-atomic="true"></div>
+            <section class="package-preparation-summary-panel club-package-preparation-summary-panel" aria-labelledby="clubPackageStepsSummaryHeading">
+              <h4 id="clubPackageStepsSummaryHeading">Preparation snapshot — club</h4>
+              <p class="muted">Read-only local club UAT preparation, not pilot or GetACourt GO. Nothing is sent, approved or executed here.</p>
+              <div id="clubPackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
             <section class="go-next-panel package-summary-panel club-package-summary-panel" aria-labelledby="clubPackageSummaryHeading">
               <h4 id="clubPackageSummaryHeading">GO package snapshot — club</h4>
               <p class="muted">Only the last local club manifest checked below. No combined readiness, verified GO or pilot permission.</p>
@@ -80,10 +85,6 @@
               <section class="package-preparation-panel club-package-preparation-panel" aria-labelledby="clubPackageStepsHeading">
                 <h5 id="clubPackageStepsHeading">Missing-part preparation — club</h5>
                 <p class="muted">Read-only planning for this club UAT manifest only, not pilot or GetACourt GO. No collection, sending, assignment or execution. UNKNOWN stays unresolved; nothing here verifies approval.</p>
-                <section class="package-preparation-summary-panel club-package-preparation-summary-panel" aria-labelledby="clubPackageStepsSummaryHeading">
-                  <h6 id="clubPackageStepsSummaryHeading">Preparation snapshot — club</h6>
-                  <div id="clubPackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"></div>
-                </section>
                 <div id="clubPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
               </section>
             </section>
@@ -113,6 +114,11 @@
             <p class="read-only-notice"><strong>No verified GO. All real checks remain NOT_RUN.</strong> Separate from the club blockers: candidate-wide evidence cannot grant club UAT/pilot GO, provider rights or deployment authority.</p>
             <p class="muted">Only summarises the local report explicitly reviewed below. No automatic file/API read, combined assessment, readiness score or action.</p>
             <div id="acceptanceSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            <section class="package-preparation-summary-panel get-package-preparation-summary-panel" aria-labelledby="getPackageStepsSummaryHeading">
+              <h4 id="getPackageStepsSummaryHeading">Preparation snapshot — GetACourt</h4>
+              <p class="muted">Read-only preparation for one local Get check, not club UAT, pilot or combined GO. Nothing is sent, approved or executed here.</p>
+              <div id="getPackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
             <section class="go-next-panel package-summary-panel get-package-summary-panel" aria-labelledby="getPackageSummaryHeading">
               <h4 id="getPackageSummaryHeading">GO package snapshot — GetACourt</h4>
               <p class="muted">One explicitly reviewed local Get package/check only, not club evidence, permission or a combined GO.</p>
@@ -125,10 +131,6 @@
               <section class="package-preparation-panel get-package-preparation-panel" aria-labelledby="getPackageStepsHeading">
                 <h5 id="getPackageStepsHeading">Missing-part preparation — GetACourt</h5>
                 <p class="muted">Read-only planning for this one Get check only, never club UAT or pilot GO. No collection, sending, assignment or execution. Device, OAuth and location permissions remain separate.</p>
-                <section class="package-preparation-summary-panel get-package-preparation-summary-panel" aria-labelledby="getPackageStepsSummaryHeading">
-                  <h6 id="getPackageStepsSummaryHeading">Preparation snapshot — GetACourt</h6>
-                  <div id="getPackageStepsSummary" role="status" aria-live="polite" aria-atomic="true"></div>
-                </section>
                 <div id="getPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
               </section>
             </section>

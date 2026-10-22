@@ -747,3 +747,34 @@ test("Preparation snapshot regions are labelled, escaped and pure presentation o
   for(const literal of ["esc(organisation)","esc(ctx.sha)","esc(ctx.check)","esc(label)"])assert.ok(helper.includes(literal));
   assert.doesNotMatch(helper,/\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|state\.|goPackageState|<button|<form|<input|<a |\.addEventListener|\.submit\(/);
 });
+
+test("One accessible preparation snapshot is immediately beside its own blockers, before detailed packages, never duplicated",()=>{
+  const html=readFileSync("platform/public/fill/index.html","utf8"),css=readFileSync("platform/public/fill/styles.css","utf8");
+  for(const [domain,anchor] of [["club","clubUatBlockers"],["get","acceptanceSummary"]]){
+    const marker='id="'+domain+'PackageStepsSummary"',panel='<section class="package-preparation-summary-panel '+domain+'-package-preparation-summary-panel"';
+    assert.equal(html.split(marker).length-1,1);assert.equal(html.split('id="'+domain+'PackageStepsSummaryHeading"').length-1,1);
+    assert.match(html,new RegExp('id="'+anchor+'"[^>]*><\\/div>\\s*'+panel));
+    const start=html.indexOf(panel),end=html.indexOf("</section>",start),region=html.slice(start,end+10);
+    assert.match(region,new RegExp('<h4 id="'+domain+'PackageStepsSummaryHeading">'));
+    assert.match(region,/Nothing is sent, approved or executed here/);
+    assert.match(region,new RegExp(marker+' role="status" aria-live="polite" aria-atomic="true"'));
+    assert.doesNotMatch(region,/<(?:button|input|form|a)\b/);
+    assert.ok(start<html.indexOf('id="'+domain+'PackageSummary"'));
+    assert.ok(start<html.indexOf('id="'+domain+'PackageStepsHeading"'));
+    assert.match(html.slice(end+10),new RegExp('^\\s*<section class="go-next-panel package-summary-panel '+domain+'-package-summary-panel"'));
+  }
+  assert.match(css,/\.package-preparation-summary-panel h4 \{ font-size:14px; margin:0 0 8px/);
+});
+
+test("Adjacent preparation snapshots preserve separate results and blockers across local reviews and single-Get-check reset",async()=>{
+  const h=await packageHarness(),calls=h.calls.length,blockers=h.get("#clubUatBlockers").innerHTML,candidate=h.summary();
+  for(const d of ["club","get"])assert.match(h.packageStepsSummary(d),/No local package reviewed/);
+  await h.selectPackage("club",clubPackage);await h.packageReview("club");const club=h.packageStepsSummary("club"),notes=h.packageSteps("club"),missing=h.packageMissing("club"),summary=h.packageSummary("club");
+  assert.match(club,/Preparation notes: <strong>12<\/strong>; 11 MISSING; 1 UNKNOWN/);
+  await h.selectPackage("get",getPackage);await h.packageReview("get");const get=h.packageStepsSummary("get");
+  assert.match(get,/Absence of notes is not approval/);assert.match(get,/Verified GO: none\. Execution NOT_RUN/);
+  assert.equal(h.packageStepsSummary("club"),club);await h.check("hosted-ui");
+  assert.doesNotMatch(h.packageStepsSummary("get"),/Preparation notes:|Get SHA:|data-package-preparation-group=/);
+  assert.equal(h.packageStepsSummary("club"),club);assert.equal(h.packageSteps("club"),notes);assert.equal(h.packageMissing("club"),missing);assert.equal(h.packageSummary("club"),summary);
+  assert.equal(h.get("#clubUatBlockers").innerHTML,blockers);assert.equal(h.summary(),candidate);assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
