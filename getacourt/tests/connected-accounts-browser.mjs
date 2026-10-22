@@ -16,6 +16,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const allowed=new Map([
   ["/qa/connected-accounts-demo.html","text/html; charset=utf-8"],
   ["/qa/connected-accounts-demo.js","text/javascript; charset=utf-8"],
+  ["/qa/connected-accounts-demo.css","text/css; charset=utf-8"],
   ["/assets/provider-supply-contract.js","text/javascript; charset=utf-8"]
 ]);
 const badRequests=[];
