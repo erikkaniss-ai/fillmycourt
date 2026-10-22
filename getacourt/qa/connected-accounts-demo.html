@@ -9,6 +9,7 @@
   <title>Connected Accounts | GetACourt fixture-only UX</title>
   <link rel="stylesheet" href="./connected-accounts-demo.css">
   <script src="../assets/provider-supply-contract.js" defer></script>
+  <script src="./connected-accounts-lifecycle.js" defer></script>
   <script src="./connected-accounts-demo.js" defer></script>
 </head>
 <body>
@@ -52,6 +53,8 @@
         <ul id="next" aria-labelledby="nextHeading"></ul>
         <div class="controls">
           <button id="consentButton" type="button" class="action">Record demo consent</button>
+          <button id="expireButton" type="button" class="action secondary" disabled>Simulate expiry</button>
+          <button id="reconnectButton" type="button" class="action secondary" disabled>Request demo reconnect</button>
           <button id="withdrawButton" type="button" class="action secondary" disabled>Withdraw demo consent</button>
         </div>
         <p id="scopeMessage" class="small muted">Demo-only consent is not real OAuth, provider authorization or a saved account.</p>
