@@ -1,5 +1,36 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Read-only theme state filters — continuation from Fill6dd77d8
+
+Each club/Get preparation card has its own labelled native state selector:
+MISSING + UNKNOWN (default), MISSING only, UNKNOWN only. It is enabled only for
+a current owner/admin-scoped reviewed result with unresolved notes; invalid,
+unreviewed/loading/rejected/expired/all-PRESENT contexts disable it and reset ALL.
+Source/check/org/auth/role/tab/file changes and late results retain the existing
+fail-closed guards. A change rechecks local context/freshness, never reads a file,
+API, document or provider, and cannot revive invalid notes or run a check.
+
+Only themed-step visibility changes through scoped CSS. Snapshot/theme counts,
+blockers and the alternative full-notes view remain unfiltered and unchanged;
+original reviewed rows are never mutated. The filtered shown/total count and
+zero-match per-theme notices explicitly retain hidden rows as unresolved, not
+complete, proven absent or GO. Empty themes for the selected state remain visible
+with their original totals and explanation. Multiple open themes/native focus
+survive filtering without replacing DOM. Club/Get selections remain independent,
+local and ephemeral; no storage, schema, parser, joined assessment or authority.
+Verified GO none, execution NOT_RUN, pilot GO NOT_GRANTED.
+
+Node covers exact mixed/zero-match counts across all seven Get catalogs, allowed
+filter values, defaults/denials/scope resets, stale/loading/late results, unchanged
+markup/full notes/blockers and no new reads/storage. Loopback Chromium additionally
+checks actual row visibility/zero-match messages, native keyboard/focus, independent
+open themes, unfiltered full notes and expiry on filter change. Four new
+`fill-go-package-theme-filter-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png` cards
+show club MISSING and Get UNKNOWN independently at1440/320px, preserving previous
+theme/full-note/collapsed and safety checks. Fictional source/CI evidence only;
+no hosted/device/OAuth acceptance, sending, deploy, production or provider request.
+Workflow/old exact-SHA approval and frozen Control Tower remain untouched.
+
 ## Read-only preparation themes — continuation from Fill85b060f
 
 Each non-empty review theme in the separate club/Get preparation snapshots now

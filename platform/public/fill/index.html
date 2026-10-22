@@ -71,6 +71,13 @@
             <section class="package-preparation-summary-panel club-package-preparation-summary-panel" aria-labelledby="clubPackageStepsSummaryHeading">
               <h4 id="clubPackageStepsSummaryHeading">Preparation snapshot — club</h4>
               <p id="clubPackageDisclosureHelp" class="muted">Read-only local club UAT preparation, not pilot or GetACourt GO. Nothing is sent, approved or executed here.</p>
+              <label class="theme-filter" for="clubPackageThemeFilter">Theme step state — club
+                <select id="clubPackageThemeFilter" aria-describedby="clubPackageThemeFilterHelp" disabled>
+                  <option value="ALL">MISSING + UNKNOWN</option><option value="MISSING">MISSING only</option><option value="UNKNOWN">UNKNOWN only</option>
+                </select>
+              </label>
+              <p id="clubPackageThemeFilterHelp" class="muted">Local view filter only. Snapshot/theme totals and full notes stay unfiltered. Hidden notes remain unresolved; no GO.</p>
+              <div id="clubPackageThemeFilterStatus" role="status" aria-live="polite" aria-atomic="true"></div>
               <div id="clubPackageStepsSummary"></div>
               <details id="clubPackageStepsDisclosure" class="go-package-disclosure" hidden>
                 <summary aria-describedby="clubPackageDisclosureHelp">Show read-only preparation notes — club</summary>
@@ -120,6 +127,13 @@
             <section class="package-preparation-summary-panel get-package-preparation-summary-panel" aria-labelledby="getPackageStepsSummaryHeading">
               <h4 id="getPackageStepsSummaryHeading">Preparation snapshot — GetACourt</h4>
               <p id="getPackageDisclosureHelp" class="muted">Read-only preparation for one local Get check, not club UAT, pilot or combined GO. Nothing is sent, approved or executed here.</p>
+              <label class="theme-filter" for="getPackageThemeFilter">Theme step state — GetACourt
+                <select id="getPackageThemeFilter" aria-describedby="getPackageThemeFilterHelp" disabled>
+                  <option value="ALL">MISSING + UNKNOWN</option><option value="MISSING">MISSING only</option><option value="UNKNOWN">UNKNOWN only</option>
+                </select>
+              </label>
+              <p id="getPackageThemeFilterHelp" class="muted">Local view filter only. Snapshot/theme totals and full notes stay unfiltered. Hidden notes remain unresolved; no GO.</p>
+              <div id="getPackageThemeFilterStatus" role="status" aria-live="polite" aria-atomic="true"></div>
               <div id="getPackageStepsSummary"></div>
               <details id="getPackageStepsDisclosure" class="go-package-disclosure" hidden>
                 <summary aria-describedby="getPackageDisclosureHelp">Show read-only preparation notes — GetACourt</summary>

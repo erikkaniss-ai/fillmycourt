@@ -474,3 +474,18 @@ filtered counts/catalogs, native keyboard/focus, independence, expiry and actual
 desktop/320px evidence. No new schema, transport, execution, sending, deploy,
 production, provider request or Control Tower change. Source/CI only; hosted/device/
 OAuth NOT_RUN, verified GO none, pilot GO NOT_GRANTED. See the boundary notes above.
+
+### Read-only theme state filters — continued from 6dd77d8
+
+Independent club/Get native selectors filter themed steps to MISSING, UNKNOWN or
+both (default), only for a current reviewed unresolved local result. Scope loss,
+new/loading/rejected/expired/all-PRESENT data resets/disables the filter. Changes
+recheck local guards, never read files/APIs/documents or run checks. Scoped CSS
+changes visibility only: original/theme counts, blockers, full notes and native
+open/focus choices remain unchanged. Shown/total and zero-match notices explicitly
+retain hidden states as unresolved, never completeness or GO. No persistent state,
+new schema/parser, transport, authority, sending, deploy, production/provider or
+Control Tower changes. Node and loopback Chromium extend mixed/zero-state counts,
+all seven catalogs, keyboard/visibility/focus, independence, resets/expiry/late
+results and desktop/320px evidence. Source/CI only; hosted/device/OAuth NOT_RUN,
+verified GO none, pilot GO NOT_GRANTED. See `docs/fill-local-acceptance-viewer.md`.

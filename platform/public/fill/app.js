@@ -1108,6 +1108,8 @@
     missing: q("#" + domain + "PackageMissing"),
     steps: q("#" + domain + "PackageSteps"),
     stepsSummary: q("#" + domain + "PackageStepsSummary"),
+    themeFilter: q("#" + domain + "PackageThemeFilter"),
+    themeFilterStatus: q("#" + domain + "PackageThemeFilterStatus"),
     disclosure: q("#" + domain + "PackageStepsDisclosure"),
   }]));
   const goPackageCheck = q("#getPackageCheck");
@@ -1226,8 +1228,23 @@
         const items = unresolved.filter(row => ids.includes(row.id));
         return items.length ? `<li data-package-preparation-group="${id}"><details class="go-package-disclosure go-package-theme" data-package-theme="${id}">` +
           `<summary aria-describedby="${domain}PackageDisclosureHelp" data-package-theme-count="${id}">${domain === "club" ? "Club" : "GetACourt"} — ${esc(label)}: ${items.filter(row => row.status === "MISSING").length} MISSING; ${items.filter(row => row.status === "UNKNOWN").length} UNKNOWN.</summary>` +
-          `<div data-package-theme-notes="${id}">${goPackageStepsHTML(items, domain)}</div></details></li>` : "";
+          `<div data-package-theme-notes="${id}">${["MISSING", "UNKNOWN"].filter(status => !items.some(row => row.status === status)).map(status =>
+            `<p class="theme-filter-empty" data-package-theme-empty="${status}">No ${status} notes in this theme. Other states remain unresolved and are only hidden by this view filter; this is not completeness or GO.</p>`).join("")}${goPackageStepsHTML(items, domain)}</div></details></li>` : "";
       }).join("") + "</ul>";
+  }
+  // View only: scoped CSS hides the opposite state, never mutates reviewed rows,
+  // summary totals, full notes or native theme open/focus choices.
+  function applyGoPackageThemeFilter(domain, rows = []) {
+    const ui = goPackageUI[domain], control = ui.themeFilter;
+    const unresolved = rows.filter(row => ["MISSING", "UNKNOWN"].includes(row.status));
+    const active = unresolved.length > 0;
+    const selected = active && ["ALL", "MISSING", "UNKNOWN"].includes(control?.value) ? control.value : "ALL";
+    if (control) { control.value = selected; control.disabled = !active; }
+    if (ui.stepsSummary) ui.stepsSummary.dataset.packageThemeFilter = selected;
+    const shown = unresolved.filter(row => selected === "ALL" || row.status === selected).length;
+    if (ui.themeFilterStatus) ui.themeFilterStatus.textContent = active
+      ? `Theme filter ${selected === "ALL" ? "MISSING + UNKNOWN" : selected}: showing ${shown} of ${unresolved.length} unresolved notes. Snapshot/theme totals and full notes are unfiltered. Hidden notes remain unresolved. Verified GO: none. Execution NOT_RUN.`
+      : "";
   }
   // Presentation only of one domain's existing local result, never a GO decision.
   function renderGoPackageSummary(domain, ctx = packageContext(domain)) {
@@ -1244,6 +1261,7 @@
       if (stepsTarget) stepsTarget.textContent = message ? message + " No missing-part preparation notes inferred." : "";
       if (stepsSummaryTarget) stepsSummaryTarget.textContent = message ? message + " No preparation summary inferred." : "";
       goPackageUI[domain].stepsSummaryHTML = null;
+      applyGoPackageThemeFilter(domain);
       if (message) closeDisclosure();
     };
     if (state.view !== "provenance" || !state.org || (!state.demo && !state.token)) { empty(""); closeDisclosure(); return; }
@@ -1291,6 +1309,7 @@
       stepsSummaryTarget.innerHTML = summaryHTML;
       goPackageUI[domain].stepsSummaryHTML = summaryHTML;
     }
+    applyGoPackageThemeFilter(domain, r.rows);
     // Native view-only disclosure: never open automatically or retain an invalid scope.
     // A still-current opposite-domain result keeps its own user's open/closed choice.
     if (disclosure) {
@@ -1400,6 +1419,8 @@
     ui.stepsSummary?.addEventListener("toggle", event => {
       if (event.target?.matches("details[data-package-theme]") && event.target.open) syncGoPackages();
     }, true);
+    // Revalidate local context/expiry first; disabled or stale controls cannot revive notes.
+    ui.themeFilter?.addEventListener("change", () => syncGoPackages());
   }
   goPackageCheck?.addEventListener("change", () => {clearGoPackage("get");syncGoPackages();});
 
