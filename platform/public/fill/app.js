@@ -1385,6 +1385,8 @@
       if (!goPackageState[domain].loading) return reviewGoPackage(domain);
     });
     ui.file?.addEventListener("change", () => {clearGoPackage(domain, goPackageState[domain].key, false);syncGoPackages();});
+    // Opening is a local guard recheck only, never a new evidence/file/API read.
+    ui.disclosure?.addEventListener("toggle", () => { if (ui.disclosure.open) syncGoPackages(); });
   }
   goPackageCheck?.addEventListener("change", () => {clearGoPackage("get");syncGoPackages();});
 

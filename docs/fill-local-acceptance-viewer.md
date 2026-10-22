@@ -15,13 +15,15 @@ manifest with unresolved notes exposes its own closed disclosure. All PRESENT/no
 notes exposes no disclosure and still means independent original-evidence/authority
 review, not verified GO. The UI never opens a disclosure automatically. A user may
 open/close both independently; unrelated valid opposite-domain renders preserve
-that domain's choice. Open state is ephemeral DOM presentation, not persisted.
+that domain's choice. Opening triggers only a local scope/result/freshness recheck
+of existing state, never another file/API read. Open state is ephemeral DOM
+presentation, not persisted.
 
 Existing scope/result guards close and hide the affected disclosure on file change,
 loading, rejection, expiry, source/check/organisation/auth/tab change, refresh or
 scope loss. Notes are cleared by the same guarded renderer; a late invalidated read
-cannot reopen them or close a newer valid result. Existing render/read-triggered
-expiry is unchanged, not a new timer or trusted revocation monitor. Existing
+cannot reopen them or close a newer valid result. Expiry is checked on existing
+renders/reads and disclosure opening, not a new timer or trusted revocation monitor. Existing
 blockers stay open; verified GO none, execution NOT_RUN, no pilot permission.
 
 Node checks native semantics, single notes region, eligibility, independent open

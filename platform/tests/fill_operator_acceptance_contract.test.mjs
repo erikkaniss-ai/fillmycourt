@@ -799,6 +799,7 @@ test("Summary disclosures use native independent closed details and one existing
   assert.match(css,/\.go-package-disclosure > summary:focus-visible/);
   const render=source.slice(source.indexOf("  function renderGoPackageSummary("),source.indexOf("  function clearGoPackage("));
   assert.doesNotMatch(render,/\.open\s*=\s*true|\.addEventListener|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval/);
+  assert.match(source,/ui\.disclosure\?\.addEventListener\("toggle", \(\) => \{ if \(ui\.disclosure\.open\) syncGoPackages\(\); \}\)/);
 });
 
 test("Only current unresolved owner/admin packages expose a closed disclosure; opposite scope preserves its native open choice",async()=>{
@@ -807,7 +808,7 @@ test("Only current unresolved owner/admin packages expose a closed disclosure; o
     await h.ops();await h.select();await h.review();await h.check();const calls=h.calls.length,blockers=h.get("#clubUatBlockers").innerHTML,candidate=h.summary();
     await h.selectPackage("club",clubPackage);await h.packageReview("club");assert.equal(h.disclosure("club").hidden,false);assert.equal(h.disclosure("club").open,false);
     // Model a native user toggle; Chromium separately verifies keyboard behaviour.
-    h.disclosure("club").open=true;const club=h.packageSteps("club");await h.selectPackage("get",getPackage);await h.packageReview("get");
+    h.disclosure("club").open=true;await h.disclosure("club").run("toggle");const club=h.packageSteps("club");await h.selectPackage("get",getPackage);await h.packageReview("get");
     assert.equal(h.disclosure("club").open,true);assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
     const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");
     assert.equal(h.disclosure("get").hidden,false);assert.equal(h.disclosure("get").open,false);h.disclosure("get").open=true;
@@ -842,7 +843,7 @@ test("New/loading/rejected/expired files cannot retain or reopen a previous disc
   const run=h.packageReview("get");await settle();assert.equal(h.disclosure("get").hidden,true);
   wait.reject(Error("SECRET"));await run;assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
   await h.selectPackage("get",d);await h.packageReview("get");assert.equal(h.disclosure("get").open,false);h.disclosure("get").open=true;
-  h.setNow(NOW+60*60*1000);await h.get("#operationsSha").run("input");assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);
+  const calls=h.calls.length;h.setNow(NOW+60*60*1000);await h.disclosure("get").run("toggle");assert.equal(h.disclosure("get").hidden,true);assert.equal(h.disclosure("get").open,false);assert.equal(h.calls.length,calls);
 });
 
 test("Late failed local review cannot hide or close a newer current opened disclosure",async()=>{

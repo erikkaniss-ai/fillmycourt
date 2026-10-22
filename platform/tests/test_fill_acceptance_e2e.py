@@ -287,8 +287,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(club_preparation).to_be_hidden()
             club_toggle.focus()
             club_toggle.press("Enter")
-            assert club_disclosure.evaluate("e=>e.open") is True
             expect(club_preparation).to_be_visible()
+            assert club_disclosure.evaluate("e=>e.open") is True
             club_package_before = club_result.inner_html()
             page.get_by_label("GetACourt package check", exact=True).select_option("google-oauth")
             inspect_package("get", GET_PACKAGE)
