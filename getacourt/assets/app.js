@@ -23,6 +23,7 @@
     profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
     profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
+    profileImportBookings:q("#profileImportBookingsButton"),
     nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote"),
     sortSelect:q("#sortSelect"), listView:q("#listViewButton"), mapView:q("#mapViewButton"),
     resultsMap:q("#resultsMap"), quickPicks:q("#quickPicks"), venueDialog:q("#venueDialog"),
@@ -956,6 +957,10 @@
   el.profileForm.addEventListener("submit",saveProfile);
   el.closeProfile.addEventListener("click",()=>el.profileDialog.close());
   el.profileSignOut.addEventListener("click",signOut);
+  el.profileImportBookings?.addEventListener("click",()=>{
+    if(el.profileDialog?.open)el.profileDialog.close();
+    openPersonalImports();
+  });
   window.addEventListener("storage",event=>{
     if(event.key==="gac.session" && event.storageArea===localStorage)syncExternalSession();
   });
