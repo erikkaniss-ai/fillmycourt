@@ -84,7 +84,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             club_preparation, get_preparation = page.locator("#clubPackageSteps"), page.locator("#getPackageSteps")
             club_preparation_summary, get_preparation_summary = page.locator("#clubPackageStepsSummary"), page.locator("#getPackageStepsSummary")
             club_disclosure, get_disclosure = page.locator("#clubPackageStepsDisclosure"), page.locator("#getPackageStepsDisclosure")
-            club_toggle, get_toggle = club_disclosure.locator("summary"), get_disclosure.locator("summary")
+            club_preparation_toggle, get_preparation_toggle = club_disclosure.locator("summary"), get_disclosure.locator("summary")
             for item in [club_disclosure, get_disclosure]:
                 expect(item).to_be_hidden()
                 assert item.evaluate("e=>e.open") is False
@@ -285,8 +285,9 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(club_disclosure).to_be_visible()
             assert club_disclosure.evaluate("e=>e.open") is False
             expect(club_preparation).to_be_hidden()
-            club_toggle.focus()
-            club_toggle.press("Enter")
+            expect(club_preparation_toggle).to_have_text("Show read-only preparation notes — club")
+            club_preparation_toggle.focus()
+            club_preparation_toggle.press("Enter")
             expect(club_preparation).to_be_visible()
             assert club_disclosure.evaluate("e=>e.open") is True
             club_package_before = club_result.inner_html()
@@ -350,15 +351,16 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(get_disclosure).to_be_visible()
             assert get_disclosure.evaluate("e=>e.open") is False
             expect(get_preparation).to_be_hidden()
-            get_toggle.focus()
-            get_toggle.press("Enter")
+            expect(get_preparation_toggle).to_have_text("Show read-only preparation notes — GetACourt")
+            get_preparation_toggle.focus()
+            get_preparation_toggle.press("Enter")
             expect(get_preparation).to_be_visible()
             assert get_disclosure.evaluate("e=>e.open") is True
-            get_toggle.press("Enter")
+            get_preparation_toggle.press("Enter")
             expect(get_preparation).to_be_hidden()
             assert get_disclosure.evaluate("e=>e.open") is False
             assert club_disclosure.evaluate("e=>e.open") is True
-            get_toggle.press("Enter")
+            get_preparation_toggle.press("Enter")
             expect(get_preparation).to_be_visible()
             assert club_preparation_summary.inner_html() == club_preparation_summary_before
             assert club_preparation.inner_html() == club_preparation_before
@@ -434,8 +436,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 page.locator(f".{domain}-package-preparation-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-preparation-summary-{domain}-mobile-FIXTURE-ONLY.png"))
             bad_package = copy.deepcopy(GET_PACKAGE)
             bad_package["token"] = "PRIVATE_SECRET<img>"
-            club_toggle.click()
-            get_toggle.click()
+            club_preparation_toggle.click()
+            get_preparation_toggle.click()
             assert club_disclosure.evaluate("e=>e.open") is True
             assert get_disclosure.evaluate("e=>e.open") is True
             inspect_package("get", bad_package)
