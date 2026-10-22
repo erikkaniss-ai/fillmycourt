@@ -50,6 +50,9 @@ try {
     await page.reload();
     await page.locator('.project-card').first().waitFor();
     assert.equal(await page.locator('.project-card').count(), 6);
+    assert.equal(await page.locator('#projects > .project-card').count(),4);
+    assert.equal(await page.locator('#dependencies > .project-card').count(),2);
+    assert.equal(await page.locator('.infrastructure-details').getAttribute('open'),null);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.match(await page.locator('.progress-label').first().innerText(), /0%\s+принято MVP\s+100%\s+до полной приёмки/);
     assert.match(await page.locator('#rollup').innerText(), /100% до полной приёмки MVP/);
