@@ -126,6 +126,14 @@ function renderProject(project) {
 
   if (project.evidenceReview) root.querySelector('.progress-note').textContent +=
     ' Decision evidence reviewed: ' + formatTime(project.evidenceReview.reviewedAt) + '. Scope: ' + (project.evidenceReview.scope || 'manual review') + '.';
+  if(project.delivery){
+    const delivery=project.delivery;
+    root.querySelector('.pilot-summary').hidden=false;
+    root.querySelector('.pilot-status').textContent='Рабочий запуск пилота: '+(delivery.launchStatus==='BLOCKED'?'НЕ ГОТОВ · BLOCKED':'UNKNOWN');
+    root.querySelector('.pilot-goal').textContent=delivery.pilotGoal||project.target||'Состав пилота не подтверждён.';
+    root.querySelector('.pilot-blockers').innerHTML=delivery.blockers.map(row=>'<li>'+escapeHtml(row.name)+(row.owner?' — '+escapeHtml(row.owner):'')+(row.go?' · GO: '+escapeHtml(row.go):'')+'</li>').join('');
+    root.querySelector('.pilot-next').textContent=delivery.nextGate?'Далее: '+delivery.nextGate:'';
+  }
   renderGithub(root.querySelector(".live-source"), project.githubLive);
   const tracked = project.githubLive?.state === 'actual_verified'
     ? (project.githubLive.pullRequests || [project.githubLive]) : [];
@@ -172,6 +180,11 @@ function render(snapshot) {
   const projects = document.querySelector("#projects");
   projects.replaceChildren(...snapshot.projects.filter(p=>!p.kind||p.kind==='product').map(renderProject));
   document.querySelector('#dependencies').replaceChildren(...snapshot.projects.filter(p=>p.kind&&p.kind!=='product').map(renderProject));
+  for(const [key,sectionId,listId] of [['active','roadmap','active-directions'],['future','future-roadmap','future-services']]){
+    const rows=snapshot.projects.flatMap(project=>(project.delivery?.[key]||[]).map(row=>({...row,project})));
+    document.querySelector('#'+sectionId).hidden=!rows.length;
+    document.querySelector('#'+listId).innerHTML=rows.map(row=>'<article class="roadmap-item"><h3>'+escapeHtml(row.name)+'</h3><span class="roadmap-status">'+(key==='active'?'Активное направление':'План / backlog')+' · % UNKNOWN</span><p>'+escapeHtml(row.scope)+'</p>'+(row.gate?'<p class="roadmap-gate">Блокер: '+escapeHtml(row.gate)+'</p>':'')+'<details><summary>Источник решения</summary>'+row.project.delivery.sourceLinks.map(link=>'<p>'+safeLink(link.url,link.title)+'</p>').join('')+'</details></article>').join('');
+  }
 }
 
 async function start() {

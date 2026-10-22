@@ -41,6 +41,11 @@ try {
     reviewedAt: '2026-01-01T00:00:00Z', reviewer: 'Fictional reviewer', scope: 'Synthetic decision review',
     blocked: ['Reviewer: missing exact artifact acceptance; do not infer completion.'],
     brief: 'Кратко: полная приёмка MVP ещё не подтверждена.',
+    delivery: {pilotGoal:'Fictional working pilot',launchStatus:'READY',launchApproved:true,
+      blockers:[{name:'Fictional missing hosted receipt',owner:'QA'}],nextGate:'Review exact hosted candidate',
+      active:[{name:'Fictional active direction',scope:'Synthetic bounded core',progress:100}],
+      future:[{name:'Fictional future service',scope:'Outside basic MVP',progress:100,gate:'Separate scope approval'}],
+      sourceLinks:[{title:'Unsafe link',url:'javascript:alert(1)'}]},
     links: [{title: 'Untrusted protocol must not become a link', url: 'javascript:alert(1)'}]
   }};
   const fixture = await buildSnapshot(config, { approvedModel });
@@ -58,6 +63,12 @@ try {
     assert.match(await page.locator('#rollup').innerText(), /100% до полной приёмки MVP/);
     assert.match(await page.locator('.mvp-uncertainty').first().innerText(), /100% \(UNKNOWN\)/);
     assert.match(await page.locator('.mvp-brief').first().innerText(), /полная приёмка MVP/);
+    assert.match(await page.locator('.pilot-status').first().innerText(),/UNKNOWN/);
+    assert.match(await page.locator('.pilot-goal').first().innerText(),/Fictional working pilot/);
+    assert.equal(await page.locator('#active-directions .roadmap-item').count(),1);
+    assert.equal(await page.locator('#future-services .roadmap-item').count(),1);
+    assert.match(await page.locator('#future-services').innerText(),/% UNKNOWN/);
+    assert.doesNotMatch(await page.locator('#future-services').innerText(),/100%|READY/);
     assert.equal(await page.locator('.technical-details').first().getAttribute('open'), null);
     await page.locator('.technical-details > summary').first().click();
     assert.match(await page.locator('.project-card').first().innerText(), /Reviewer: missing exact artifact acceptance/);

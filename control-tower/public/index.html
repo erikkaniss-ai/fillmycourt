@@ -13,7 +13,7 @@
         <div>
           <p class="eyebrow">Закрытый обзор владельца · только чтение</p>
           <h1>Development Control Tower</h1>
-          <p class="subhead">Прогресс до MVP: что принято и сколько ещё осталось подтвердить.</p>
+          <p class="subhead">MVP для рабочего пилота: подтверждённые работы, блокеры запуска и дальнейшие направления.</p>
         </div>
         <div id="freshness" class="freshness" aria-live="polite">Loading verified sources…</div>
       </header>
@@ -22,13 +22,15 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Все проекты</p>
-            <h2 id="portfolio-title">До полной приёмки MVP</h2>
+            <h2 id="portfolio-title">Работы до MVP и запуск пилота</h2>
           </div>
           <p class="legend">Проценты — по весу принятых этапов MVP, не по коммитам.</p>
         </div>
         <div id="projects" class="project-grid"></div>
         <details class="details infrastructure-details"><summary>Общая инфраструктура — вне процента MVP проектов</summary><div id="dependencies" class="project-grid"></div></details>
       </section>
+      <section id="roadmap" class="roadmap" hidden aria-labelledby="roadmap-title"><h2 id="roadmap-title">Направления разработки</h2><p class="legend">Активный объём из брифа. Отдельные проценты не утверждены — UNKNOWN.</p><div id="active-directions" class="roadmap-grid"></div></section>
+      <section id="future-roadmap" class="roadmap" hidden aria-labelledby="future-title"><h2 id="future-title">После базового MVP: дополнительные сервисы</h2><p class="legend">Не увеличивают и не уменьшают процент основного MVP. Запланированное не означает готовое.</p><div id="future-services" class="roadmap-grid"></div></section>
     </main>
     <template id="project-template">
       <article class="project-card">
@@ -44,6 +46,7 @@
           <strong class="progress-label"></strong>
         </div>
         <p class="mvp-uncertainty"></p>
+        <div class="pilot-summary" hidden><p class="pilot-status"></p><p class="pilot-goal"></p><ul class="pilot-blockers"></ul><p class="pilot-next"></p></div>
         <p class="mvp-brief"></p>
         <details class="details technical-details"><summary>Подробности и доказательства</summary>
         <p class="progress-note"></p>

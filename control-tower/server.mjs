@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateApprovedModel, assessMilestone, progressBreakdown, approvedRollup, assessScopedCi } from './acceptance.mjs';
+import { deliveryScope } from './delivery.mjs';
 
 const here = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const publicDir = join(here, "public");
@@ -256,6 +257,7 @@ export async function buildSnapshot(config, options = {}) {
             .map(l => ({ title: l.title, url: l.url })) } : null,
         history: reviewed && Array.isArray(review.history) ? [...(project.history || []), ...review.history] : project.history,
         baseline: true, approval: { id: model.proposalId, by: model.approvedBy, at: model.approvedAt },
+        delivery: reviewed ? deliveryScope(review,definition,milestones) : null,
         milestones, milestoneWeight: 100, progress: progress.overall, progressBreakdown: progress,
         owner: definition.owner, target: definition.target, githubLive: github };
     }
