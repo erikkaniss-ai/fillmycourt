@@ -170,8 +170,8 @@ function render(snapshot) {
     <div class="rollup-number">${rollupKnown ? Number(rollup.confirmed)+'%' : 'UNKNOWN'}<small>принято MVP</small></div>
     <div><strong>Портфель: ${rollupKnown ? (100-Number(rollup.confirmed))+'% до полной приёмки MVP' : 'прогресс MVP неизвестен'}</strong><p>«Осталось» — непринятая часть MVP, включая UNKNOWN, а не оценка часов или несделанного кода. Четыре продукта имеют одинаковый вес; инфраструктура в общий процент не входит. MVP не означает разрешение production.</p><p>${rollupKnown ? `Не проверено: ${rollup.unknown}% (UNKNOWN).` : 'Нет полной подтверждённой основы для процента.'}</p></div>`;
   const projects = document.querySelector("#projects");
-  projects.replaceChildren(...snapshot.projects.filter(p=>p.kind!=='dependency').map(renderProject));
-  document.querySelector('#dependencies').replaceChildren(...snapshot.projects.filter(p=>p.kind==='dependency').map(renderProject));
+  projects.replaceChildren(...snapshot.projects.filter(p=>!p.kind||p.kind==='product').map(renderProject));
+  document.querySelector('#dependencies').replaceChildren(...snapshot.projects.filter(p=>p.kind&&p.kind!=='product').map(renderProject));
 }
 
 async function start() {

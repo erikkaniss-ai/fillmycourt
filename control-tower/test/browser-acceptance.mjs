@@ -32,7 +32,7 @@ try {
   })) };
   const approvedModel = { status: 'APPROVED', proposalId: 'synthetic-test',
     approvedBy: 'Fictional owner', approvedAt: '2026-01-01T00:00:00Z', receipts: {},
-    projects: config.projects.map((p, i) => ({ ...p, kind: i < 4 ? 'product' : 'dependency',
+    projects: config.projects.map((p, i) => ({ ...p, kind: i < 4 ? 'product' : i===4 ? 'dependency' : 'enabler',
       portfolioWeight: i < 4 ? 25 : 0, milestones: [
         { id: 'M' + i, name: 'Synthetic acceptance', weight: 100, acceptance: ['First condition', 'Second condition'] }
       ] }))
