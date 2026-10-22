@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: '22'
       - name: Integrated accessibility, offline privacy and current-RC boundary contracts
-        run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
+        run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs getacourt/tests/connected-accounts-activation-gate.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
       - name: Offline hosted-device-OAuth preflight contracts (no hosted or production traffic)
         run: node --test getacourt/tests/acceptance-preflight.test.mjs
       - name: Record fail-closed preflight against exact candidate (NOT RUN, not hosted acceptance)
@@ -103,6 +103,7 @@ jobs:
           node --check getacourt/assets/provider-account-test-lab.js
           node --check getacourt/qa/connected-accounts-demo.js
           node --check getacourt/qa/connected-accounts-lifecycle.js
+          node --check getacourt/qa/connected-accounts-activation-gate.mjs
           node --experimental-strip-types --test \
             platform/tests/getacourt_booking_source_guard.test.mjs \
             platform/tests/getacourt_date_contract.test.mjs \
@@ -120,6 +121,7 @@ jobs:
             platform/tests/getacourt_provider_account_lab.test.mjs \
             getacourt/tests/connected-accounts-contract.test.mjs \
             getacourt/tests/connected-accounts-lifecycle.test.mjs \
+            getacourt/tests/connected-accounts-activation-gate.test.mjs \
             platform/tests/getacourt_ci_dispatch_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
@@ -163,11 +165,12 @@ jobs:
           node --test platform/tests/getacourt_provider_supply_contract.test.mjs
       - name: Personal provider-account readiness contracts (no live API)
         run: node --test platform/tests/getacourt_provider_account_lab.test.mjs
-      - name: Connected Accounts fixture-only UI source contracts
+      - name: Connected Accounts fixture-only UI and rights evidence contracts
         run: |
           node --check getacourt/qa/connected-accounts-demo.js
           node --check getacourt/qa/connected-accounts-lifecycle.js
-          node --test getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs
+          node --check getacourt/qa/connected-accounts-activation-gate.mjs
+          node --test getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs getacourt/tests/connected-accounts-activation-gate.test.mjs
       - name: GetACourt native-only booking source guard contracts
         run: node --test platform/tests/getacourt_booking_source_guard.test.mjs
       - name: Install isolated QA-08 browser runner (no deploy)
