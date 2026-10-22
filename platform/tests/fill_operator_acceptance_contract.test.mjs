@@ -838,7 +838,7 @@ test("Opened disclosures close and hide on invalidated scope; the unaffected pac
       assert.equal(h.disclosure(domain).hidden,invalid,action+domain);assert.equal(h.disclosure(domain).open,!invalid,action+domain);
       assert.equal(h.get("#"+domain+"PackageThemeFilter").disabled,invalid,action+domain);
       assert.equal(h.get("#"+domain+"PackageThemeFilter").value,invalid?"ALL":domain==="club"?"MISSING":"UNKNOWN",action+domain);
-      if(invalid)assert.doesNotMatch(h.packageSteps(domain),/data-package-step=/);
+      if(invalid){assert.doesNotMatch(h.packageSteps(domain),/data-package-step=/);assert.doesNotMatch(h.packageStepsSummary(domain),/data-package-theme-counter=/);}
     }
   }
 });
@@ -869,7 +869,7 @@ test("Snapshot themes are independent closed native disclosures with only their 
   const expected={"authority-source":["original-authority"],"runtime-isolation":["protected-deploy","independent-runtime","isolation","two-synthetic-orgs"],"consent-device":["tester-consent"],"evidence-scope-stop":["scope-allowlist","current-evidence","unresolved-blockers","expiry-revocation-stop","connection-freshness","club-wide-coverage"]};
   for(const t of sections){
     assert.deepEqual([...stepIDs(t.html,"MISSING"),...stepIDs(t.html,"UNKNOWN")].sort(),expected[t.id].sort());
-    assert.match(t.html,/summary aria-describedby="clubPackageDisclosureHelp"/);assert.match(t.html,/>Club — /);
+    assert.match(t.html,/summary aria-describedby="clubPackageDisclosureHelp clubPackageThemeFilterHelp"/);assert.match(t.html,/>Club — /);
     assert.match(t.html,/Verified GO: none\. Execution NOT_RUN/);assert.doesNotMatch(t.html,/data-package-step="source-binding"|data-package-step-state="PRESENT"|<button|<input|<form|<a /);
   }
   const result=h.packageStepsSummary("club");assert.equal((result.match(/role="status"/g)||[]).length,1);
@@ -877,7 +877,7 @@ test("Snapshot themes are independent closed native disclosures with only their 
   assert.doesNotMatch(result,/<details[^>]*\b(?:open|name)=/);
   const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";d.items[1].state="MISSING";d.items.pop();await h.selectPackage("get",d);await h.packageReview("get");
   const getThemes=themeSections(h.packageStepsSummary("get"));assert.deepEqual(getThemes.map(t=>t.id),["authority-source","consent-device"]);
-  for(const t of getThemes){assert.match(t.html,/summary aria-describedby="getPackageDisclosureHelp"/);assert.match(t.html,/>GetACourt — /);assert.doesNotMatch(t.html,/two-synthetic-orgs|club-wide-coverage|connection-freshness/);}
+  for(const t of getThemes){assert.match(t.html,/summary aria-describedby="getPackageDisclosureHelp getPackageThemeFilterHelp"/);assert.match(t.html,/>GetACourt — /);assert.doesNotMatch(t.html,/two-synthetic-orgs|club-wide-coverage|connection-freshness/);}
   assert.deepEqual(stepIDs(getThemes[0].html,"MISSING"),["source-binding"]);assert.match(getThemes[0].html,/exact Get SHA and this single selected check/);
   assert.deepEqual(stepIDs(getThemes[1].html,"MISSING"),["separate-state-change-go"]);
 });
@@ -953,6 +953,7 @@ test("All seven Get catalogs keep exact original theme totals and filtered unres
     const ids=[...new Set([...getPackage.items.slice(0,10).map(x=>x.id),...c.requiredEvidence,...(c.requiresStateChangeGO?["separate-state-change-go"]:[])])];
     d.items=ids.map((id,i)=>({id,state:i%3===0?"UNKNOWN":i%3===1?"MISSING":"PRESENT"}));await h.check(c.id);await h.selectPackage("get",d);await h.packageReview("get");
     const markup=h.packageStepsSummary("get"),total=d.items.filter(i=>i.state!=="PRESENT").length;
+    assertThemeCounts(markup);
     for(const selected of ["MISSING","UNKNOWN","ALL"]){await filterThemes(h,"get",selected);
       const count=selected==="ALL"?total:d.items.filter(i=>i.state===selected).length;assert.match(filterStatus(h,"get"),new RegExp(`showing ${count} of ${total} unresolved`));
       assert.equal(h.packageStepsSummary("get"),markup);assert.doesNotMatch(markup,/data-package-step-state="PRESENT"/);
@@ -961,6 +962,7 @@ test("All seven Get catalogs keep exact original theme totals and filtered unres
     d.items=ids.map(id=>({id,state:"UNKNOWN"}));await h.selectPackage("get",d);await h.packageReview("get");await filterThemes(h,"get","MISSING");
     assert.match(filterStatus(h,"get"),new RegExp(`showing 0 of ${ids.length} unresolved`));assert.equal(h.get("#getPackageThemeFilter").disabled,false);
     assert.equal(stepIDs(h.packageStepsSummary("get"),"UNKNOWN").length,ids.length);assert.match(filterStatus(h,"get"),/Hidden notes remain unresolved/);
+    assertThemeCounts(h.packageStepsSummary("get"));
   }
 });
 
@@ -992,4 +994,63 @@ test("Native labelled filters are scoped to theme CSS, with explicit zero-match 
   for(const t of themes)assert.match(t.html,/Other states remain unresolved and are only hidden by this view filter/);
   const helper=source.slice(source.indexOf("  function applyGoPackageThemeFilter("),source.indexOf("  // Presentation only of one domain"));
   assert.doesNotMatch(helper,/\.innerHTML\s*=|\.text\(|\.files|\bapi\(|\bfetch\(|Storage|clipboard|setTimeout|setInterval|\.open\s*=/);assert.match(source,/themeFilter\?\.addEventListener\("change", \(\) => syncGoPackages\(\)\)/);
+});
+
+const themeCounts=html=>[...html.matchAll(/data-package-theme-count-filter="([^"]+)" data-package-theme-matched="(\d+)" data-package-theme-total="(\d+)"/g)].map(m=>({filter:m[1],matched:Number(m[2]),total:Number(m[3])}));
+function assertThemeCounts(html){
+  for(const t of themeSections(html)){
+    const missing=stepIDs(t.html,"MISSING").length,unknown=stepIDs(t.html,"UNKNOWN").length,total=missing+unknown;
+    assert.equal(t.html.split(`data-package-theme-counter="${t.id}"`).length-1,1);
+    assert.deepEqual(themeCounts(t.html),[{filter:"ALL",matched:total,total},{filter:"MISSING",matched:missing,total},{filter:"UNKNOWN",matched:unknown,total}]);
+    for(const c of themeCounts(t.html))assert.match(t.html,new RegExp(`Filter matches: ${c.matched} of ${c.total} unresolved steps\\.`));
+  }
+}
+
+test("Each club theme has exact ALL/MISSING/UNKNOWN match counts, including zero without clearing original totals",async()=>{
+  const h=await packageHarness();await h.selectPackage("club",clubPackage);await h.packageReview("club");
+  const html=h.packageStepsSummary("club");assertThemeCounts(html);const themes=themeSections(html);
+  assert.equal(themes.length,4);assert.equal(themeCounts(html).filter(c=>c.filter==="ALL").reduce((n,c)=>n+c.matched,0),12);
+  assert.deepEqual(themeCounts(themes[0].html),[{filter:"ALL",matched:1,total:1},{filter:"MISSING",matched:0,total:1},{filter:"UNKNOWN",matched:1,total:1}]);
+  assert.equal(themeCounts(themes[1].html).find(c=>c.filter==="MISSING").matched,4);
+  assert.deepEqual(preparationGroups(html),[{id:"authority-source",missing:0,unknown:1},{id:"runtime-isolation",missing:4,unknown:0},{id:"consent-device",missing:1,unknown:0},{id:"evidence-scope-stop",missing:6,unknown:0}]);
+  assert.doesNotMatch(html,/data-package-step="source-binding"|data-package-step-state="PRESENT"/);
+});
+
+test("Club and mixed Get counter catalogues remain independent and unchanged across native filter choices",async()=>{
+  const h=await packageHarness();let reads=0;
+  for(const domain of ["club","get"]){const d=structuredClone(domain==="club"?clubPackage:getPackage);if(domain==="get"){d.items[0].state="UNKNOWN";d.items[1].state="MISSING";d.items.pop();}
+    await h.selectPackage(domain,d,{size:100,text:async()=>{reads++;return JSON.stringify(d);}});await h.packageReview(domain);}
+  const html=["club","get"].map(d=>h.packageStepsSummary(d)),calls=h.calls.length,writes=["club","get"].map(d=>h.get("#"+d+"PackageStepsSummary").htmlWrites);
+  for(const s of html)assertThemeCounts(s);assert.equal(themeCounts(html[1]).filter(c=>c.filter==="ALL").reduce((n,c)=>n+c.matched,0),3);
+  assert.deepEqual(themeCounts(themeSections(html[1])[0].html),[{filter:"ALL",matched:2,total:2},{filter:"MISSING",matched:1,total:2},{filter:"UNKNOWN",matched:1,total:2}]);
+  await filterThemes(h,"club","MISSING");await filterThemes(h,"get","UNKNOWN");
+  assert.deepEqual(["club","get"].map(d=>h.packageStepsSummary(d)),html);assert.deepEqual(["club","get"].map(d=>h.get("#"+d+"PackageStepsSummary").htmlWrites),writes);
+  assert.equal(h.get("#clubPackageStepsSummary").dataset.packageThemeFilter,"MISSING");assert.equal(h.get("#getPackageStepsSummary").dataset.packageThemeFilter,"UNKNOWN");
+  assert.equal(reads,2);assert.equal(h.calls.length,calls);assert.equal(h.storage.size,1);
+});
+
+test("No counter or zero/readiness inference before review, for denied/all-PRESENT scopes, malformed files or expiry",async()=>{
+  for(const options of [{},{role:"manager"},{role:"viewer"},{signedIn:false},{demo:true}]){const h=await harness(options);await h.open();for(const d of ["club","get"])assert.doesNotMatch(h.packageStepsSummary(d),/data-package-theme-counter=|Filter matches:/);}
+  const h=await packageHarness();await h.selectPackage("get",getPackage);await h.packageReview("get");assert.doesNotMatch(h.packageStepsSummary("get"),/data-package-theme-counter=|Filter matches:/);
+  const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");assertThemeCounts(h.packageStepsSummary("get"));
+  await h.selectPackage("get","{");await h.packageReview("get");assert.doesNotMatch(h.packageStepsSummary("get"),/data-package-theme-counter=|Filter matches:/);
+  await h.selectPackage("get",d);await h.packageReview("get");h.setNow(NOW+60*60*1000);await filterThemes(h,"get","UNKNOWN");assert.doesNotMatch(h.packageStepsSummary("get"),/data-package-theme-counter=|Filter matches:/);
+});
+
+test("Late pending counter catalogue cannot overwrite the newer result or survive a file/scope reset",async()=>{
+  const h=await packageHarness(),old=deferred();await h.selectPackage("get",{},{size:100,text:()=>old.promise});const run=h.packageReview("get");await settle();
+  const d=structuredClone(getPackage);d.items[0].state="UNKNOWN";await h.selectPackage("get",d);await h.packageReview("get");await filterThemes(h,"get","UNKNOWN");const html=h.packageStepsSummary("get");
+  old.resolve(JSON.stringify({...d,items:[]}));await run;assert.equal(h.packageStepsSummary("get"),html);assert.equal(themeCounts(html).find(c=>c.filter==="ALL").total,1);
+  await h.selectPackage("get",d);assert.doesNotMatch(h.packageStepsSummary("get"),/data-package-theme-counter=|Filter matches:/);
+});
+
+test("Counter variants are CSS-only scoped native summary text, not new controls, state, transport or authority",()=>{
+  const css=readFileSync("platform/public/fill/styles.css","utf8"),html=readFileSync("platform/public/fill/index.html","utf8");
+  assert.match(css,/\.theme-filter-count > span \{ display:none; \}/);
+  for(const status of ["ALL","MISSING","UNKNOWN"])assert.ok(css.includes(`[data-package-theme-filter="${status}"] [data-package-theme-count-filter="${status}"]`));
+  assert.match(css,/data-package-theme-count-filter="UNKNOWN"\] \{ display:inline; \}/);
+  for(const domain of ["club","get"])assert.match(html,new RegExp(`id="${domain}PackageThemeFilterHelp"[^>]*>[^<]*Theme match counts apply even when collapsed; expand to view, not completed work`));
+  const renderer=source.slice(source.indexOf("  function goPackageStepsSummaryHTML("),source.indexOf("  // View only: scoped CSS"));
+  assert.match(renderer,/data-package-theme-counter=/);assert.match(renderer,/PackageDisclosureHelp \$\{domain\}PackageThemeFilterHelp/);
+  assert.doesNotMatch(renderer,/\.text\(|\.files|\bfetch\(|\bapi\(|Storage|setTimeout|setInterval|\.addEventListener|<button|<input|<form|\.open\s*=|goPackageState/);
 });

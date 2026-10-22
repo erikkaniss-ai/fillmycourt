@@ -242,6 +242,23 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             package_blockers = page.locator("#clubUatBlockers").inner_html()
             club_result, get_result = page.locator("#clubPackageResult"), page.locator("#getPackageResult")
 
+            def assert_theme_counter(theme, value):
+                states = theme.locator("[data-package-step]").evaluate_all("es=>es.map(e=>e.dataset.packageStepState)")
+                matched = len(states) if value == "ALL" else states.count(value)
+                counter = theme.locator(":scope > summary [data-package-theme-counter]")
+                expect(counter).to_have_count(1)
+                # Exactly one numeric variant is visible, also while details is closed.
+                expect(counter.locator("[data-package-theme-count-filter]:visible")).to_have_count(1)
+                for candidate in counter.locator("[data-package-theme-count-filter]").all():
+                    if candidate.get_attribute("data-package-theme-count-filter") == value:
+                        expect(candidate).to_be_visible()
+                        expect(candidate).to_have_text(f"Filter matches: {matched} of {len(states)} unresolved steps.")
+                        assert candidate.get_attribute("data-package-theme-matched") == str(matched)
+                        assert candidate.get_attribute("data-package-theme-total") == str(len(states))
+                    else:
+                        expect(candidate).to_be_hidden()
+                return matched
+
             def assert_theme_notes(domain, expected):
                 snapshot = page.locator(f"#{domain}PackageStepsSummary")
                 expect(snapshot.locator("[data-package-theme]")).to_have_count(len(expected))
@@ -254,7 +271,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                     assert theme.evaluate("e=>e.open") is False
                     assert theme.get_attribute("name") is None
                     expect(toggle).to_contain_text("Club —" if domain == "club" else "GetACourt —")
-                    assert toggle.get_attribute("aria-describedby") == f"{domain}PackageDisclosureHelp"
+                    assert toggle.get_attribute("aria-describedby") == f"{domain}PackageDisclosureHelp {domain}PackageThemeFilterHelp"
+                    assert assert_theme_counter(theme, "ALL") == len(components)
                     expect(notes).to_be_hidden()
                     toggle.focus()
                     toggle.press("Enter")
@@ -268,6 +286,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                     toggle.press("Space")
                     expect(notes).to_be_hidden()
                     assert theme.evaluate("e=>e.open") is False
+                    assert_theme_counter(theme, "ALL")
 
             def inspect_package(domain, value):
                 page.locator(f"#{domain}PackageFile").set_input_files({
@@ -278,6 +297,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 expect(page.locator(f"#{domain}PackageMissing [data-package-component]")).to_have_count(0)
                 expect(page.locator(f"#{domain}PackageSteps [data-package-step]")).to_have_count(0)
                 expect(page.locator(f"#{domain}PackageStepsSummary [data-package-preparation-group]")).to_have_count(0)
+                expect(page.locator(f"#{domain}PackageStepsSummary [data-package-theme-counter]")).to_have_count(0)
                 expect(page.locator(f"#{domain}PackageStepsSummary")).not_to_contain_text("Preparation notes:")
                 expect(page.locator(f"#{domain}PackageStepsDisclosure")).to_be_hidden()
                 assert page.locator(f"#{domain}PackageStepsDisclosure").evaluate("e=>e.open") is False
@@ -516,8 +536,10 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 expect(page.locator(f"#{domain}PackageThemeFilterStatus")).to_contain_text(f"showing {shown} of {total} unresolved notes")
                 expect(page.locator(f"#{domain}PackageThemeFilterStatus")).to_contain_text("Hidden notes remain unresolved")
                 assert snapshot.inner_html() == original
+                matched_total = 0
                 for theme in snapshot.locator("[data-package-theme]").all():
                     assert theme.evaluate("e=>e.open") is False
+                    matched_total += assert_theme_counter(theme, value)
                     theme.locator(":scope > summary").click()
                     expect(theme.locator("[data-package-theme-notes]")).to_be_visible()
                     for row in theme.locator("[data-package-step]").all():
@@ -526,6 +548,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                             expect(row).to_be_visible()
                         else:
                             expect(row).to_be_hidden()
+                    assert theme.locator("[data-package-step]:visible").count() == assert_theme_counter(theme, value)
                     for empty in theme.locator("[data-package-theme-empty]").all():
                         if empty.get_attribute("data-package-theme-empty") == value:
                             expect(empty).to_be_visible()
@@ -534,6 +557,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                             expect(empty).to_be_hidden()
                     theme.locator(":scope > summary").click()
                     expect(theme.locator("[data-package-theme-notes]")).to_be_hidden()
+                    assert_theme_counter(theme, value)
+                assert matched_total == shown
                 assert snapshot.inner_html() == original
 
             for domain, cases, total in [("club", [("MISSING", 11), ("UNKNOWN", 1), ("ALL", 12)], 12), ("get", [("MISSING", 2), ("UNKNOWN", 1), ("ALL", 3)], 3)]:
@@ -545,6 +570,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             club_theme_filter.press("ArrowDown")
             expect(club_theme_filter).to_have_value("MISSING")
             expect(club_theme_filter).to_be_focused()
+            for theme in club_preparation_summary.locator("[data-package-theme]").all():
+                assert_theme_counter(theme, "MISSING")
             get_theme_filter.select_option("UNKNOWN")
             expect(club_theme_filter).to_have_value("MISSING")
             expect(get_theme_filter).to_have_value("UNKNOWN")
@@ -572,12 +599,15 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 page.set_viewport_size({"width": width, "height": 1000})
                 for domain in ["club", "get"]:
                     snapshot = page.locator(f"#{domain}PackageStepsSummary")
+                    for theme in snapshot.locator("[data-package-theme]").all():
+                        assert_theme_counter(theme, "MISSING" if domain == "club" else "UNKNOWN")
                     for theme_id in ["authority-source", "consent-device"]:
                         snapshot.locator(f'[data-package-theme="{theme_id}"] > summary').click()
                         expect(snapshot.locator(f'[data-package-theme-notes="{theme_id}"]')).to_be_visible()
                     assert snapshot.locator("details[open]").count() == 2
                     assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
                     page.locator(f".{domain}-package-preparation-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-theme-filter-{domain}-{device}-FIXTURE-ONLY.png"))
+                    page.locator(f".{domain}-package-preparation-summary-panel").screenshot(path=str(screenshots / f"fill-go-package-theme-counts-{domain}-{device}-FIXTURE-ONLY.png"))
                     for theme_id in ["authority-source", "consent-device"]:
                         snapshot.locator(f'[data-package-theme="{theme_id}"] > summary').click()
                         expect(snapshot.locator(f'[data-package-theme-notes="{theme_id}"]')).to_be_hidden()
@@ -606,6 +636,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             expect(get_preparation_summary).not_to_contain_text("PRIVATE_SECRET")
             expect(get_preparation_summary).not_to_contain_text("Preparation notes:")
             expect(get_preparation_summary.locator("[data-package-preparation-group]")).to_have_count(0)
+            expect(get_preparation_summary.locator("[data-package-theme-counter]")).to_have_count(0)
             expect(get_disclosure).to_be_hidden()
             assert get_disclosure.evaluate("e=>e.open") is False
             assert club_disclosure.evaluate("e=>e.open") is True
@@ -626,6 +657,8 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
             page.keyboard.press("Enter")
             expect(club_preparation_summary.locator("[data-package-theme]")).to_have_count(0)
             expect(get_preparation_summary.locator("[data-package-theme]")).to_have_count(0)
+            for snapshot in [club_preparation_summary, get_preparation_summary]:
+                expect(snapshot.locator("[data-package-theme-counter]")).to_have_count(0)
             expect(club_preparation_summary).to_contain_text("expired")
             expect(get_preparation_summary).to_contain_text("expired")
             assert len(calls) == package_calls
@@ -660,6 +693,7 @@ def test_fill_local_acceptance_report_and_missing_go(tmp_path):
                 expect(page.locator(f"#{domain}PackageMissing [data-package-component]")).to_have_count(0)
                 expect(page.locator(f"#{domain}PackageSteps [data-package-step]")).to_have_count(0)
                 expect(page.locator(f"#{domain}PackageStepsSummary [data-package-preparation-group]")).to_have_count(0)
+                expect(page.locator(f"#{domain}PackageStepsSummary [data-package-theme-counter]")).to_have_count(0)
                 expect(page.locator(f"#{domain}PackageStepsSummary")).not_to_contain_text("Preparation notes:")
                 expect(page.locator(f"#{domain}PackageStepsDisclosure")).to_be_hidden()
                 assert page.locator(f"#{domain}PackageStepsDisclosure").evaluate("e=>e.open") is False

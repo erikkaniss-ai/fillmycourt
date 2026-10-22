@@ -489,3 +489,19 @@ Control Tower changes. Node and loopback Chromium extend mixed/zero-state counts
 all seven catalogs, keyboard/visibility/focus, independence, resets/expiry/late
 results and desktop/320px evidence. Source/CI only; hosted/device/OAuth NOT_RUN,
 verified GO none, pilot GO NOT_GRANTED. See `docs/fill-local-acceptance-viewer.md`.
+
+### Read-only theme match counts — continued from 4a8b02e
+
+Each club/Get native theme summary now shows filter-matching/total unresolved
+step counts for its own ALL/MISSING/UNKNOWN selection, including while collapsed.
+These are view matches, not expanded/completed work, readiness, evidence or GO.
+Original theme/snapshot totals, full notes and blockers remain unchanged; zero
+matches retain unresolved rows and do not grant permission. Fixed numeric variants
+use already validated own-theme rows and existing scoped CSS, without new state,
+handlers, DOM replacement, reads, storage, schema, transport or authority. Existing
+scope/expiry/reset/late-result guards clear invalid counters; denied/unreviewed/
+all-PRESENT data yields none. Node and loopback Chromium extend exact per-theme
+values/sums, one visible variant, closed/open and actual visible-row consistency,
+keyboard/focus, independence and1440/320px evidence. Source/CI only; no sending,
+deploy, production/provider or Control Tower change. Verified GO none, all real
+hosted/device/OAuth checks NOT_RUN, pilot GO NOT_GRANTED. See the boundary notes.

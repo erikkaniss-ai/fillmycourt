@@ -1,5 +1,36 @@
 # Read-only hosted / device / OAuth report in the operator MVP
 
+## Read-only per-theme match counts — continuation from Fill4a8b02e
+
+Every non-empty club/Get theme summary now includes **Filter matches: N of T
+unresolved steps**, for that domain's current ALL/MISSING/UNKNOWN selection.
+The count is available when the theme is closed as well as open: it means steps
+matching the view filter, not steps currently expanded, completed work, evidence
+validity, readiness or GO. Existing original MISSING/UNKNOWN theme totals and the
+global filter total stay unchanged. A zero-match theme retains its nonzero
+unresolved total and warning; no approval or proven absence is inferred.
+
+All three numeric variants are computed from that theme's already validated local
+unresolved rows. Existing scoped filter CSS exposes exactly one variant; there is
+no new state, handler, DOM replacement, API/file/document read, persistence,
+parser/schema, execution or authority. Full notes, blockers, source/check binding
+and independent club/Get filters/open/focus choices remain unchanged. Existing
+scope/role/file/source/check/tab/auth/expiry and late-result guards remove old
+counter DOM with the invalid result. Unreviewed/denied/all-PRESENT data never
+creates counters or an inferred zero. UNKNOWN remains unresolved, verified GO none,
+execution NOT_RUN, pilot GO NOT_GRANTED.
+
+Node verifies own-theme exact values/sums across all seven Get catalogs, zero
+matches, no PRESENT notes, context independence, denied/stale/malformed/late
+results and pure presentation. Loopback Chromium checks exactly one visible
+numeric variant while closed/open, equality with actual visible rows when open,
+sum against the global filter count, native keyboard/focus, independent filters
+and existing denial/expiry/late/reset/network/storage protections. Four new
+`fill-go-package-theme-counts-{club,get}-{desktop,mobile}-FIXTURE-ONLY.png` cards
+retain prior captures and actual1440/320px checks. Fictional source/CI only, not
+hosted, physical-device, OAuth or assistive-device acceptance. No sending, deploy,
+production/provider requests, workflow/approval or frozen Control Tower changes.
+
 ## Read-only theme state filters — continuation from Fill6dd77d8
 
 Each club/Get preparation card has its own labelled native state selector:

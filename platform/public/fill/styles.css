@@ -185,6 +185,11 @@
 .theme-filter select { display:block; width:100%; min-width:0; max-width:100%; margin-top:6px; }
 .theme-filter select:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
 .theme-filter-empty { display:none; }
+.theme-filter-count { display:block; font-size:13px; font-weight:400; margin-top:4px; }
+.theme-filter-count > span { display:none; }
+[data-package-theme-filter="ALL"] [data-package-theme-count-filter="ALL"],
+[data-package-theme-filter="MISSING"] [data-package-theme-count-filter="MISSING"],
+[data-package-theme-filter="UNKNOWN"] [data-package-theme-count-filter="UNKNOWN"] { display:inline; }
 [data-package-theme-filter="MISSING"] [data-package-step-state="UNKNOWN"],
 [data-package-theme-filter="UNKNOWN"] [data-package-step-state="MISSING"] { display:none; }
 [data-package-theme-filter="MISSING"] [data-package-theme-empty="MISSING"],

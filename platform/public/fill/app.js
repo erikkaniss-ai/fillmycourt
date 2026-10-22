@@ -1226,8 +1226,12 @@
       "<p>Themes only — not an execution order, assignment or evidence collection. Expand a theme for the same local notes filtered to that theme; the full-notes view remains separate.</p>" + limits) +
       '<ul class="go-package-items">' + themes.map(([id, label, ids]) => {
         const items = unresolved.filter(row => ids.includes(row.id));
+        const counts = ["ALL", "MISSING", "UNKNOWN"].map(status => {
+          const matched = status === "ALL" ? items.length : items.filter(row => row.status === status).length;
+          return `<span data-package-theme-count-filter="${status}" data-package-theme-matched="${matched}" data-package-theme-total="${items.length}">Filter matches: ${matched} of ${items.length} unresolved steps.</span>`;
+        }).join("");
         return items.length ? `<li data-package-preparation-group="${id}"><details class="go-package-disclosure go-package-theme" data-package-theme="${id}">` +
-          `<summary aria-describedby="${domain}PackageDisclosureHelp" data-package-theme-count="${id}">${domain === "club" ? "Club" : "GetACourt"} — ${esc(label)}: ${items.filter(row => row.status === "MISSING").length} MISSING; ${items.filter(row => row.status === "UNKNOWN").length} UNKNOWN.</summary>` +
+          `<summary aria-describedby="${domain}PackageDisclosureHelp ${domain}PackageThemeFilterHelp" data-package-theme-count="${id}">${domain === "club" ? "Club" : "GetACourt"} — ${esc(label)}: ${items.filter(row => row.status === "MISSING").length} MISSING; ${items.filter(row => row.status === "UNKNOWN").length} UNKNOWN.<span class="theme-filter-count" data-package-theme-counter="${id}">${counts}</span></summary>` +
           `<div data-package-theme-notes="${id}">${["MISSING", "UNKNOWN"].filter(status => !items.some(row => row.status === status)).map(status =>
             `<p class="theme-filter-empty" data-package-theme-empty="${status}">No ${status} notes in this theme. Other states remain unresolved and are only hidden by this view filter; this is not completeness or GO.</p>`).join("")}${goPackageStepsHTML(items, domain)}</div></details></li>` : "";
       }).join("") + "</ul>";
