@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,9 +11,9 @@
     <main class="shell">
       <header class="hero">
         <div>
-          <p class="eyebrow">Read-only owner view</p>
+          <p class="eyebrow">Закрытый обзор владельца · только чтение</p>
           <h1>Development Control Tower</h1>
-          <p class="subhead">Milestone acceptance, live source freshness and explicit decision gates — never commit-count theatre.</p>
+          <p class="subhead">Прогресс до MVP: что принято и сколько ещё осталось подтвердить.</p>
         </div>
         <div id="freshness" class="freshness" aria-live="polite">Loading verified sources…</div>
       </header>
@@ -21,10 +21,10 @@
       <section aria-labelledby="portfolio-title">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Portfolio</p>
-            <h2 id="portfolio-title">Projects and decision gates</h2>
+            <p class="eyebrow">Все проекты</p>
+            <h2 id="portfolio-title">До полной приёмки MVP</h2>
           </div>
-          <p class="legend"><span class="dot verified"></span>actual verified <span class="dot synthetic"></span>synthetic verified <span class="dot manual"></span>manual <span class="dot unknown"></span>unverified</p>
+          <p class="legend">Проценты — по весу принятых этапов MVP, не по коммитам.</p>
         </div>
         <div id="projects" class="project-grid"></div>
       </section>
@@ -42,6 +42,9 @@
           <div class="progress-track"><div class="progress-value"></div></div>
           <strong class="progress-label"></strong>
         </div>
+        <p class="mvp-uncertainty"></p>
+        <p class="mvp-brief"></p>
+        <details class="details technical-details"><summary>Подробности и доказательства</summary>
         <p class="progress-note"></p>
         <details class="details source-details"><summary class="source-summary">PR / CI evidence</summary><section class="live-source" aria-label="Live GitHub source"></section></details>
         <details class="details"><summary>Milestones and acceptance evidence</summary><ul class="milestones"></ul></details>
@@ -51,6 +54,7 @@
           <section><h4>Blocked</h4><ul class="blocked"></ul></section>
         </div>
         <details class="details"><summary>Environment and history</summary><div class="environments"></div><ol class="history"></ol></details>
+        </details>
       </article>
     </template>
     <script type="module" src="/app.js"></script>

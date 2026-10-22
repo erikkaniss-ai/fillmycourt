@@ -107,11 +107,15 @@ function renderProject(project) {
   const label = root.querySelector(".progress-label");
   const breakdown = project.progressBreakdown;
   if (breakdown?.approved) {
-    label.textContent = `${breakdown.confirmed}% confirmed · ${breakdown.unknown}% UNKNOWN`;
+    label.innerHTML = `<span class="mvp-kpi"><b>${Number(breakdown.confirmed)}%</b><small>принято MVP</small></span><span class="mvp-kpi remaining"><b>${100-Number(breakdown.confirmed)}%</b><small>до полной приёмки</small></span>`;
+    root.querySelector('.mvp-uncertainty').textContent = `Не проверено: ${breakdown.unknown}% (UNKNOWN)${breakdown.unfinished ? ' · Известно не завершено: '+breakdown.unfinished+'%' : ''}.`;
+    root.querySelector('.mvp-brief').textContent = project.evidenceReview?.brief ||
+      (breakdown.confirmed===100 ? 'Все критерии этого MVP приняты. Production — отдельное решение.' : 'Приёмка MVP ещё не завершена. Непроверенное не считается готовым.');
     root.querySelector('.progress-value').style.width = `${breakdown.confirmed}%`;
     root.querySelector('.progress-note').textContent = `Approved ${project.approval.id}. Known unfinished: ${breakdown.unfinished}%. Overall readiness: ${breakdown.overall === null ? 'UNKNOWN' : breakdown.overall + '%'}. Confirmed source/synthetic acceptance is not hosted/live readiness or release GO. ${project.kind === 'product' ? 'Product rollup weight: ' + project.portfolioWeight + '%.' : 'Dependency/enabler: excluded from product rollup.'}`;
   } else if (progress === null) {
-    label.textContent = "UNKNOWN · no approved baseline";
+    label.textContent = "UNKNOWN";
+    root.querySelector('.mvp-uncertainty').textContent = 'Объём MVP не утверждён: процент и остаток неизвестны.';
     root.querySelector(".progress-note").textContent = "Progress is intentionally withheld until weighted acceptance criteria are defined and reviewed.";
     root.querySelector(".progress-track").classList.add("unknown-track");
   } else {
@@ -158,12 +162,13 @@ function renderProject(project) {
 
 function render(snapshot) {
   const { rollup } = snapshot;
+  const rollupKnown = !!snapshot.approvedBaseline && Number.isFinite(rollup.confirmed);
   const configured = snapshot.projects.filter((project) => project.github).length;
   const verified = snapshot.projects.filter((project) => project.githubLive?.state === "actual_verified").length;
   document.querySelector("#freshness").innerHTML = `${badge(verified === configured && configured > 0 ? "actual_verified" : "unverified")} GitHub ${verified}/${configured}: ${formatTime(snapshot.fetchedAt)}`;
   document.querySelector("#rollup").innerHTML = `
-    <div class="rollup-number">${rollup.percent === null ? "UNKNOWN" : `${rollup.percent}%`}</div>
-    <div><strong>Owner-approved P0/MVP acceptance only</strong><p>${snapshot.approvedBaseline ? `Approved ${escapeHtml(snapshot.approvedBaseline.id)}. Confirmed: ${rollup.confirmed}%; UNKNOWN: ${rollup.unknown}%; known unfinished: ${rollup.unfinished}%. Four products at 25% each; Shared Platform and Control Tower excluded to prevent double counting.` : `${rollup.baselinedProjects} of ${rollup.totalProjects} projects have an approved baseline.`} Green CI is not deployed acceptance or project completion. Overall readiness stays UNKNOWN while evidence is incomplete.</p></div>`;
+    <div class="rollup-number">${rollupKnown ? Number(rollup.confirmed)+'%' : 'UNKNOWN'}<small>принято MVP</small></div>
+    <div><strong>Портфель: ${rollupKnown ? (100-Number(rollup.confirmed))+'% до полной приёмки MVP' : 'прогресс MVP неизвестен'}</strong><p>«Осталось» — непринятая часть MVP, включая UNKNOWN, а не оценка часов или несделанного кода. Четыре продукта имеют одинаковый вес; инфраструктура в общий процент не входит. MVP не означает разрешение production.</p><p>${rollupKnown ? `Не проверено: ${rollup.unknown}% (UNKNOWN).` : 'Нет полной подтверждённой основы для процента.'}</p></div>`;
   const projects = document.querySelector("#projects");
   projects.replaceChildren(...snapshot.projects.map(renderProject));
 }

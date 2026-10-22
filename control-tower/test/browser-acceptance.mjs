@@ -18,6 +18,8 @@ try {
     assert.equal(await page.locator(".project-card").count(), 5);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `Horizontal overflow at ${width}`);
     assert.equal(await page.locator('.source-details').first().getAttribute('open'), null);
+    assert.equal(await page.locator('.technical-details').first().getAttribute('open'), null);
+    await page.locator('.technical-details > summary').first().click();
     await page.getByText('Milestones and acceptance evidence', {exact: true}).first().click();
     assert.equal(await page.locator('.milestones').first().isVisible(), true);
     console.log(`Browser PASS: ${width}px, five cards, milestone expansion, no horizontal overflow`);
@@ -38,6 +40,7 @@ try {
   approvedModel.projectReviews = { p0: {
     reviewedAt: '2026-01-01T00:00:00Z', reviewer: 'Fictional reviewer', scope: 'Synthetic decision review',
     blocked: ['Reviewer: missing exact artifact acceptance; do not infer completion.'],
+    brief: 'Кратко: полная приёмка MVP ещё не подтверждена.',
     links: [{title: 'Untrusted protocol must not become a link', url: 'javascript:alert(1)'}]
   }};
   const fixture = await buildSnapshot(config, { approvedModel });
@@ -48,8 +51,12 @@ try {
     await page.locator('.project-card').first().waitFor();
     assert.equal(await page.locator('.project-card').count(), 6);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    assert.equal(await page.locator('.progress-label').first().innerText(), '0% confirmed · 100% UNKNOWN');
-    assert.match(await page.locator('#rollup').innerText(), /Confirmed: 0%; UNKNOWN: 100%/);
+    assert.match(await page.locator('.progress-label').first().innerText(), /0%\s+принято MVP\s+100%\s+до полной приёмки/);
+    assert.match(await page.locator('#rollup').innerText(), /100% до полной приёмки MVP/);
+    assert.match(await page.locator('.mvp-uncertainty').first().innerText(), /100% \(UNKNOWN\)/);
+    assert.match(await page.locator('.mvp-brief').first().innerText(), /полная приёмка MVP/);
+    assert.equal(await page.locator('.technical-details').first().getAttribute('open'), null);
+    await page.locator('.technical-details > summary').first().click();
     assert.match(await page.locator('.project-card').first().innerText(), /Reviewer: missing exact artifact acceptance/);
     assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
     assert.equal(await page.locator('.rollup-number').evaluate(e =>
@@ -57,6 +64,14 @@ try {
     console.log('Approved-model browser PASS: ' + width + 'px, six cards, UNKNOWN preserved');
   }
   assert.deepEqual(errors, []);
+  // Presentation-only fixture: remaining means all unaccepted weight, including
+  // UNKNOWN; it is not just known unfinished work and never a development ETA.
+  fixture.projects[0].progressBreakdown={approved:true,confirmed:35,unknown:45,unfinished:20,overall:null};
+  fixture.rollup={percent:null,confirmed:8.75,unknown:86.25,unfinished:5,baselinedProjects:4,totalProjects:4};
+  await page.reload();await page.locator('.project-card').first().waitFor();
+  assert.match(await page.locator('.progress-label').first().innerText(),/35%\s+принято MVP\s+65%\s+до полной приёмки/);
+  assert.match(await page.locator('.mvp-uncertainty').first().innerText(),/45% \(UNKNOWN\).*20%/);
+  assert.match(await page.locator('#rollup').innerText(),/91.25% до полной приёмки MVP/);
 } finally {
   await browser.close();
   server.closeAllConnections();

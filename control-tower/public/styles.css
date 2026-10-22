@@ -43,6 +43,15 @@ h4 { margin-bottom: 8px; font-size: .82rem; letter-spacing: .06em; text-transfor
 .progress-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; margin-top: 20px; }
 .progress-track { overflow: hidden; height: 9px; border-radius: 999px; background: color-mix(in srgb, var(--line) 84%, transparent); }.progress-value { height: 100%; border-radius: inherit; background: var(--blue); }.unknown-track { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--line) 80%, transparent) 0 8px, transparent 8px 16px); }
 .progress-label { font-variant-numeric: tabular-nums; }.progress-note { margin: 8px 0 18px; color: var(--muted); font-size: .84rem; }
+.progress-row{display:flex;flex-direction:column-reverse;align-items:stretch;gap:16px}
+.progress-label{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.mvp-kpi{display:flex;flex-direction:column;min-width:0}
+.mvp-kpi b{color:var(--green);font-size:clamp(2.25rem,5vw,3.25rem);line-height:1.1;letter-spacing:-.05em}
+.mvp-kpi.remaining b{color:var(--ink)}
+.mvp-kpi small,.rollup-number small{display:block;color:var(--muted);font-size:.82rem;font-weight:500;letter-spacing:0;line-height:1.5;margin-top:4px;white-space:normal}
+.mvp-uncertainty{margin:12px 0 8px;color:var(--muted);font-size:.82rem}
+.mvp-brief{margin:0;font-size:.92rem;line-height:1.55}
+.technical-details{margin-top:18px}.technical-details>.progress-note{margin-top:12px}
 .live-source { padding: 12px; border-radius: 9px; background: color-mix(in srgb, var(--blue) 8%, transparent); font-size: .83rem; }.live-source p { margin: 6px 0 0; }.live-source-top { gap: 8px; align-items: center; }.live-source-top span:last-child { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .badge { display: inline-block; padding: 2px 6px; border-radius: 6px; font-size: .69rem; font-weight: 750; line-height: 1.3; text-transform: uppercase; }.badge.actual_verified { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }.badge.synthetic_verified { background: color-mix(in srgb, var(--purple) 18%, transparent); color: var(--purple); }.badge.manual { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }.badge.unverified { background: color-mix(in srgb, var(--red) 18%, transparent); color: var(--red); }
 .details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }.details summary { color: var(--blue); cursor: pointer; font-weight: 650; }.milestones, .lanes ul, .history { padding-left: 18px; }.milestones { display: grid; gap: 12px; }.milestones li { padding-bottom: 12px; border-bottom: 1px solid var(--line); }.milestones p { margin: 6px 0 0; color: var(--muted); font-size: .86rem; }.milestone-heading { gap: 8px; }.milestone-heading span { color: var(--muted); font-size: .8rem; white-space: nowrap; }

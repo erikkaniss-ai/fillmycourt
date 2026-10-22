@@ -251,6 +251,7 @@ export async function buildSnapshot(config, options = {}) {
         if (Array.isArray(review[key]) && review[key].every(v => typeof v === 'string')) lanes[key] = review[key];
       return { ...publicProject(project), ...lanes, kind: definition.kind, portfolioWeight: definition.portfolioWeight,
         evidenceReview: reviewed ? { reviewedAt: review.reviewedAt, reviewer: review.reviewer, scope: review.scope,
+          brief: typeof review.brief === 'string' && review.brief.length <= 400 ? review.brief : null,
           links: (Array.isArray(review.links) ? review.links : []).filter(l => typeof l?.title === 'string' && typeof l?.url === 'string')
             .map(l => ({ title: l.title, url: l.url })) } : null,
         history: reviewed && Array.isArray(review.history) ? [...(project.history || []), ...review.history] : project.history,
