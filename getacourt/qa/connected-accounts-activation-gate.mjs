@@ -124,7 +124,9 @@ export function listRequiredEvidence(lane){
   return Object.freeze([...GATES[lane]]);
 }
 // This makes the execution interface explicit without implementing one.
-export function planVaultAdapter({mode}={}) {
+export function planVaultAdapter(raw) {
+  const input=strict(raw,["mode"]);
+  const mode=input.mode;
   if(!["club_credentials","delegated_refresh_token"].includes(mode))
     throw Error("INVALID_SECRET_CLASS");
   return Object.freeze({
