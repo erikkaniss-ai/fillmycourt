@@ -20,13 +20,17 @@ booking action or payment route. It is not a provider OAuth/API connection.
    `/clubs/<slug>` page, expand a court, time and explicit duration/price
    offer, then open the companion popup and click **Allow this club**.
    Approval is an informed grant of this club's rendered offers to local
-   GetACourt. Copy its public extension ID into the local GetACourt page.
+   GetACourt. Copy the public extension ID **and the pairing code displayed
+   after Allow this club** into the local GetACourt page. The pairing code is
+   a browser-only capability, not a Playtomic password or OAuth token. Never
+   paste it into chat, code, screenshots or analytics. GetACourt stores neither
+   the extension ID nor the pairing code.
 4. Press **Read expanded offers**. Only the previously approved tab and club
    may be read. At least 60 seconds separates attempts, including failures
    after tab validation. This is our conservative limit, not a provider rate
    entitlement. The companion does not navigate, refresh or click the provider.
-5. **Disconnect and clear** revokes the stored club approval, clears the tab
-   grant and prevents late in-flight completion. The popup also offers
+5. **Disconnect and clear** revokes the stored club approval and pairing code,
+   clears the tab grant and prevents late in-flight completion. The popup also offers
    Disconnect. Removing the extension removes this capability. This does not
    log the user out of Playtomic or revoke any provider OAuth grant.
 
@@ -56,11 +60,17 @@ database, telemetry or server APIs. Persistent storage contains only the
 approved club URL. Extension ID entry is not saved by GetACourt.
 
 Only a top-frame sender at `http://localhost:8765/personal-sources.html` may
-request a read or revoke. Web pages cannot grant consent; only the packaged
-popup can. Request fields are allowlisted. All result strings render as text.
+request a read or revoke, **and only after presenting the random pairing code
+issued by the companion popup**. The localhost pathname check alone is not
+proof of page identity: other processes could serve that address. Web pages
+cannot grant consent or obtain the pairing code; only the packaged popup can. Request fields are allowlisted. All result strings render as text.
 External action names, provider URLs, scripts, credentials or booking methods
 cannot be supplied. The 60-second budget, single-flight guard and revocation
-epoch reject bursts, simultaneous reads and late withdrawn responses.
+epoch reject bursts, simultaneous reads and late withdrawn responses. A new
+Allow this club generates a new pairing code and invalidates the old one;
+logout/disconnect clears pairing. The local page keeps the pairing code in
+its input only, removes it when closing or disconnecting, and does not send
+it to the provider.
 
 This is personal assistance under the user's explicit opt-in. Provider API
 delegation, automated product redistribution and commercial supply rights
