@@ -63,7 +63,9 @@ Only a top-frame sender at `http://localhost:8765/personal-sources.html` may
 request a read or revoke, **and only after presenting the random pairing code
 issued by the companion popup**. The localhost pathname check alone is not
 proof of page identity: other processes could serve that address. Web pages
-cannot grant consent or obtain the pairing code; only the packaged popup can. Request fields are allowlisted. All result strings render as text.
+cannot grant consent or ask the extension to reveal its pairing code. The
+user deliberately copies the popup code into the local page; therefore only
+enter it into the trusted local GetACourt page, not other localhost services. Request fields are allowlisted. All result strings render as text.
 External action names, provider URLs, scripts, credentials or booking methods
 cannot be supplied. The 60-second budget, single-flight guard and revocation
 epoch reject bursts, simultaneous reads and late withdrawn responses. A new
