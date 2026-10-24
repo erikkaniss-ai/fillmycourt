@@ -3,8 +3,8 @@ async function searchPlaytomic(query) {
   const fail=code=>{throw Object.assign(new Error("Search unavailable"),{readerCode:code});};
   const visible=e=>!!e&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=="hidden";
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  let canceled=false;
-  const cancel=(message,sender)=>{if(sender.id===chrome.runtime.id&&message?.action==="cancelPersonalSearch")canceled=true;};
+  let canceled=false,cancelWait;
+  const cancel=(message,sender)=>{if(sender.id===chrome.runtime.id&&message?.action==="cancelPersonalSearch"){canceled=true;cancelWait?.();}};
   const check=()=>{if(canceled)fail("CONSENT_WITHDRAWN");};
   const challenge=()=>[...document.querySelectorAll('input[type="password"],input[autocomplete="one-time-code"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[id*="captcha"]')].some(visible);
   const minutes=label=>{
@@ -21,6 +21,7 @@ async function searchPlaytomic(query) {
       query.from>query.to||![0,60,90,120].includes(query.durationMinutes))fail("QUERY_INVALID");
     check();
     await pause(200);
+    check();
     if(innerWidth>640)fail("COMPACT_VIEW_REQUIRED");
     if(challenge())fail("CHALLENGE_REQUIRED");
     const heading=[...document.querySelectorAll("h2")].find(e=>e.textContent.trim()==="Available courts");
@@ -43,11 +44,12 @@ async function searchPlaytomic(query) {
     // Wait for the control tree to settle between the two normal UI filters.
     const settle=()=>new Promise(resolve=>{
       let quiet,deadline,done=false;
-      const finish=code=>{if(done)return;done=true;clearTimeout(quiet);clearTimeout(deadline);observer.disconnect();resolve(code);};
+      const finish=code=>{if(done)return;done=true;clearTimeout(quiet);clearTimeout(deadline);observer.disconnect();cancelWait=undefined;resolve(code);};
       const ready=()=>!region.querySelector('[aria-busy="true"],[role="progressbar"]')&&
-        !/loading (?:availability|courts|slots)/i.test(region.innerText);
-      const changed=()=>{clearTimeout(quiet);quiet=setTimeout(()=>finish(ready()?null:"SCHEDULE_NOT_READY"),500);};
+        !/\bloading\b/i.test(region.innerText);
+      const changed=()=>{clearTimeout(quiet);quiet=setTimeout(()=>{if(ready())finish(null);},500);};
       const observer=new MutationObserver(changed);
+      cancelWait=()=>finish("CONSENT_WITHDRAWN");
       observer.observe(region,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-busy","class","hidden"]});
       deadline=setTimeout(()=>finish("SCHEDULE_NOT_READY"),6000);
       changed();

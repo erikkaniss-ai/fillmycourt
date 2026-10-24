@@ -41,6 +41,13 @@ try{
     window.chrome={runtime:{id:"fixture",onMessage:{addListener:f=>fixtureListeners.push(f),removeListener:f=>fixtureListeners=fixtureListeners.filter(x=>x!==f)}}};
     document.addEventListener("click",event=>{if(event.target.closest("button"))bookClicks++;});
     document.addEventListener("change",event=>changes.push(event.target.tagName));
+    document.querySelector('input[type="date"]').addEventListener("change",()=>{
+      const loading=document.createElement("p");loading.textContent="Loading…";document.querySelector("section").append(loading);
+      setTimeout(()=>{
+        for(const row of document.querySelectorAll("details details div"))row.firstChild.textContent=row.firstChild.textContent.replace("€36.00","€40.00");
+        loading.remove();
+      },750);
+    });
   `});
   await sourcePage.addScriptTag({content:capture});await sourcePage.addScriptTag({content:search});
   const query={date:"2026-10-25",sport:"Tennis",from:"14:00",to:"20:00",durationMinutes:90};
@@ -49,7 +56,7 @@ try{
   assert.equal(result.readerError,undefined,"Fictional search failed: "+JSON.stringify({result,diagnostic}));
   assert.equal(result.date,query.date);assert.equal(result.sport,"Tennis");assert.equal(result.offers.length,6);
   assert.equal(new Set(result.offers.map(x=>x.court)).size,3);
-  assert.ok(result.offers.every(x=>x.priceEur===36&&x.durationMinutes===90));
+  assert.ok(result.offers.every(x=>x.priceEur===40&&x.durationMinutes===90),"No stale rows while the new date is loading");
   assert.equal(await sourcePage.locator("details details[open]").count(),6);
   assert.equal(await sourcePage.evaluate(()=>bookClicks),0);assert.deepEqual(await sourcePage.evaluate(()=>changes),["SELECT","INPUT"]);
   assert.equal(await sourcePage.evaluate(()=>fixtureListeners.length),0);checks++;
