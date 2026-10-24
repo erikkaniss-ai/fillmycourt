@@ -23,8 +23,12 @@ async function approve(sender) {
   if (!allowedSource(source)) throw Error("Open an official Playtomic club page first.");
   await revoke();
   await chrome.storage.local.set({approvedSource:source});
-  await chrome.storage.session.set({approvedTab:tab.id});
-  return {status:"connected",sourceUrl:source};
+  // A top-frame localhost URL is not an authentication factor: other local
+  // applications can bind the same port. The user must pair the page with an
+  // unguessable short-lived companion capability shown only in this popup.
+  const pairingKey = crypto.randomUUID();
+  await chrome.storage.session.set({approvedTab:tab.id,pairingKey});
+  return {status:"connected",sourceUrl:source,pairingKey};
 }
 async function read() {
   if (busy) throw Error("A read is already running.");
@@ -48,9 +52,18 @@ async function read() {
   } finally { busy = false; }
 }
 async function handle(message,sender,external) {
-  if (!message || Object.keys(message).some(k => k !== "action")) throw Error("Unsupported request.");
-  if (external && !receiverAllowed(sender)) throw Error("Only the local GetACourt personal-sources page may read.");
-  if (!external && (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("popup.html"))) throw Error("Unsupported sender.");
+  if (!message || typeof message !== "object" || Array.isArray(message)) throw Error("Unsupported request.");
+  const allowed = external ? new Set(["action","pairingKey"]) : new Set(["action"]);
+  if (Object.keys(message).some(k => !allowed.has(k))) throw Error("Unsupported request.");
+  if (external) {
+    if (!receiverAllowed(sender)) throw Error("Only the local GetACourt personal-sources page may read.");
+    const {pairingKey} = await chrome.storage.session.get("pairingKey");
+    if (typeof pairingKey !== "string" || !/^[0-9a-f-]{36}$/.test(pairingKey) ||
+        typeof message.pairingKey !== "string" || message.pairingKey !== pairingKey)
+      throw Error("Companion not paired. Reconnect in the extension popup.");
+  } else if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("popup.html")) {
+    throw Error("Unsupported sender.");
+  }
   if (message.action === "revoke") return revoke();
   if (message.action === "read") return read();
   if (!external && message.action === "approve") return approve(sender);
