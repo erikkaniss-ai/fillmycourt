@@ -1,5 +1,6 @@
 (() => {
   const byId = id => document.getElementById(id);
+  const validateObservation = globalThis.GetACourtPersonalSourceObservation?.validateObservation;
   const local = location.origin === "http://localhost:8765";
   let epoch = 0, pending = false, expiry;
   byId("environment").textContent = local ? "Local browser mode. Connect your club using the companion popup." : "Inactive here. Use http://localhost:8765/personal-sources.html in Chrome or Edge with the companion installed.";
@@ -18,9 +19,11 @@
       const result = await chrome.runtime.sendMessage(identity(),{action:"read"});
       if (current !== epoch) return;
       if (result?.status !== "observed") throw Error(result?.error || "Source unavailable.");
-      const o = result.observation;
-      // Treat even the companion response as untrusted text. No HTML/links/actions from offers.
-      if (o?.source !== "user_ui_observation" || o.provider !== "playtomic" || !Array.isArray(o.offers) || o.offers.length > 20 || !/^https:\/\/playtomic\.com\/clubs\/[a-z0-9-]+$/.test(o.sourceUrl)) throw Error("Invalid source observation.");
+      if (typeof validateObservation !== "function") throw Error("Local source validation unavailable.");
+      // Treat even the companion response as untrusted text. No HTML, links or
+      // actions from offers are accepted, and only the Playtomic companion's
+      // narrow rendered-row schema may reach this temporary view.
+      const o = validateObservation(result.observation);
       byId("status").textContent = `${o.venue} · ${o.date} · ${o.sport}. Captured ${o.capturedAt}. Source freshness unknown.`;
       for (const offer of o.offers) {
         const article = document.createElement("article");

@@ -78,16 +78,21 @@ Installation and real Chrome/Edge activeTab-to-local-Get readback must still
 be performed with user approval. VM tests do not establish browser permission
 acceptance or a live connection. No deployment is needed for local acceptance.
 
-## Other provider findings, 22 October 2026
+## Portugal P0 update, 24 October 2026
 
-Racket ID offers a selection stage that exposes court name, duration and price
-before its Continue action. The read-only investigation stopped before
-Continue and closed the selection. Availability indicators alone should not
-be parsed as an offer; an explicit court selection sheet is required.
+The earlier exploratory notes below have been superseded by the current,
+browser-verified receipt:
+[`getacourt-portugal-p0-provider-ui-receipt-2026-10-24.md`](getacourt-portugal-p0-provider-ui-receipt-2026-10-24.md).
 
-TieSports has an official browser directory at <https://clubs.tiesports.com/en>.
-Its club pages expose **Book Online**, a date/time selector, court accordions,
-and duration/price options. Opening those controls is discovery; selecting a
-duration and proceeding is excluded from the reader. This resolves the prior
-incorrect assumption that TiePlayer access was mobile-only. The signed-in
-club management page with venue `None` is a separate surface.
+The current result is deliberately fail-closed. The observed TieSports public
+OPA OEIRAS profile leads players to the TiePlayer mobile app; no browser player
+calendar or explicit offer was observed. Rackets Pro Quinta da Marinha sends
+its official `Reservar` link to `racket.id/home`, which rendered the RACKET ID
+OFFICE landing page rather than a player booking flow. Smashpro exposes a
+public directory/search path, but the observed Quinta da Marinha profile is
+unclaimed and did not yield an authoritative calendar, free time or price.
+
+Accordingly this companion continues to accept **only Playtomic** rendered-row
+observations. TieSports/TiePlayer, Racket ID and Smashpro must not be treated
+as connected sources until their own player UI, provider delegation,
+availability/price redisplay and revocation requirements have been approved.
