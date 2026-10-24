@@ -12,9 +12,10 @@ function harness() {
   const localStore={},session={},handlers={}; let calls=0,clock=100000,tabUrl=source,readImpl;
   const area = data => ({async get(keys){return Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(k=>[k,data[k]]));},async set(v){Object.assign(data,v);},async remove(k){delete data[k];},async clear(){for(const k of Object.keys(data))delete data[k];}});
   const chrome={runtime:{id:'reader',getURL:p=>'chrome-extension://reader/'+p,onMessage:{addListener:f=>handlers.internal=f},onMessageExternal:{addListener:f=>handlers.external=f}},storage:{local:area(localStore),session:area(session)},tabs:{query:async()=>[{id:1,url:tabUrl}],get:async()=>({url:tabUrl})},scripting:{executeScript:async()=>{calls++;return readImpl?readImpl():[{frameId:0,result:{sourceUrl:source,offers:[]}}];}}};
-  const context=vm.createContext({chrome,URL,Date:class extends Date {static now(){return clock;}},importScripts:()=>{},capturePlaytomic:()=>{}});
+  let pairingSequence=0;
+  const context=vm.createContext({chrome,URL,Date:class extends Date {static now(){return clock;}},crypto:{randomUUID:()=>`00000000-0000-4000-8000-${String(++pairingSequence).padStart(12,'0')}`},importScripts:()=>{},capturePlaytomic:()=>{}});
   vm.runInContext(background,context);
-  return {localStore,session,call:(external,action,sender=external?local:popup)=>new Promise(resolve=>handlers[external?'external':'internal'](action,sender,resolve)),get calls(){return calls;},advance:()=>clock+=60000,changeTab:()=>tabUrl='https://playtomic.com/clubs/another-club',defer:()=>{let resolve;readImpl=()=>new Promise(r=>resolve=r);return value=>resolve(value);}};
+  return {localStore,session,call:(external,action,sender=external?local:popup)=>new Promise(resolve=>handlers[external?'external':'internal'](external && session.pairingKey && !('pairingKey' in action) && ['read','revoke'].includes(action.action) ? {...action,pairingKey:session.pairingKey} : action,sender,resolve)),get calls(){return calls;},advance:()=>clock+=60000,changeTab:()=>tabUrl='https://playtomic.com/clubs/another-club',defer:()=>{let resolve;readImpl=()=>new Promise(r=>resolve=r);return value=>resolve(value);}};
 }
 test('no read before popup consent; persisted preference alone cannot restore tab access',async()=>{
   const h=harness();assert.equal((await h.call(true,{action:'read'})).status,'unavailable');assert.equal(h.calls,0);
@@ -34,6 +35,23 @@ test('approved read is bounded, cooldown survives requests, revoke removes prefe
   assert.equal((await h.call(true,{action:'revoke'})).status,'disconnected');
   assert.deepEqual(h.localStore,{});assert.deepEqual(h.session,{});
   assert.equal((await h.call(true,{action:'read'})).status,'unavailable');assert.equal(h.calls,2);
+});
+test('pairing capability is required even for the exact localhost origin and rotates on consent',async()=>{
+  const h=harness();
+  const first=await h.call(false,{action:'approve'});
+  assert.match(first.pairingKey,/^[0-9a-f-]{36}$/);
+  assert.equal(h.session.pairingKey,first.pairingKey);
+  for(const bad of [{action:'read',pairingKey:'00000000-0000-4000-8000-111111111111'},{action:'read',pairingKey:''},{action:'revoke',pairingKey:'00000000-0000-4000-8000-111111111111'}]){
+    assert.equal((await h.call(true,bad)).status,'unavailable');
+  }
+  assert.equal(h.calls,0);
+  assert.equal((await h.call(true,{action:'read',pairingKey:first.pairingKey})).status,'observed');
+  const second=await h.call(false,{action:'approve'});
+  assert.notEqual(first.pairingKey,second.pairingKey);
+  assert.equal((await h.call(true,{action:'read',pairingKey:first.pairingKey})).status,'unavailable');
+  assert.equal((await h.call(true,{action:'revoke',pairingKey:first.pairingKey})).status,'unavailable');
+  assert.equal((await h.call(true,{action:'revoke',pairingKey:second.pairingKey})).status,'disconnected');
+  assert.deepEqual(h.localStore,{}); assert.deepEqual(h.session,{});
 });
 test('changed club tab cannot reuse approval',async()=>{
   const h=harness();await h.call(false,{action:'approve'});h.changeTab();
@@ -63,5 +81,12 @@ test('package has no cookie, host, background network or booking automation perm
   const manifest=JSON.parse(readFileSync(new URL('manifest.json',root),'utf8'));
   assert.deepEqual(manifest.permissions,['activeTab','scripting','storage']);assert.equal(manifest.host_permissions,undefined);
   assert.deepEqual(manifest.externally_connectable.matches,['http://localhost/*']);
+  const localPage=readFileSync(new URL('../personal-sources.html',import.meta.url),'utf8');
+  const localUi=readFileSync(new URL('../assets/personal-sources.js',import.meta.url),'utf8');
+  const popupPage=readFileSync(new URL('popup.html',root),'utf8');
+  assert.match(localPage,/id="pairing"[^>]*type="password"/);
+  assert.match(localUi,/pairingKey:pairingKey\(\)/);
+  assert.match(localUi,/pagehide[\s\S]*byId\("pairing"\).value = ""/);
+  assert.match(popupPage,/id="pairingKey"/);
   assert.doesNotMatch(background+capture,/\bfetch\s*\(|XMLHttpRequest|document\.cookie|localStorage|\.click\s*\(|setInterval|webRequest|debugger/);
 });
