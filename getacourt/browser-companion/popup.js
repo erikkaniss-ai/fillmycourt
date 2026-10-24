@@ -1,11 +1,8 @@
-document.getElementById("identity").textContent = chrome.runtime.id;
-for (const action of ["approve","revoke"]) document.getElementById(action).addEventListener("click",async () => {
-  const r = await chrome.runtime.sendMessage({action});
-  const paired = r.status === "connected" && typeof r.pairingKey === "string" && /^[0-9a-f-]{36}$/.test(r.pairingKey);
-  document.getElementById("pairingHelp").hidden = !paired;
-  document.getElementById("pairingValue").hidden = !paired;
-  document.getElementById("pairingKey").textContent = paired ? r.pairingKey : "";
-  document.getElementById("status").textContent = paired
-    ? "Club allowed. Pair with local GetACourt using the code below."
-    : r.status === "disconnected" ? "Disconnected." : r.error || "Companion unavailable.";
+for(const action of ["approve","open","revoke"])document.getElementById(action).addEventListener("click",async()=>{
+  const button=document.getElementById(action);button.disabled=true;
+  try{
+    const result=await chrome.runtime.sendMessage({action});
+    document.getElementById("status").textContent=result?.status==="connected"?"Connected. GetACourt is opening.":result?.status==="disconnected"?"Disconnected.":result?.status==="opened"?"GetACourt opened.":result?.error||"Could not connect. Open the Playtomic club and try again.";
+  }catch{document.getElementById("status").textContent="Reader unavailable. Reload the existing extension in Chrome.";}
+  finally{button.disabled=false;}
 });

@@ -71,6 +71,12 @@ jobs:
           GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
           GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
         run: node getacourt/tests/connected-accounts-browser.mjs
+      - name: Personal reader UI and bounded search DOM — fictional fixtures only
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+          GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
+          GAC_FIXTURE_BROWSER: chromium
+        run: node getacourt/tests/personal-reader-browser.mjs
       - name: Integrated unregistered module offline network-loss and exact-cache proof
         env:
           GAC_OFFLINE_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
@@ -103,7 +109,10 @@ jobs:
           node --check getacourt/browser-companion/capture.js
           node --check getacourt/browser-companion/popup.js
           node --check getacourt/assets/personal-source-observation.js
-          node --check getacourt/assets/personal-sources.js
+          node --check getacourt/browser-companion/search.js
+          node --check getacourt/browser-companion/reader.js
+          node --check getacourt/browser-companion/observation.js
+          node --check getacourt/tests/personal-reader-browser.mjs
           node --check getacourt/assets/app.js
           node --check getacourt/assets/auth-pkce.js
           node --check getacourt/assets/commercial-signals.js

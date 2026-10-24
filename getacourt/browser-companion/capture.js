@@ -1,5 +1,5 @@
 // Executed only after activeTab consent. Reads rendered offer fields, never page state.
-function capturePlaytomic() {
+function capturePlaytomic(scope) {
   // Return fixed failure codes without depending on how the browser serializes
   // injected exceptions. Never return the caught exception text.
   const fail = code => { throw Object.assign(new Error("Offer unavailable"), {readerCode:code}); };
@@ -25,9 +25,16 @@ function capturePlaytomic() {
     const timeGroup = button.closest("details");
     const courtGroup = timeGroup?.parentElement.closest("details");
     const court = courtGroup?.querySelector(":scope > summary")?.innerText.split("\n")[0].trim();
+    if (scope && !scope.courts.includes(court)) continue;
     const row = button.parentElement.innerText.replace(/\s+/g, " ").trim();
     const m = /^(\d{1,2}:\d{2} [AP]M)\s*-\s*(\d{1,2}:\d{2} [AP]M)\s*•\s*(\d+) min\s*•\s*€(\d+(?:\.\d{2})?)\s*Book$/.exec(row);
     if (!court || court.length > 100 || !m || Number(m[3]) < 1 || Number(m[3]) > 360 || Number(m[4]) > 2000) fail("OFFER_FORMAT_CHANGED");
+    if (scope) {
+      const startMatch=/^(\d{1,2}):(\d{2}) ([AP]M)$/.exec(m[1]);
+      const start=(Number(startMatch[1])%12)*60+Number(startMatch[2])+(startMatch[3]==="PM"?720:0);
+      if (start<scope.fromMinutes || start>scope.toMinutes || (scope.durationMinutes && Number(m[3])!==scope.durationMinutes)) continue;
+      if (offers.length===20) break;
+    }
     offers.push({court, startLabel:m[1], endLabel:m[2], durationMinutes:Number(m[3]), priceEur:Number(m[4])});
     if (offers.length > 20) fail("TOO_MANY_OFFERS");
   }

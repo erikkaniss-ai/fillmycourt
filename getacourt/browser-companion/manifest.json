@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "GetACourt Personal Playtomic Reader",
-  "version": "0.1.1",
-  "description": "Read expanded offers in one personally approved Playtomic club tab. No booking actions.",
+  "version": "0.2.0",
+  "description": "Search explicit offers in one personally approved Playtomic club. No booking or payment actions.",
   "permissions": ["activeTab", "scripting", "storage"],
   "background": {"service_worker": "background.js"},
   "action": {"default_popup": "popup.html"},
-  "externally_connectable": {"matches": ["http://localhost/*"]}
+  "content_security_policy": {"extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"}
 }

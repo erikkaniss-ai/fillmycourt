@@ -1,137 +1,129 @@
-# Personal Playtomic browser reader
+# GetACourt personal Playtomic reader v0.2.0
 
-This implementation adds a browser-local companion and a GetACourt page at
-`personal-sources.html`. The approved club preference persists in extension
-local storage. Every read is explicitly requested in local GetACourt; there
-is no background synchronization, provider HTTP client, credential transfer,
-booking action or payment route. It is not a provider OAuth/API connection.
+This is a browser-local, explicitly requested search of one personally approved
+Playtomic club. It is not a provider API integration or an unattended supply
+feed. No booking, hold, payment, provider credential, token, cookie or private
+endpoint is used. No deployment is needed.
 
-## Run locally, without deploying
+## Connect without copying codes
 
-1. Serve only the `getacourt` directory on `http://localhost:8765` (bind to
-   loopback, not a public interface). Open `/personal-sources.html` in Chrome
-   or Edge. The profile in the normal GetACourt UI links to this page.
-2. After reviewing and explicitly approving the new browser access, load the
-   unpacked `getacourt/browser-companion` extension. It requests `activeTab`,
-   `scripting` and `storage`; no permanent host, cookies, debugger, webRequest,
-   alarms or identity permission. This installation has NOT been performed
-   by the source change. The in-app browser does not host this extension.
-3. Sign into Playtomic yourself in the same Chrome/Edge profile. Open one
-   `/clubs/<slug>` page, expand a court, time and explicit duration/price
-   offer, then open the companion popup and click **Allow this club**.
-   Approval is an informed grant of this club's rendered offers to local
-   GetACourt. Copy the public extension ID **and the pairing code displayed
-   after Allow this club** into the local GetACourt page. The pairing code is
-   a browser-only capability, not a Playtomic password or OAuth token. Never
-   paste it into chat, code, screenshots or analytics. GetACourt stores neither
-   the extension ID nor the pairing code.
-4. Press **Read expanded offers**. Only the previously approved tab and club
-   may be read. At least 60 seconds separates attempts, including failures
-   after tab validation. This is our conservative limit, not a provider rate
-   entitlement. The companion does not navigate, refresh or click the provider.
-5. **Disconnect and clear** revokes the stored club approval and pairing code,
-   clears the tab grant and prevents late in-flight completion. The popup also offers
-   Disconnect. Removing the extension removes this capability. This does not
-   log the user out of Playtomic or revoke any provider OAuth grant.
+1. Existing owners reload the unpacked `getacourt/browser-companion` extension
+   once for v0.2.0. New owners review and load that same folder in Chrome/Edge.
+   Permissions remain only `activeTab`, `scripting` and `storage`.
+2. Sign into Playtomic personally in that browser profile and open the intended
+   official `https://playtomic.com/clubs/<slug>` page.
+3. Click the GetACourt extension icon, then **Connect and open GetACourt**.
+   The packaged reader opens itself. There is no extension ID, pairing code,
+   localhost server or third-party password to enter.
+4. Choose one day (today through the next 14 days), Padel/Tennis, start-time
+   range and optional 60/90/120-minute duration. Press **Search this club**.
+5. **Disconnect and clear**, in either reader or popup, withdraws the club
+   association, clears the current results and cancels the current search.
+   It does not log the owner out of Playtomic or remove the extension.
 
-The local association survives browser restarts; temporary activeTab access
-does not. Reconnect from the club's popup after restart, navigation, changed
-club or lost access. No promise of permanent login or unattended server access
-is made. The extension cannot reuse an in-app browser session in Chrome.
+The club preference alone persists in extension local storage. The approved
+tab and attempt budget are browser-session state. Reopening the reader or
+restarting its service worker needs no codes and creates no new grant.
+After browser restart, tab closure/navigation or lost activeTab access, renew
+the grant from the intended club's icon. Permanent provider login, cross-device
+access and unattended background reading are not promised.
 
-## Data and trust
+The normal GetACourt profile's `personal-sources.html` link is now installation
+guidance. That website cannot read the extension. The v0.1 localhost bridge,
+ID/code inputs, external messaging listener and `externally_connectable`
+manifest entry have been removed.
 
-The collector reads the visible Available courts section, venue heading,
-selected date/sport and expanded Book rows only. The English mobile accordion
-layout observed during investigation is supported. A different locale/layout,
-collapsed offers, ambiguous date/sport, malformed row or more than 20 offers
-fails closed. It never opens a booking or expands anything itself. Hidden
-desktop alternatives, profile information, hydration state, cookies, browser
-storage and provider network traffic are not read. Account query identifiers
-are stripped from the source URL.
+## Why removing the code does not weaken receiver authentication
 
-The response identifies `user_ui_observation`, `expanded_offers_only`, capture
-time, displayed date and local time labels, court, duration and EUR price.
-Timezone and provider source freshness remain unknown: reading an unchanged
-DOM is not a provider refresh. No UTC conversion or full-inventory claim.
-Results live only in GetACourt page memory and clear after 60 seconds, page
-exit or disconnect. They do not enter the main availability, booking, Core,
-database, telemetry or server APIs. Persistent storage contains only the
-approved club URL. Extension ID entry is not saved by GetACourt.
+Search runs in a packaged `chrome-extension://<installed-id>/reader.html`
+page. The service worker accepts only the exact own-extension reader/popup
+sender URLs and own runtime ID; the reader cannot grant source-tab consent.
+Websites, localhost processes, other extensions, frames and altered paths are
+rejected. No web-accessible resources are declared. The extension CSP permits
+only packaged scripts/styles, no network connections, objects or frames.
 
-Only a top-frame sender at `http://localhost:8765/personal-sources.html` may
-request a read or revoke, **and only after presenting the random pairing code
-issued by the companion popup**. The localhost pathname check alone is not
-proof of page identity: other processes could serve that address. Web pages
-cannot grant consent or ask the extension to reveal its pairing code. The
-user deliberately copies the popup code into the local page; therefore only
-enter it into the trusted local GetACourt page, not other localhost services. Request fields are allowlisted. All result strings render as text.
-External action names, provider URLs, scripts, credentials or booking methods
-cannot be supplied. The 60-second budget, single-flight guard and revocation
-epoch reject bursts, simultaneous reads and late withdrawn responses. A new
-Allow this club generates a new pairing code and invalidates the old one;
-logout/disconnect clears pairing. The local page keeps the pairing code in
-its input only, removes it when closing or disconnecting, and does not send
-it to the provider.
+This replaces the previous manual pairing secret with the browser's extension
+origin boundary. It does not replace authentication with a public extension
+ID or a localhost pathname. No capability is placed in a URL, clipboard,
+persistent web storage, chat or analytics.
 
-This is personal assistance under the user's explicit opt-in. Provider API
-delegation, automated product redistribution and commercial supply rights
-remain separate. No legal or provider approval is inferred from this code.
+## What Search does
 
-## Troubleshooting (companion and reader page v0.1.1)
+One explicit click inspects one approved club and one selected date. If needed
+it moves only the approved club tab into a separate compact browser window
+(480 pixels wide); the reader explains this before Search. Other tabs/windows
+are not enumerated, resized or closed. The compact window exposes the English
+mobile court/time accordion that was verified in the earlier live reader.
 
-Updating files does not update an already loaded Chrome service worker or an
-already open page. Reload the existing extension in Chrome, hard refresh the
-local page, then approve the club again and privately enter the new pairing
-code. Both popup and local page show v0.1.1. No reinstall or extra permission
-is required. Never post pairing codes or an unmasked popup screenshot.
+The injected code changes only the normal visible date/sport controls using
+their input/change events and opens native court/time details. It never clicks
+a button, submits a form or enters checkout. The provider's own UI may make its
+normal filter requests; there is no direct provider HTTP client, network
+inspection, cookie replay, hydration-state access or hidden-API use.
 
-Unavailable responses contain fixed reason codes and fixed instructions:
-`PAIRING_REQUIRED`, `CONNECT_REQUIRED`, `RATE_LIMITED`, `READ_BUSY`,
-`TAB_CHANGED`, `TAB_ACCESS_REQUIRED`, `CONSENT_WITHDRAWN`,
-`OFFER_SECTION_MISSING`, `NO_EXPANDED_OFFERS`, or a format/validation failure.
-Raw browser/provider exceptions are never returned. The collector serializes
-only allowlisted failure codes across script injection instead of relying on
-browser exception serialization. Missing capture results are reported as
-`READ_FAILED`, separately from a changed source URL. Unrecognized
-errors stay `READ_FAILED`; none are availability observations.
+Search inspects at most 3 courts and expands at most 2 eligible start times per
+court (6 total). It shares up to 20 matching explicit priced offers. Date,
+sport, time and duration must match the request. The collector reads only
+rendered, visible Book offer rows containing a court, start/end, duration and
+EUR price. It does not activate Book. Hidden or uninspected offers are not
+inventory, and an empty/unsupported subset is not proof that no courts are free.
 
-`NO_EXPANDED_OFFERS` requires a visible explicit offer in the supported English
-mobile court/time accordion, including court, time, duration, price and Book.
-The reader does not parse the desktop colored schedule grid. Never click Book
-to diagnose this reader. Share only the reason code/status text. Wait at least
-60 seconds between deliberate attempts; no automatic retry or polling runs.
-The generic error in the user's 24 October screenshot does not establish
-whether pairing, tab access, the cooldown or the offer layout caused failure.
-Live read/expiry/revoke acceptance remains pending until verified separately.
+At least 60 seconds separates attempts in the browser session, including failed
+attempts after source-tab validation. Reconnect/disconnect cannot reset that
+budget. Only one search runs at a time. There is no scheduler, automatic retry,
+refresh loop, multi-venue crawl or automatic date iteration. Waiting for DOM
+updates is bounded and does not issue provider requests.
 
-## Verification and remaining acceptance
+Sign-in/security-check UI, unsupported language/layout, ambiguous controls,
+loading timeouts, changed source tab, malformed offers and lost access stop
+the search. The owner personally handles OAuth, MFA and CAPTCHA; nothing
+bypasses them. Fixed failure codes replace raw browser/provider exceptions.
 
-`node --test getacourt/tests/personal-playtomic-reader.test.mjs` exercises consent,
-exact sender/port/path/frame, forbidden requests, cooldown, lost tab context,
-revoke cleanup, in-flight withdrawal and conservative visible-row parsing.
-It is registered in fast, integration and full Platform CI. Fixtures are
-fictional; there is no real account or observed live offer in the repository.
+Revocation increments the worker generation immediately and serializes consent
+writes so a late approval cannot undo a later withdrawal. It asks the injected
+search to stop at its next checkpoint; already-started provider UI requests
+cannot be undone. The worker unconditionally rejects a late withdrawn result,
+even if cancellation delivery is delayed.
 
-Installation and real Chrome/Edge activeTab-to-local-Get readback must still
-be performed with user approval. VM tests do not establish browser permission
-acceptance or a live connection. No deployment is needed for local acceptance.
+## Provenance, display and limits
 
-## Portugal P0 update, 24 October 2026
+The independent strict validator is bundled as `observation.js`; a contract
+test requires exact equality with `assets/personal-source-observation.js`.
+Results identify `user_ui_observation`, the clean club URL without account
+queries, selected date/sport, capture UTC time and explicit offers. Coverage
+remains `expanded_offers_only`; timezone and provider freshness remain UNKNOWN.
+A stable DOM is not proof of a fresh provider response.
 
-The earlier exploratory notes below have been superseded by the current,
-browser-verified receipt:
-[`getacourt-portugal-p0-provider-ui-receipt-2026-10-24.md`](getacourt-portugal-p0-provider-ui-receipt-2026-10-24.md).
+The reader renders text only and sorts the inspected offers by start time and
+price. Results exist only in that reader page, expire after 60 seconds, and
+clear when filters change, the page exits or access is withdrawn. They are
+not uploaded, persisted, inserted into Core/main inventory, booked or paid.
 
-The current result is deliberately fail-closed. The observed TieSports public
-OPA OEIRAS profile leads players to the TiePlayer mobile app; no browser player
-calendar or explicit offer was observed. Rackets Pro Quinta da Marinha sends
-its official `Reservar` link to `racket.id/home`, which rendered the RACKET ID
-OFFICE landing page rather than a player booking flow. Smashpro exposes a
-public directory/search path, but the observed Quinta da Marinha profile is
-unclaimed and did not yield an authoritative calendar, free time or price.
+TiePlayer, Racket ID and Smashpro are not connected in this companion.
+Licensed API delegation, redistribution rights, Portugal-wide coverage,
+production activation and deployment remain separate scopes requiring their
+own evidence/authorization.
 
-Accordingly this companion continues to accept **only Playtomic** rendered-row
-observations. TieSports/TiePlayer, Racket ID and Smashpro must not be treated
-as connected sources until their own player UI, provider delegation,
-availability/price redisplay and revocation requirements have been approved.
+## Verification
+
+- Node contracts cover exact packaged senders, no external bridge, no-code
+  reopen, session/preference separation, query limits, source changes, fixed
+  errors, global cooldown, revoke/approval races, late results and strict schema.
+- `personal-reader-browser.mjs` tests native date/sport controls, bounded real
+  DOM expansion and mid-update cancellation on fictional provider HTML.
+  The fixture URL is fulfilled entirely in-process; no live provider traffic.
+- Responsive reader fixtures at 390/1440 pixels verify text-only rendering,
+  no code inputs, expiry, no automatic search, no web storage and late-result
+  rejection after disconnect.
+- Mandatory pinned Chromium CI additionally loads the actual MV3 package in
+  a fresh temporary profile and verifies its native own-page messaging and
+  refusal to approve a non-provider tab. Branded Chrome cannot run this
+  side-loading smoke test; the optional local Chrome fixture run does not
+  claim native extension installation proof.
+
+The earlier v0.1.1 real owner session demonstrated one explicit offer transfer,
+60-second expiry, changed-tab rejection and disconnect. It does not establish
+v0.2.0's automatic filtering/window behavior. After source CI, v0.2.0 needs the
+owner's one-time extension reload and a fresh no-code Search/Disconnect check
+in their own signed-in browser. Record actual results separately; never
+substitute these fictional tests for live acceptance.

@@ -1,111 +1,171 @@
 importScripts("capture.js");
-let generation = 0, busy = false;
-// Only these fixed messages may leave the companion. Never forward browser,
-// provider or thrown-error text, which could contain account data or secrets.
-const readerErrors = Object.freeze({
-  REQUEST_REJECTED: "This request is not allowed. Use the local GetACourt reader page.",
-  PAIRING_REQUIRED: "Pairing code missing or expired. Use Allow this club in the Playtomic extension popup, then enter its new code in local GetACourt.",
-  CONNECT_REQUIRED: "No club tab is connected. Open the Playtomic club and use Allow this club in the extension popup.",
-  CLUB_PAGE_REQUIRED: "Open an official Playtomic club page before allowing this club.",
-  READ_BUSY: "A read is already running. Wait for it to finish.",
-  RATE_LIMITED: "Wait 60 seconds after the previous read attempt, then press Read once. No automatic retry will run.",
-  TAB_CHANGED: "The approved tab changed club. Reconnect from the intended club using the extension popup.",
-  TAB_ACCESS_REQUIRED: "Chrome cannot read the approved tab. Keep it open and renew Allow this club in its extension popup.",
-  CONSENT_WITHDRAWN: "Access was disconnected during this read. No offers were shared.",
-  OFFER_SECTION_MISSING: "The visible English Available courts section was not found. Open the club schedule; other page layouts are not supported yet.",
-  DATE_AMBIGUOUS: "The selected date could not be read unambiguously. No offers were shared.",
-  SPORT_AMBIGUOUS: "The selected sport could not be read unambiguously. Select Padel or Tennis in the English club schedule.",
-  VENUE_MISSING: "The club name could not be read. No offers were shared.",
-  NO_EXPANDED_OFFERS: "No explicit offer is expanded. The reader currently supports the English mobile court/time accordion: expand a court and time until duration, price and Book are visible. Do not press Book.",
-  OFFER_FORMAT_CHANGED: "The expanded offer layout is not supported. No availability was inferred or shared.",
-  TOO_MANY_OFFERS: "Expand at most 20 offers before reading.",
-  READ_FAILED: "The read could not be completed. No offers were shared. Keep the club tab open and check the visible schedule."
+const VERSION="0.2.0";
+let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
+// Fixed messages only: never return a browser/provider exception or credential.
+const errors=Object.freeze({
+  REQUEST_REJECTED:"Open GetACourt from its extension icon.",
+  CONNECT_REQUIRED:"Open the intended Playtomic club, click the GetACourt icon, then Connect and open GetACourt.",
+  CLUB_PAGE_REQUIRED:"Open an official Playtomic /clubs/ page before connecting.",
+  READ_BUSY:"A search is already running. Wait for it to finish.",
+  RATE_LIMITED:"Wait 60 seconds after the previous attempt. No automatic retry runs.",
+  TAB_CHANGED:"The approved tab left this club. Reconnect explicitly from the intended club.",
+  TAB_ACCESS_REQUIRED:"Renew tab access using Connect and open GetACourt on the club tab.",
+  CONSENT_WITHDRAWN:"Access was disconnected during the search. No offers were shared.",
+  QUERY_INVALID:"Choose one valid date within the next 14 days, Padel or Tennis, and a same-day start-time range.",
+  COMPACT_VIEW_REQUIRED:"Compact view failed. Resize the club window below 640 pixels before searching.",
+  CHALLENGE_REQUIRED:"Complete the provider sign-in or security check personally in the club tab.",
+  SCHEDULE_NOT_READY:"The selected schedule did not finish updating. No offers were shared.",
+  OFFER_SECTION_MISSING:"The visible English Available courts section was not found. This layout is unsupported.",
+  DATE_AMBIGUOUS:"The selected date is ambiguous. No offers were shared.",
+  SPORT_AMBIGUOUS:"The selected sport is ambiguous. No offers were shared.",
+  VENUE_MISSING:"The club name could not be read. No offers were shared.",
+  NO_EXPANDED_OFFERS:"No matching explicit priced offer was found in the inspected subset. Other slots may exist.",
+  OFFER_FORMAT_CHANGED:"The offer layout is unsupported. No availability was inferred.",
+  TOO_MANY_OFFERS:"Close some expanded offers before reading.",
+  READ_FAILED:"The search could not be completed. No offers were shared."
 });
-const readerFailure = code => { throw Object.assign(new Error("Personal reader unavailable"), {readerCode:code}); };
-function unavailable(error) {
-  const code = Object.hasOwn(readerErrors, error?.readerCode) ? error.readerCode : "READ_FAILED";
-  return {status:"unavailable",code,error:readerErrors[code]};
+const fail=code=>{throw Object.assign(new Error("Reader unavailable"),{readerCode:code});};
+const unavailable=error=>{
+  const code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
+  return {status:"unavailable",code,error:errors[code],version:VERSION};
+};
+const sourceAllowed=value=>{
+  try {const u=new URL(value);return u.origin==="https://playtomic.com"&&/^\/clubs\/[a-z0-9-]+$/.test(u.pathname)&&!u.search&&!u.hash;}
+  catch{return false;}
+};
+function caller(sender){
+  if(sender?.id!==chrome.runtime.id)fail("REQUEST_REJECTED");
+  if(sender.url===chrome.runtime.getURL("popup.html"))return "popup";
+  if(sender.url===chrome.runtime.getURL("reader.html")&&(sender.frameId===undefined||sender.frameId===0))return "reader";
+  fail("REQUEST_REJECTED");
 }
-const allowedSource = value => {
-  try { const u = new URL(value); return u.origin === "https://playtomic.com" && /^\/clubs\/[a-z0-9-]+$/.test(u.pathname) && !u.search && !u.hash; }
-  catch { return false; }
-};
-const receiverAllowed = sender => {
-  try { const u = new URL(sender.url); return u.origin === "http://localhost:8765" && u.pathname === "/personal-sources.html" && sender.frameId === 0; }
-  catch { return false; }
-};
-async function revoke() {
-  generation++;
+function queryValid(q){
+  if(!q||Object.keys(q).sort().join(",")!=="date,durationMinutes,from,sport,to"||
+    !/^\d{4}-\d{2}-\d{2}$/.test(q.date)||!["Padel","Tennis"].includes(q.sport)||
+    !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(q.from)||!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(q.to)||
+    q.from>q.to||![0,60,90,120].includes(q.durationMinutes))return false;
+  const date=Date.parse(q.date+"T00:00:00.000Z");
+  const today=Date.parse(new Date().toISOString().slice(0,10)+"T00:00:00.000Z");
+  return Number.isFinite(date)&&new Date(date).toISOString().slice(0,10)===q.date&&date>=today&&date<=today+14*86400000;
+}
+function consentOperation(operation){
+  consentPending++;
+  const result=consentQueue.then(operation);
+  consentQueue=result.catch(()=>{});
+  return result.finally(()=>{consentPending--;});
+}
+async function clearConsent(){
+  const {approvedTab}=await chrome.storage.session.get("approvedTab");
   await chrome.storage.local.remove("approvedSource");
-  await chrome.storage.session.clear();
-  return {status:"disconnected"};
-}
-async function approve(sender) {
-  // Only our packaged popup may approve a tab; web pages cannot issue consent.
-  if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("popup.html")) readerFailure("REQUEST_REJECTED");
-  const [tab] = await chrome.tabs.query({active:true,currentWindow:true});
-  const u = new URL(tab?.url || "about:blank");
-  const source = u.origin + u.pathname;
-  if (!allowedSource(source)) readerFailure("CLUB_PAGE_REQUIRED");
-  await revoke();
-  await chrome.storage.local.set({approvedSource:source});
-  // A top-frame localhost URL is not an authentication factor: other local
-  // applications can bind the same port. The user must pair the page with an
-  // unguessable short-lived companion capability shown only in this popup.
-  const pairingKey = crypto.randomUUID();
-  await chrome.storage.session.set({approvedTab:tab.id,pairingKey});
-  return {status:"connected",sourceUrl:source,pairingKey};
-}
-async function read() {
-  if (busy) readerFailure("READ_BUSY");
-  busy = true;
-  const epoch = generation;
-  try {
-    const {approvedSource} = await chrome.storage.local.get("approvedSource");
-    const {approvedTab,lastAttempt=0} = await chrome.storage.session.get(["approvedTab","lastAttempt"]);
-    if (!allowedSource(approvedSource) || !Number.isInteger(approvedTab)) readerFailure("CONNECT_REQUIRED");
-    if (Date.now() - lastAttempt < 60000) readerFailure("RATE_LIMITED");
-    let tab;
-    try { tab = await chrome.tabs.get(approvedTab); }
-    catch { readerFailure("TAB_ACCESS_REQUIRED"); }
-    const u = new URL(tab.url);
-    if (u.origin + u.pathname !== approvedSource || !allowedSource(u.origin+u.pathname)) readerFailure("TAB_CHANGED");
-    await chrome.storage.session.set({lastAttempt:Date.now()});
-    if (epoch !== generation) readerFailure("CONSENT_WITHDRAWN");
-    let results;
-    try { results = await chrome.scripting.executeScript({target:{tabId:approvedTab},func:capturePlaytomic}); }
-    catch { readerFailure(epoch !== generation ? "CONSENT_WITHDRAWN" : "TAB_ACCESS_REQUIRED"); }
-    const result = results.find(r => r.frameId === 0)?.result;
-    if (epoch !== generation) readerFailure("CONSENT_WITHDRAWN");
-    if (result?.readerError) readerFailure(result.readerError);
-    if (!result) readerFailure("READ_FAILED");
-    if (result.sourceUrl !== approvedSource) readerFailure("TAB_CHANGED");
-    return {status:"observed",observation:result};
-  } finally { busy = false; }
-}
-async function handle(message,sender,external) {
-  if (!message || typeof message !== "object" || Array.isArray(message)) readerFailure("REQUEST_REJECTED");
-  const allowed = external ? new Set(["action","pairingKey"]) : new Set(["action"]);
-  if (Object.keys(message).some(k => !allowed.has(k))) readerFailure("REQUEST_REJECTED");
-  if (external) {
-    if (!receiverAllowed(sender)) readerFailure("REQUEST_REJECTED");
-    const {pairingKey} = await chrome.storage.session.get("pairingKey");
-    if (typeof pairingKey !== "string" || !/^[0-9a-f-]{36}$/.test(pairingKey) ||
-        typeof message.pairingKey !== "string" || message.pairingKey !== pairingKey)
-      readerFailure("PAIRING_REQUIRED");
-  } else if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL("popup.html")) {
-    readerFailure("REQUEST_REJECTED");
+  // Reconnecting must not reset the browser session's global attempt budget.
+  await chrome.storage.session.remove("approvedTab");
+  if(Number.isInteger(approvedTab)) {
+    try{await chrome.tabs.sendMessage(approvedTab,{action:"cancelPersonalSearch"});}catch{}
   }
-  if (message.action === "revoke") return revoke();
-  if (message.action === "read") return read();
-  if (!external && message.action === "approve") return approve(sender);
-  readerFailure("REQUEST_REJECTED");
 }
-function listener(external) {
-  return (message,sender,reply) => {
-    handle(message,sender,external).then(reply).catch(error => reply(unavailable(error)));
-    return true;
-  };
+async function disconnect(){
+  generation++;
+  return consentOperation(async()=>{
+    await clearConsent();
+  return {status:"disconnected",version:VERSION};
+  });
 }
-chrome.runtime.onMessage.addListener(listener(false));
-chrome.runtime.onMessageExternal.addListener(listener(true));
+async function approve(){
+  const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+  const u=new URL(tab?.url||"about:blank"),source=u.origin+u.pathname;
+  if(!sourceAllowed(source))fail("CLUB_PAGE_REQUIRED");
+  generation++;
+  return consentOperation(async()=>{
+    await clearConsent();
+    await chrome.storage.local.set({approvedSource:source});
+    await chrome.storage.session.set({approvedTab:tab.id});
+    return {status:"connected",sourceUrl:source,version:VERSION};
+  });
+}
+async function openReader(){
+  await chrome.tabs.create({url:chrome.runtime.getURL("reader.html")});
+  return {status:"opened",version:VERSION};
+}
+async function approvedTab(){
+  const {approvedSource}=await chrome.storage.local.get("approvedSource");
+  const {approvedTab}=await chrome.storage.session.get("approvedTab");
+  if(!sourceAllowed(approvedSource)||!Number.isInteger(approvedTab))fail("CONNECT_REQUIRED");
+  let tab,u;
+  try{tab=await chrome.tabs.get(approvedTab);u=new URL(tab.url);}catch{fail("TAB_ACCESS_REQUIRED");}
+  if(u.origin+u.pathname!==approvedSource)fail("TAB_CHANGED");
+  return {tab,source:approvedSource};
+}
+async function status(){
+  const {approvedSource}=await chrome.storage.local.get("approvedSource");
+  const {approvedTab}=await chrome.storage.session.get("approvedTab");
+  return {status:!consentPending&&sourceAllowed(approvedSource)&&Number.isInteger(approvedTab)?"connected":"disconnected",
+    sourceUrl:sourceAllowed(approvedSource)?approvedSource:null,version:VERSION};
+}
+async function runSearch(query){
+  if(consentPending)fail("CONSENT_WITHDRAWN");
+  if(busy)fail("READ_BUSY");
+  busy=true;const epoch=generation;
+  try{
+    const {lastAttempt=0}=await chrome.storage.session.get("lastAttempt");
+    if(Date.now()-lastAttempt<60000)fail("RATE_LIMITED");
+    const {tab,source}=await approvedTab();
+    await chrome.storage.session.set({lastAttempt:Date.now()});
+    if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+    if(query){
+      // The Search button discloses moving only this approved tab to compact view.
+      // Other tabs/windows are never enumerated, resized or closed.
+      try{
+        const window=await chrome.windows.get(tab.windowId);
+        if(!window||window.width>640)
+          await chrome.windows.create({tabId:tab.id,type:"normal",width:480,height:850,focused:false});
+      }catch{fail("COMPACT_VIEW_REQUIRED");}
+    }
+    if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+    let results;
+    try{
+      if(query){
+        await chrome.scripting.executeScript({target:{tabId:tab.id},files:["capture.js","search.js"]});
+        if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+        results=await chrome.scripting.executeScript({target:{tabId:tab.id},func:async q=>searchPlaytomic(q),args:[query]});
+      }else results=await chrome.scripting.executeScript({target:{tabId:tab.id},func:capturePlaytomic});
+    }catch(error){
+      if(epoch!==generation||error?.readerCode==="CONSENT_WITHDRAWN")fail("CONSENT_WITHDRAWN");
+      fail("TAB_ACCESS_REQUIRED");
+    }
+    if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+    const result=results?.find(r=>r.frameId===0)?.result;
+    if(result?.readerError)fail(result.readerError);
+    if(!result)fail("READ_FAILED");
+    const current=await approvedTab();
+    if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+    if(current.tab.id!==tab.id||result.sourceUrl!==source)fail("TAB_CHANGED");
+    if(query&&(result.date!==query.date||result.sport!==query.sport))fail("SCHEDULE_NOT_READY");
+    return {status:"observed",observation:result,version:VERSION};
+  }finally{busy=false;}
+}
+async function handle(message,sender){
+  const role=caller(sender);
+  if(!message||typeof message!=="object"||Array.isArray(message)||
+    Object.keys(message).some(k=>k!=="action"&&!(message.action==="search"&&k==="query")))fail("REQUEST_REJECTED");
+  if(message.action==="status")return status();
+  if(message.action==="revoke")return disconnect();
+  if(message.action==="approve"&&role==="popup"){
+    const result=await approve();await openReader();return result;
+  }
+  if(message.action==="open"&&role==="popup")return openReader();
+  if(message.action==="read"&&role==="reader")return runSearch();
+  if(message.action==="search"&&role==="reader"){
+    if(!queryValid(message.query))fail("QUERY_INVALID");
+    return runSearch(message.query);
+  }
+  if(message.action==="showClub"&&role==="reader"){
+    const {tab}=await approvedTab();
+    await chrome.tabs.update(tab.id,{active:true});
+    await chrome.windows.update(tab.windowId,{focused:true});
+    return {status:"opened",version:VERSION};
+  }
+  fail("REQUEST_REJECTED");
+}
+chrome.runtime.onMessage.addListener((message,sender,reply)=>{
+  handle(message,sender).then(reply).catch(error=>reply(unavailable(error)));return true;
+});

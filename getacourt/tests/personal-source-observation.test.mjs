@@ -40,8 +40,11 @@ test("validator is pure local code with no provider transport or persistent stor
   ])assert.doesNotMatch(source,pattern);
 });
 
-test("the local page loads validation before the reader and names no false P0 connection",()=>{
+test("the packaged reader shares the strict validator and the legacy page is inactive guidance",()=>{
   const page=readFileSync("getacourt/personal-sources.html","utf8");
-  assert.match(page,/assets\/personal-source-observation\.js[\s\S]*assets\/personal-sources\.js/);
+  const reader=readFileSync("getacourt/browser-companion/reader.html","utf8");
+  assert.match(reader,/observation\.js[\s\S]*reader\.js/);
+  assert.equal(readFileSync("getacourt/browser-companion/observation.js","utf8").trim(),readFileSync("getacourt/assets/personal-source-observation.js","utf8").trim());
+  assert.doesNotMatch(page,/<script|id="pairing"|id="extension"/);
   assert.match(page,/TiePlayer, Racket ID and Smashpro are not connected here/);
 });
