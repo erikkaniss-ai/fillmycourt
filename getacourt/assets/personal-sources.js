@@ -12,11 +12,16 @@
     if (!globalThis.chrome?.runtime?.sendMessage) throw Error("Browser companion unavailable. Use Chrome or Edge.");
     return id;
   };
+  const pairingKey = () => {
+    const code = byId("pairing").value.trim();
+    if (!/^[0-9a-f-]{36}$/.test(code)) throw Error("Enter the current pairing code from the companion popup.");
+    return code;
+  };
   byId("read").addEventListener("click",async () => {
     if (!local || pending) return;
     pending = true; const current = ++epoch; clear();
     try {
-      const result = await chrome.runtime.sendMessage(identity(),{action:"read"});
+      const result = await chrome.runtime.sendMessage(identity(),{action:"read",pairingKey:pairingKey()});
       if (current !== epoch) return;
       if (result?.status !== "observed") throw Error(result?.error || "Source unavailable.");
       if (typeof validateObservation !== "function") throw Error("Local source validation unavailable.");
@@ -37,10 +42,10 @@
   byId("disconnect").addEventListener("click",async () => {
     ++epoch; clear(); byId("status").textContent = "Local view cleared. Disconnecting companion…";
     try {
-      const r = await chrome.runtime.sendMessage(identity(),{action:"revoke"});
+      const r = await chrome.runtime.sendMessage(identity(),{action:"revoke",pairingKey:pairingKey()});
       if (r?.status !== "disconnected") throw Error("Revoke unavailable");
-      byId("extension").value = ""; byId("status").textContent = "Disconnected. Club preference removed.";
+      byId("extension").value = ""; byId("pairing").value = ""; byId("status").textContent = "Disconnected. Club preference removed.";
     } catch { byId("status").textContent = "View cleared. To revoke the stored club permission, use Disconnect in the companion popup or remove the extension."; }
   });
-  addEventListener("pagehide",() => { ++epoch; clear(); });
+  addEventListener("pagehide",() => { ++epoch; clear(); byId("pairing").value = ""; });
 })();
