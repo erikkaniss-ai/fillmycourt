@@ -78,6 +78,33 @@ This is personal assistance under the user's explicit opt-in. Provider API
 delegation, automated product redistribution and commercial supply rights
 remain separate. No legal or provider approval is inferred from this code.
 
+## Troubleshooting (companion and reader page v0.1.1)
+
+Updating files does not update an already loaded Chrome service worker or an
+already open page. Reload the existing extension in Chrome, hard refresh the
+local page, then approve the club again and privately enter the new pairing
+code. Both popup and local page show v0.1.1. No reinstall or extra permission
+is required. Never post pairing codes or an unmasked popup screenshot.
+
+Unavailable responses contain fixed reason codes and fixed instructions:
+`PAIRING_REQUIRED`, `CONNECT_REQUIRED`, `RATE_LIMITED`, `READ_BUSY`,
+`TAB_CHANGED`, `TAB_ACCESS_REQUIRED`, `CONSENT_WITHDRAWN`,
+`OFFER_SECTION_MISSING`, `NO_EXPANDED_OFFERS`, or a format/validation failure.
+Raw browser/provider exceptions are never returned. The collector serializes
+only allowlisted failure codes across script injection instead of relying on
+browser exception serialization. Missing capture results are reported as
+`READ_FAILED`, separately from a changed source URL. Unrecognized
+errors stay `READ_FAILED`; none are availability observations.
+
+`NO_EXPANDED_OFFERS` requires a visible explicit offer in the supported English
+mobile court/time accordion, including court, time, duration, price and Book.
+The reader does not parse the desktop colored schedule grid. Never click Book
+to diagnose this reader. Share only the reason code/status text. Wait at least
+60 seconds between deliberate attempts; no automatic retry or polling runs.
+The generic error in the user's 24 October screenshot does not establish
+whether pairing, tab access, the cooldown or the offer layout caused failure.
+Live read/expiry/revoke acceptance remains pending until verified separately.
+
 ## Verification and remaining acceptance
 
 `node --test getacourt/tests/personal-playtomic-reader.test.mjs` exercises consent,

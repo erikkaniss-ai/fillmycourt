@@ -23,7 +23,10 @@
     try {
       const result = await chrome.runtime.sendMessage(identity(),{action:"read",pairingKey:pairingKey()});
       if (current !== epoch) return;
-      if (result?.status !== "observed") throw Error(result?.error || "Source unavailable.");
+      if (result?.status !== "observed") {
+        const code = /^[A-Z_]{3,32}$/.test(result?.code || "") ? `${result.code}: ` : "";
+        throw Error(code + (result?.error || "Source unavailable."));
+      }
       if (typeof validateObservation !== "function") throw Error("Local source validation unavailable.");
       // Treat even the companion response as untrusted text. No HTML, links or
       // actions from offers are accepted, and only the Playtomic companion's
