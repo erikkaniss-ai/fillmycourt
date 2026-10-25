@@ -75,6 +75,47 @@ try{
   assert.equal(cancelResult.readerError,"CONSENT_WITHDRAWN");assert.equal(await sourcePage.evaluate(()=>fixtureListeners.length),0);checks++;
   assert.deepEqual(await sourcePage.evaluate(()=>changes),["SELECT"]);
   assert.equal(await sourcePage.locator('input[type="date"]').inputValue(),"2026-10-25");
+  // New public Playtomic grid variant: only an explicitly white court cell
+  // is clicked to open the price popup. Continue must NEVER be activated.
+  await sourcePage.setContent('<!doctype html><html><body><h1>Book a court in Fictional venue</h1>'+
+    '<section><h2>Available courts</h2><input type="date" value="2026-10-24">'+
+    '<select><option>PADEL</option><option>TENNIS</option></select>'+
+    '<div id="freeCell" type="button" class="absolute z-0 h-11 cursor-pointer bg-white">Available</div>'+
+    '<div id="busyCell" type="button" class="absolute z-0 h-11 cursor-pointer bg-gray">Not Available</div>'+
+    '</section></body></html>');
+  await sourcePage.addScriptTag({content:'
+    window.gridClicks=0;window.checkoutClicks=0;window.fixtureListeners=[];
+    window.chrome={runtime:{id:"fixture",onMessage:{addListener:f=>fixtureListeners.push(f),removeListener:f=>fixtureListeners=fixtureListeners.filter(x=>x!==f)}}};
+    document.getElementById("freeCell").addEventListener("click",()=>{
+      window.gridClicks++;
+      const node=document.createElement("div");
+      node.className="ui-stroke-neutral-default absolute z-50";
+      node.innerHTML=\`<div class="flex flex-col"><div class="font-bold">NATUREZA</div><div class="text-xs">6:30 AM</div></div>
+      <div class="bg-secondary-energy-50"><div class="text-sm">1 hr, 30 min</div><div class="text-sm">€36.00</div></div>
+      <button class="ui-bg-primary-highlight">Continue - €36.00</button><button>Close</button>\`;
+      document.querySelector("section").append(node);
+      node.querySelector("button").addEventListener("click",()=>{window.checkoutClicks++;});
+      node.querySelectorAll("button")[1].addEventListener("click",()=>node.remove());
+    });
+  '});
+  await sourcePage.addScriptTag({content:capture});
+  await sourcePage.addScriptTag({content:search});
+  const gridQuery={date:"2026-10-25",sport:"Padel",from:"06:00",to:"08:00",durationMinutes:90};
+  const gridResult=await sourcePage.evaluate(q=>searchPlaytomic(q),gridQuery);
+  assert.equal(gridResult.readerError,undefined,"New grid capture failed "+JSON.stringify(gridResult));
+  assert.equal(gridResult.offers.length,1);
+  assert.equal(gridResult.offers[0].court,"NATUREZA");
+  assert.equal(gridResult.offers[0].startLabel,"6:30 AM");
+  assert.equal(gridResult.offers[0].endLabel,"8:00 AM");
+  assert.equal(gridResult.offers[0].durationMinutes,90);
+  assert.equal(gridResult.offers[0].priceEur,36);
+  assert.equal(await sourcePage.evaluate(()=>gridClicks),1);
+  assert.equal(await sourcePage.evaluate(()=>checkoutClicks),0);
+  assert.equal(await sourcePage.locator("#busyCell").getAttribute("class"),"absolute z-0 h-11 cursor-pointer bg-gray");
+  await sourcePage.locator('div[class*="z-50"] button.ui-bg-primary-highlight').evaluate(button=>button.textContent="Continue - €99.00");
+  const wrongPrice=await sourcePage.evaluate(()=>capturePlaytomic());
+  assert.equal(wrongPrice.readerError,"OFFER_FORMAT_CHANGED");
+  assert.equal(await sourcePage.evaluate(()=>checkoutClicks),0);
   assert.deepEqual(foreign,[]);await context.close();
 
   for(const width of [390,1440]){
