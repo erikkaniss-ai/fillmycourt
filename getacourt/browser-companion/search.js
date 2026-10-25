@@ -25,14 +25,18 @@ async function searchPlaytomic(query) {
     if(innerWidth>640)fail("COMPACT_VIEW_REQUIRED");
     if(challenge())fail("CHALLENGE_REQUIRED");
     const heading=[...document.querySelectorAll("h2")].find(e=>e.textContent.trim()==="Available courts");
-    const region=heading?.parentElement;
+    let region=heading?.parentElement;
+    if(region&&!region.querySelector('input[type="date"],select')){
+      const section=heading.closest("section");
+      if(section?.querySelector('input[type="date"],select'))region=section;
+    }
     if(!region||!visible(heading))fail("OFFER_SECTION_MISSING");
     const dateInputs=[...region.querySelectorAll('input[type="date"]')].filter(visible);
     const sportInputs=[...region.querySelectorAll("select")].filter(visible);
     if(dateInputs.length!==1)fail("DATE_AMBIGUOUS");
     if(sportInputs.length!==1)fail("SPORT_AMBIGUOUS");
     const dateInput=dateInputs[0],sportInput=sportInputs[0];
-    const option=[...sportInput.options].find(o=>o.textContent.trim()===query.sport);
+    const option=[...sportInput.options].find(o=>o.textContent.trim().toLowerCase()===query.sport.toLowerCase());
     if(!option)fail("SPORT_AMBIGUOUS");
     const set=(element,prototype,value)=>{
       check();
@@ -46,7 +50,7 @@ async function searchPlaytomic(query) {
       let quiet,deadline,done=false;
       const finish=code=>{if(done)return;done=true;clearTimeout(quiet);clearTimeout(deadline);observer.disconnect();cancelWait=undefined;resolve(code);};
       const ready=()=>!region.querySelector('[aria-busy="true"],[role="progressbar"]')&&
-        !/\bloading\b/i.test(region.innerText);
+        !/\bloading\b|a atualizar disponibilidade|a actualizar disponibilidade|updating availability/i.test(region.innerText);
       const changed=()=>{clearTimeout(quiet);quiet=setTimeout(()=>{if(ready())finish(null);},500);};
       const observer=new MutationObserver(changed);
       cancelWait=()=>finish("CONSENT_WITHDRAWN");
@@ -62,10 +66,37 @@ async function searchPlaytomic(query) {
     problem=await settle();check();if(problem)fail(problem);
     if(challenge())fail("CHALLENGE_REQUIRED");
     const selectedDates=[...region.querySelectorAll('input[type="date"]')].map(e=>e.value);
-    const selectedSports=[...region.querySelectorAll("select")].map(e=>e.selectedOptions[0]?.textContent.trim());
-    if(!selectedDates.length||selectedDates.some(d=>d!==query.date)||!selectedSports.length||selectedSports.some(s=>s!==query.sport))
+    const selectedSports=[...region.querySelectorAll("select")].map(e=>e.selectedOptions[0]?.textContent.trim().toLowerCase());
+    if(!selectedDates.length||selectedDates.some(d=>d!==query.date)||!selectedSports.length||selectedSports.some(s=>s!==query.sport.toLowerCase()))
       fail("SCHEDULE_NOT_READY");
     const courts=[...region.querySelectorAll("details")].filter(e=>!e.parentElement.closest("details")&&visible(e)).slice(0,3);
+    if(!courts.length){
+      // Audited October 2026 Playtomic variant: court cells are WHITE
+      // button-like DIVs, and ONE clicked cell opens a visible anchored
+      // disclosure panel with a price, duration and Continue button.
+      // Click only exact displayed white *cells*, never Book/Continue/forms.
+      const candidates=[...region.querySelectorAll('div[type="button"],div[role="button"]')].filter(el=>
+        el.tagName==="DIV"&&visible(el)&&
+        ["absolute","z-0","h-11","cursor-pointer","bg-white"].every(c=>el.classList.contains(c))&&
+        el.getAttribute("aria-disabled")!=="true" && !/not available|reserved/i.test(el.innerText||"")
+      ).slice(0,6);
+      for(const cell of candidates){
+        check();
+        if(!visible(cell))continue;
+        cell.click(); // One ordinary UI disclosure, NOT an offer acceptance.
+        await pause(180);check();
+        if(challenge())fail("CHALLENGE_REQUIRED");
+        const observed=capturePlaytomic({courts:[],fromMinutes:+query.from.slice(0,2)*60+ +query.from.slice(3),
+          toMinutes:+query.to.slice(0,2)*60+ +query.to.slice(3),durationMinutes:query.durationMinutes});
+        check();
+        if(!observed.readerError)return observed;
+        if(observed.readerError!=="NO_EXPANDED_OFFERS")fail(observed.readerError);
+        const panel=[...document.querySelectorAll('div[class*="z-50"][class*="absolute"]')].find(visible);
+        const close=panel&&[...panel.querySelectorAll("button")].find(b=>visible(b)&&b.innerText.trim()==="Close"&&!b.disabled);
+        if(close)close.click(); // Dismiss a read-only disclosure, never Continue.
+      }
+      fail("NO_EXPANDED_OFFERS");
+    }
     const names=[];let starts=0;
     const from=+query.from.slice(0,2)*60 + +query.from.slice(3),to=+query.to.slice(0,2)*60 + +query.to.slice(3);
     for(const court of courts){
