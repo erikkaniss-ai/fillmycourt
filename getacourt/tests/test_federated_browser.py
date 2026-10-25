@@ -165,3 +165,45 @@ def test_reject_credential_payload_or_wrong_day_without_polluting_results(browse
     expect(page.locator("#personalStatus")).to_contain_text("does not match")
     expect(page.locator("#offers .card")).to_have_count(2)
     assert not forbidden
+
+
+def test_clipboard_one_click_import_and_old_search_race_rejection(browser_page):
+    import json
+    page, _, forbidden, _ = browser_page
+    page.get_by_role("button", name="Search across sources").click()
+    expect(page.locator("#offers .card")).to_have_count(2)
+    date = page.locator('[name="date"]').input_value()
+    captured = page.evaluate("new Date().toISOString()")
+    observed = {
+        "provider":"playtomic","source":"user_ui_observation",
+        "sourceUrl":"https://playtomic.com/clubs/cascais-padel-club",
+        "venue":"Cascais Padel & Nature","date":date,"sport":"Padel",
+        "capturedAt":captured,"timezone":None,"sourceFreshness":"unknown",
+        "coverage":"expanded_offers_only",
+        "offers":[{"court":"Club Court","startLabel":"6:30 PM","endLabel":"8:00 PM",
+                   "durationMinutes":90,"priceEur":36}]
+    }
+    page.evaluate("""data => {
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{
+        readText: async()=>JSON.stringify(data)
+      }});
+    }""",observed)
+    assert page.locator("#personalPayload").input_value() == ""
+    page.get_by_role("button", name="Compare observed offers").click()
+    expect(page.locator("#personalCards .card")).to_have_count(1)
+    expect(page.locator("#personalCards")).to_contain_text("Club Court")
+    expect(page.locator("#personalStatus")).to_contain_text("copied from your Reader")
+    page.evaluate("""() => {
+      let finish;window.resolveClipboard=()=>finish();
+      Object.defineProperty(navigator,'clipboard',{configurable:true,value:{
+        readText: () => new Promise(r=>{finish=()=>r('{"provider":"not-real"}')})
+      }});
+    }""")
+    page.get_by_role("button", name="Compare observed offers").click()
+    page.wait_for_function("typeof window.resolveClipboard === 'function'")
+    page.locator('[name="location"]').fill("Oeiras")
+    page.evaluate("resolveClipboard()")
+    expect(page.locator("#personalCards .card")).to_have_count(0)
+    expect(page.locator("#personalStatus")).to_contain_text("cleared")
+    assert page.locator("#personalPayload").input_value() == ""
+    assert not forbidden
