@@ -100,3 +100,68 @@ def test_observation_expiry_clears_only_offers(browser_page, fixture_url):
     expect(page.locator("#searchStatus")).to_contain_text("snapshot expired", timeout=5000)
     expect(page.locator("#offers .card")).to_have_count(0)
     expect(page.locator("#clubs .card")).to_have_count(2)
+
+
+@pytest.mark.parametrize("width", [320, 390, 1440])
+def test_personal_playtomic_observation_joins_native_read_without_provider_auth_or_upload(browser_page, fixture_url, width):
+    import json
+    page, context, forbidden, _ = browser_page
+    page.set_viewport_size({"width": width, "height": 900})
+    page.get_by_role("button", name="Search across sources").click()
+    expect(page.locator("#offers .card")).to_have_count(2)
+    before = context.request.get(fixture_url + "/__counts").json()["coreRequests"]
+    current_date = page.locator('[name="date"]').input_value()
+    captured = page.evaluate("new Date().toISOString()")
+    observation = {
+        "provider":"playtomic","source":"user_ui_observation",
+        "sourceUrl":"https://playtomic.com/clubs/cascais-padel-club",
+        "venue":"Cascais Padel & Nature","date":current_date,"sport":"Padel",
+        "capturedAt":captured,"timezone":None,"sourceFreshness":"unknown",
+        "coverage":"expanded_offers_only",
+        "offers":[{"court":"Observed court 1","startLabel":"6:30 PM","endLabel":"8:00 PM",
+                   "durationMinutes":90,"priceEur":36}]
+    }
+    page.locator("#personalPayload").fill(json.dumps(observation))
+    page.get_by_role("button", name="Compare observed offers").click()
+    expect(page.locator("#personalCards .card")).to_have_count(1)
+    expect(page.locator("#personalCards")).to_contain_text("Observed court 1")
+    expect(page.locator("#personalCards")).to_contain_text("€36.00")
+    expect(page.locator("#personalCards")).to_contain_text("timezone unknown")
+    expect(page.locator("#sourceStatus")).to_contain_text("Personal offer observation loaded")
+    expect(page.locator("#offers .card")).to_have_count(2)
+    assert context.request.get(fixture_url + "/__counts").json()["coreRequests"] == before
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+    assert page.locator("#personalPayload").input_value() == ""
+    assert not forbidden
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    page.locator('[name="location"]').fill("Oeiras")
+    expect(page.locator("#personalCards .card")).to_have_count(0)
+    expect(page.locator("#personalStatus")).to_contain_text("cleared")
+
+
+def test_reject_credential_payload_or_wrong_day_without_polluting_results(browser_page):
+    import json
+    page, _, forbidden, _ = browser_page
+    page.get_by_role("button", name="Search across sources").click()
+    expect(page.locator("#offers .card")).to_have_count(2)
+    current_date = page.locator('[name="date"]').input_value()
+    captured = page.evaluate("new Date().toISOString()")
+    observation = {
+        "provider":"playtomic","source":"user_ui_observation",
+        "sourceUrl":"https://playtomic.com/clubs/cascais-padel-club",
+        "venue":"Cascais Padel & Nature","date":current_date,"sport":"Padel",
+        "capturedAt":captured,"timezone":None,"sourceFreshness":"unknown",
+        "coverage":"expanded_offers_only",
+        "offers":[{"court":"Observed court","startLabel":"6:30 PM","endLabel":"8:00 PM",
+                   "durationMinutes":90,"priceEur":36}]
+    }
+    page.locator("#personalPayload").fill(json.dumps({**observation, "access_token":"sensitive"}))
+    page.get_by_role("button", name="Compare observed offers").click()
+    expect(page.locator("#personalCards .card")).to_have_count(0)
+    expect(page.locator("#personalStatus")).to_contain_text("not accepted")
+    assert "sensitive" not in page.locator("main").inner_text()
+    page.locator("#personalPayload").fill(json.dumps({**observation, "date":"2026-10-26" if current_date!="2026-10-26" else "2026-10-27"}))
+    page.get_by_role("button", name="Compare observed offers").click()
+    expect(page.locator("#personalStatus")).to_contain_text("does not match")
+    expect(page.locator("#offers .card")).to_have_count(2)
+    assert not forbidden
