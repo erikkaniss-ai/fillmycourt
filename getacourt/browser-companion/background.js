@@ -1,5 +1,5 @@
 importScripts("capture.js");
-const VERSION="0.2.0";
+const VERSION="0.2.1";
 let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 // Fixed messages only: never return a browser/provider exception or credential.
 const errors=Object.freeze({
