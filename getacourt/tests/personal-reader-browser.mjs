@@ -83,21 +83,22 @@ try{
     '<div id="freeCell" type="button" class="absolute z-0 h-11 cursor-pointer bg-white">Available</div>'+
     '<div id="busyCell" type="button" class="absolute z-0 h-11 cursor-pointer bg-gray">Not Available</div>'+
     '</section></body></html>');
-  await sourcePage.addScriptTag({content:'
+  await sourcePage.addScriptTag({content:`
     window.gridClicks=0;window.checkoutClicks=0;window.fixtureListeners=[];
     window.chrome={runtime:{id:"fixture",onMessage:{addListener:f=>fixtureListeners.push(f),removeListener:f=>fixtureListeners=fixtureListeners.filter(x=>x!==f)}}};
     document.getElementById("freeCell").addEventListener("click",()=>{
       window.gridClicks++;
       const node=document.createElement("div");
       node.className="ui-stroke-neutral-default absolute z-50";
-      node.innerHTML=\`<div class="flex flex-col"><div class="font-bold">NATUREZA</div><div class="text-xs">6:30 AM</div></div>
-      <div class="bg-secondary-energy-50"><div class="text-sm">1 hr, 30 min</div><div class="text-sm">€36.00</div></div>
-      <button class="ui-bg-primary-highlight">Continue - €36.00</button><button>Close</button>\`;
+      node.innerHTML=
+        '<div class="flex flex-col"><div class="font-bold">NATUREZA</div><div class="text-xs">6:30 AM</div></div>'+
+        '<div class="bg-secondary-energy-50"><div class="text-sm">1 hr, 30 min</div><div class="text-sm">€36.00</div></div>'+
+        '<button class="ui-bg-primary-highlight">Continue - €36.00</button><button>Close</button>';
       document.querySelector("section").append(node);
       node.querySelector("button").addEventListener("click",()=>{window.checkoutClicks++;});
       node.querySelectorAll("button")[1].addEventListener("click",()=>node.remove());
     });
-  '});
+  `});
   await sourcePage.addScriptTag({content:capture});
   await sourcePage.addScriptTag({content:search});
   const gridQuery={date:"2026-10-25",sport:"Padel",from:"06:00",to:"08:00",durationMinutes:90};
