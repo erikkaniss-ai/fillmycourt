@@ -1,6 +1,6 @@
 // User-initiated, browser-memory-only bridge for Playtomic personal observations.
 // It is NOT provider API evidence, cannot authorize booking or create native slots.
-import {safeSourceUrl,CLUBS} from './source-catalog.mjs';
+import {safeSourceUrl,CLUBS,directoryMatches,fold} from './source-catalog.mjs';
 const KEYSET=(obj,keys)=>obj && typeof obj==='object' && !Array.isArray(obj) &&
   Reflect.ownKeys(obj).every(k=>typeof k==='string'&&keys.includes(k));
 const ROOT=['provider','source','sourceUrl','venue','date','sport','capturedAt','timezone','sourceFreshness','coverage','offers'];
@@ -36,6 +36,11 @@ export function normalizePersonalObservation(raw,query,{now=Date.now(),validator
  if(!Number.isFinite(timestamp)||timestamp>now+5000||now-timestamp>=60000)throw Error('OBSERVATION_EXPIRED');
  if(query.sport!==v.sport.toLowerCase()||query.date!==v.date)throw Error('OBSERVATION_QUERY_MISMATCH');
  const known=CLUBS.find(c=>c.sources.some(s=>s.id==='playtomic'&&s.url===v.sourceUrl));
+ // A legitimate imported offer must not be presented as answering a search
+ // in the wrong area. For unmapped clubs allow only exact venue-name searches;
+ // a guessed city from a slug or raw observation is not geographic evidence.
+ if(known ? !directoryMatches(query).some(c=>c.id===known.id)
+          : fold(v.venue)!==fold(query.location))throw Error('OBSERVATION_LOCATION_MISMATCH');
  const qfrom=Number(query.from.slice(0,2))*60+Number(query.from.slice(3));
  const qto=Number(query.to.slice(0,2))*60+Number(query.to.slice(3));
  const offers=v.offers.flatMap((offer,i)=>{
