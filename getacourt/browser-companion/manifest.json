@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GetACourt Personal Playtomic Reader",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Search explicit offers in one personally approved Playtomic club. No booking or payment actions.",
   "permissions": ["activeTab", "scripting", "storage"],
   "background": {"service_worker": "background.js"},
