@@ -9,7 +9,11 @@ function capturePlaytomic(scope) {
     fail("CLUB_PAGE_REQUIRED");
   const visible = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== "hidden";
   const heading = [...document.querySelectorAll("h2")].find(e => e.textContent.trim() === "Available courts");
-  const region = heading?.parentElement;
+  let region = heading?.parentElement;
+  if (region && !region.querySelector('input[type="date"],select')) {
+    const section = heading.closest("section");
+    if(section?.querySelector('input[type="date"],select'))region=section;
+  }
   if (!region || !visible(heading)) fail("OFFER_SECTION_MISSING");
   const dates = [...region.querySelectorAll('input[type="date"]')].map(e => e.value);
   if (!dates.length || new Set(dates).size !== 1 || !/^\d{4}-\d{2}-\d{2}$/.test(dates[0]))
