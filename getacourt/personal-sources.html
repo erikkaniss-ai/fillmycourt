@@ -1,2 +1,42 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'"><title>GetACourt personal sources</title><link rel="stylesheet" href="assets/personal-sources.css"></head>
-<body><main><a href="index.html">GetACourt</a><h1>Connect your Playtomic club</h1><p>The personal reader now opens inside the GetACourt extension. There are no IDs or pairing codes to copy, and this web page cannot read the club.</p><ol><li>Open the intended Playtomic club in the Chrome/Edge profile where you normally sign in.</li><li>Click the GetACourt extension icon, then <strong>Connect and open GetACourt</strong>.</li><li>Choose one day, sport and start-time range, then press <strong>Search this club</strong>.</li></ol><p>Existing installations need one reload in Chrome's extensions page for version 0.2.0. After that, reopen GetACourt through its icon. Renew the club grant after a browser restart or lost access; no code is needed.</p><p>Search uses the approved club's normal filters and offer disclosures in a compact window. It never presses Book or payment controls. Results expire after 60 seconds. Disconnect is available in both the reader and popup.</p><p>This is a bounded personal browser reader, with unknown provider freshness and partial coverage. TiePlayer, Racket ID and Smashpro are not connected here.</p></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'">
+  <title>GetACourt — Search across sources</title>
+  <link rel="stylesheet" href="assets/federated-search.css">
+  <script type="module" src="assets/federated-search-page.mjs"></script>
+</head>
+<body>
+<a class="skip" href="#search">Skip to search</a>
+<header><a class="brand" href="index.html">GetACourt</a><span>Read-only candidate · no bookings or payments</span></header>
+<main>
+  <section class="intro"><p class="eyebrow">CLUBS + COURT OFFERS</p><h1>One search.<br>Clear sources.</h1>
+  <p>Compare connected Core offers and find clubs across booking systems. A listed club is not a confirmed free court.</p>
+  <p class="notice">External live availability is not yet connected to this web search. Playtomic personal-reader results stay inside your extension.</p></section>
+  <form id="search" novalidate>
+    <label>City, area or exact club name<input name="location" value="Cascais" required maxlength="80" autocomplete="off"></label>
+    <label>Sport<select name="sport"><option value="padel">Padel</option><option value="tennis">Tennis</option><option value="squash">Squash</option><option value="badminton">Badminton</option><option value="pickleball">Pickleball</option></select></label>
+    <label>Date<input name="date" type="date" required></label>
+    <label>Starts from<input name="from" type="time" value="17:00" required></label>
+    <label>Starts before<input name="to" type="time" value="22:00" required></label>
+    <label>Duration<select name="duration"><option value="any">60 or 90 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label>
+    <button type="submit">Search across sources</button>
+  </form>
+  <p id="searchStatus" role="status" aria-live="polite">Choose a time and search. No source has been checked.</p>
+  <section aria-labelledby="coverageHeading"><h2 id="coverageHeading">Source coverage</h2><div id="sourceStatus" class="source-grid"></div></section>
+  <section aria-labelledby="offersHeading"><h2 id="offersHeading">Native court offers</h2><p>Observed in Core at the search time; not reserved. Prices and availability must be rechecked before any booking.</p><div id="offers" class="cards"></div></section>
+  <section aria-labelledby="clubsHeading"><h2 id="clubsHeading">Clubs to check with the source</h2><p>Reviewed public directory entries. Their opening hours and empty calendars never establish free slots. This initial catalogue is not complete market coverage.</p><div id="clubs" class="cards"></div></section>
+  <details id="readerGuide"><summary>Use your private Playtomic reader</summary>
+    <p>The personal reader opens inside the GetACourt extension. There are no IDs or pairing codes to copy, and this web page cannot read your provider session.</p>
+    <ol><li>Open the intended Playtomic club in the Chrome/Edge profile where you normally sign in.</li><li>Click the GetACourt extension icon, then <strong>Connect and open GetACourt</strong>.</li><li>Choose one day, sport and start-time range, then press <strong>Search this club</strong>.</li></ol>
+    <p>Existing installations need one reload in Chrome's extensions page for version 0.2.0. Renew the club grant after a browser restart or lost access; no code is needed.</p>
+    <p>The reader uses the approved club's normal filters and offer disclosures in a compact window. It never presses Book or payment controls. Results expire after 60 seconds. Disconnect is available in both reader and popup.</p>
+    <p>Coverage is partial and provider freshness unknown. TiePlayer, Racket ID and Smashpro are not connected in this extension.</p>
+  </details>
+</main>
+<footer>GetACourt · Source-labelled discovery · No automatic sign-in, reservation or background refresh</footer>
+</body></html>

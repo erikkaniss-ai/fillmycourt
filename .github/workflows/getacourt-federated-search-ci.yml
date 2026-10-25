@@ -1,0 +1,47 @@
+name: GetACourt federated search
+on:
+  pull_request:
+    branches: [getacourt-staging]
+    paths:
+      - 'getacourt/**'
+      - 'netlify/**'
+      - '.github/workflows/getacourt-federated-search-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: get-federated-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  search-contract-and-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax and actual search-handler contracts
+        run: |
+          node --check getacourt/assets/source-catalog.mjs
+          node --check getacourt/assets/federated-search.mjs
+          node --check getacourt/assets/federated-search-page.mjs
+          node --experimental-strip-types --test getacourt/tests/federated-search.test.mjs
+      - name: Install pinned browser test dependencies
+        run: |
+          python -m pip install pytest==8.4.2 playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Actual browser and handler with isolated fictional Core
+        run: python -m pytest getacourt/tests/test_federated_browser.py -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: getacourt-federated-FICTIONAL-CORE
+          path: test-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
