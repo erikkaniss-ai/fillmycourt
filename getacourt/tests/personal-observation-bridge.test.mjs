@@ -64,9 +64,25 @@ test("capturedAt 60-second expiry, future claims and malformed sensitive data fa
 });
 test("unmapped valid Playtomic clubs stay personal, not falsely merged to other club",()=>{
   const v={...observed,sourceUrl:"https://playtomic.com/clubs/another-club",venue:"Other court center"};
-  const result=normalize(v);
+  const result=normalize(v,{...query,location:"Other court center"});
   assert.equal(result.clubId,null);
   assert.equal(result.offers[0].clubName,"Other court center");
+});
+test("import cannot claim an offer in another club or unrelated location",()=>{
+  assert.throws(()=>normalize(observed,{...query,location:"Oeiras"}),/OBSERVATION_LOCATION_MISMATCH/);
+  const other={...observed,sourceUrl:"https://playtomic.com/clubs/unmapped-club",venue:"Unmapped Club"};
+  assert.throws(()=>normalize(other,query),/OBSERVATION_LOCATION_MISMATCH/);
+  assert.equal(normalize(other,{...query,location:"Unmapped Club"}).clubId,null);
+});
+test("verified new TieSports directory Padel Factory is listed without inventing free courts or price",async()=>{
+  const {directoryMatches}=await import("../assets/source-catalog.mjs");
+  const clubs=directoryMatches({...query,location:"Lisboa"});
+  const factory=clubs.find(c=>c.id==="pt-padel-factory-lisboa");
+  assert.ok(factory);
+  assert.equal(factory.sources[0].id,"tiesports");
+  assert.equal(factory.sources[0].url,"https://clubs.tiesports.com/en/lisboa/PadelFactory");
+  assert.equal(factory.sources[0].kind,"club_page");
+  assert.equal(Object.hasOwn(factory,"availableSlots"),false);
 });
 test("unknown DST timezone is never inferred from user-provided wall-clock labels",()=>{
   const result=normalize(observed);
