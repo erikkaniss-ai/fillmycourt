@@ -69,11 +69,25 @@ function render(data,query,localFallback=false){
   status.textContent=localFallback?'Search server unavailable. Showing the local reviewed directory only; no availability check completed.':`${offers.length} native offer${offers.length===1?'':'s'} · ${data.directory.length} listed club${data.directory.length===1?'':'s'} · partial source coverage`;
   if(offers.length){const ticket=generation;expiry=setTimeout(()=>{if(ticket!==generation)return;empty(offerBox,'Offer snapshot expired. Search again to recheck.');status.textContent='Offer snapshot expired. Directory entries remain unverified for availability.';},Math.max(0,expires-now));}
 }
-document.querySelector('#reviewPersonal').addEventListener('click',()=>{
+document.querySelector('#reviewPersonal').addEventListener('click',async()=>{
   if(!latestQuery){personalStatus.textContent='Search a location/date/time first, then import your own Reader observation.';personalPayload.value='';return;}
+  const ticket=generation,query=latestQuery;
+  let raw=personalPayload.value;
+  // Only a direct player click can request clipboard read. No background
+  // clipboard polling or implicit import; missing permission keeps paste fallback.
+  if(!raw.trim()){
+    try{
+      if(!navigator.clipboard?.readText)throw Error('Clipboard unavailable');
+      raw=await navigator.clipboard.readText();
+    }catch{
+      if(ticket===generation)personalStatus.textContent='Clipboard not accessible. Paste the sanitized Reader report into the field, then click Compare.';
+      return;
+    }
+  }
+  if(ticket!==generation || query!==latestQuery)return;
   let imported;
   try{
-    imported=normalizePersonalObservation(personalPayload.value,latestQuery,{
+    imported=normalizePersonalObservation(raw,query,{
       now:Date.now(),validator:window.GetACourtPersonalSourceObservation?.validateObservation
     });
   }catch(error){
@@ -85,7 +99,7 @@ document.querySelector('#reviewPersonal').addEventListener('click',()=>{
   }
   clearPersonal();
   personal=imported;paintPersonal();sourceRows(latestSources);
-  const ticket=generation,expires=Date.parse(imported.expiresAt);
+  const expires=Date.parse(imported.expiresAt);
   personalExpiry=setTimeout(()=>{
     if(ticket!==generation)return;
     clearPersonal('Personal observation expired; search in the extension to refresh.');
