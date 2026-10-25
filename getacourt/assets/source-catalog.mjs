@@ -18,6 +18,9 @@ const records = [
    sources:[
      {id:'racket_id', url:'https://racket.id/booking', kind:'player_portal', reviewedOn:'2026-10-25'},
      {id:'smashpro', url:'https://smashpro.pt/pt/c/rackets-pro-academy-quinta-da-marinha', kind:'unclaimed_listing', reviewedOn:'2026-10-25'}]},
+  {id:'pt-padel-factory-lisboa', name:'Padel Factory', area:'Lisboa',
+   areas:['lisboa','lisbon','alto da bela vista'], sports:['padel'],
+   sources:[{id:'tiesports',url:'https://clubs.tiesports.com/en/lisboa/PadelFactory',kind:'club_page',reviewedOn:'2026-10-25'}]},
   {id:'pt-opa-oeiras', name:'OPA OEIRAS', area:'Oeiras',
    areas:['oeiras','lisboa','lisbon'], sports:['padel','pickleball'],
    sources:[{id:'tiesports', url:'https://clubs.tiesports.com/en/lisboa/OeirasPadelAcademy', kind:'club_page', reviewedOn:'2026-10-25'}]}
