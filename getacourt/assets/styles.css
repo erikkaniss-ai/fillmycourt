@@ -527,3 +527,10 @@ main { overflow: hidden; }
   .toast, .dialog-progress span { transition: none; }
   .slot:hover { transform: none; }
 }
+
+
+/* Visible entry to independent, read-only multi-source court discovery. */
+.federated-entry{display:grid;gap:7px;max-width:520px;margin:16px 0 22px}
+.federated-entry-link{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:12px 18px;border:2px solid var(--accent,#1267e5);border-radius:12px;color:var(--ink,#0d1726);background:#fff;font-weight:750;text-decoration:none;text-align:center}
+.federated-entry-link:hover{background:#e7f2ff}
+.federated-entry small{display:block;font-size:12px;line-height:1.5;color:var(--muted,#455b70)}
