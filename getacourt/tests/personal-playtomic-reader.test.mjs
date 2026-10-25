@@ -140,9 +140,9 @@ test("collector accepts only rendered explicit offers, strips account queries an
   const court={querySelector:()=>({innerText:"Fictional court\n1 options"})};
   const row={innerText:"3:30 PM - 5:00 PM • 90 min • €36.00 Book"};
   const button={getClientRects:()=>[{}],innerText:"Book",disabled:false,parentElement:row,closest:()=>({parentElement:{closest:()=>court}})};
-  const region={querySelectorAll:s=>s==='input[type="date"]'?[{value:"2026-10-25"}]:s==="select"?[{selectedOptions:[{textContent:"Padel"}]}]:[button]};
+  const region={querySelector:()=>({}),querySelectorAll:s=>s==='input[type="date"]'?[{value:"2026-10-25"}]:s==="select"?[{getClientRects:()=>[{}],selectedOptions:[{textContent:"Padel"}]}]:s==="button"?[button]:[]};
   const heading={textContent:"Available courts",parentElement:region,getClientRects:()=>[{}]};
-  const document={querySelectorAll:()=>[heading],querySelector:()=>({innerText:"Book a court in Fictional venue"})};
+  const document={querySelectorAll:s=>s==="h2"?[heading]:[],querySelector:()=>({innerText:"Book a court in Fictional venue"})};
   const context=vm.createContext({URL,location:{href:source+"?user_id=discard"},document,getComputedStyle:()=>({visibility:"visible"}),module:{exports:{}}});
   vm.runInContext(capture,context);const collect=context.module.exports.capturePlaytomic;
   const result=collect();assert.equal(result.sourceUrl,source);assert.equal(result.sourceFreshness,"unknown");assert.equal(result.offers[0].priceEur,36);
@@ -159,6 +159,11 @@ test("package has unchanged narrow permissions, no external bridge, no credentia
   const page=readFileSync(new URL("reader.html",root),"utf8"),ui=readFileSync(new URL("reader.js",root),"utf8");
   assert.doesNotMatch(page,/id="(?:pairing|extension)"/);assert.doesNotMatch(ui,/localStorage|sessionStorage|indexedDB/);
   assert.doesNotMatch(background+capture+search,/\bfetch\s*\(|XMLHttpRequest|document\.cookie|setInterval|webRequest|debugger/);
-  assert.doesNotMatch(search,/\.click\s*\(|submit\s*\(|requestSubmit\s*\(/);
+  // White DIV-grid disclosures and named Close are now necessary for the
+  // verified Playtomic UI. Continue/Book/Pay and form submissions stay forbidden.
+  assert.match(search,/cell\.click\(\)/);
+  assert.match(search,/close\.click\(\)/);
+  assert.match(search,/"bg-white"/);
+  assert.doesNotMatch(search,/(?:book|continue|checkout|pay)\.click\s*\(|submit\s*\(|requestSubmit\s*\(/i);
   assert.match(search,/courtStarts>=2/);assert.match(search,/slice\(0,3\)/);
 });
