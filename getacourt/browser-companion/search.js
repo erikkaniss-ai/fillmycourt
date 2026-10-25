@@ -122,7 +122,7 @@ async function searchPlaytomic(query) {
     check();
     return result;
   } catch(error) {
-    const allowed=["CLUB_PAGE_REQUIRED","QUERY_INVALID","COMPACT_VIEW_REQUIRED","CHALLENGE_REQUIRED","SCHEDULE_NOT_READY","OFFER_SECTION_MISSING","DATE_AMBIGUOUS","SPORT_AMBIGUOUS","VENUE_MISSING","NO_EXPANDED_OFFERS","CONSENT_WITHDRAWN"];
+    const allowed=["CLUB_PAGE_REQUIRED","QUERY_INVALID","COMPACT_VIEW_REQUIRED","CHALLENGE_REQUIRED","SCHEDULE_NOT_READY","OFFER_SECTION_MISSING","DATE_AMBIGUOUS","SPORT_AMBIGUOUS","VENUE_MISSING","NO_EXPANDED_OFFERS","OFFER_FORMAT_CHANGED","CONSENT_WITHDRAWN"];
     return {readerError:allowed.includes(error?.readerCode)?error.readerCode:"READ_FAILED"};
   } finally {chrome.runtime.onMessage.removeListener(cancel);}
 }
