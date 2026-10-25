@@ -87,7 +87,8 @@ try{
     });
     await page.clock.install({time:new Date("2026-10-24T10:00:00Z")});
     await page.addInitScript(()=>{
-      window.fixtureCalls=[];window.fixtureMode="normal";
+      window.fixtureClipboard="";window.fixtureCalls=[];window.fixtureMode="normal";
+      Object.defineProperty(navigator,"clipboard",{configurable:true,value:{writeText:async text=>{window.fixtureClipboard=text;}}});
       window.fixtureObservation=query=>({
         provider:"playtomic",source:"user_ui_observation",sourceUrl:"https://playtomic.com/clubs/fictional-club",
         venue:"Fictional venue",date:query.date,sport:query.sport,capturedAt:new Date().toISOString(),
@@ -117,9 +118,18 @@ try{
     assert.equal(await page.locator("#results b").count(),0);
     assert.match(await page.locator("#results").innerText(),/Fictional court <b>1<\/b>/);
     assert.equal(await page.locator("#search").isDisabled(),true);
+    assert.equal(await page.locator("#copyObservation").isEnabled(),true);
+    await page.locator("#copyObservation").click();
+    const copied=await page.evaluate(()=>JSON.parse(fixtureClipboard));
+    assert.equal(copied.provider,"playtomic");
+    assert.equal(copied.source,"user_ui_observation");
+    assert.equal(copied.sourceFreshness,"unknown");
+    assert.equal(copied.offers.length,1);
+    assert.deepEqual(Object.keys(copied).sort(),["capturedAt","coverage","date","offers","provider","source","sourceFreshness","sourceUrl","sport","timezone","venue"].sort());
     if(artifactDir)await page.screenshot({path:join(artifactDir,"personal-reader-fictional-"+width+".png"),fullPage:true});
     await page.clock.fastForward(60001);
     assert.equal(await page.locator("#results article").count(),0);
+    assert.equal(await page.locator("#copyObservation").isDisabled(),true);
     assert.match(await page.locator("#status").innerText(),/Observation expired/);
     assert.equal(await page.locator("#search").isDisabled(),false);
     assert.equal(await page.evaluate(()=>fixtureCalls.filter(x=>x.action==="search").length),1);
