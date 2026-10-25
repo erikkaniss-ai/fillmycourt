@@ -7,7 +7,7 @@
   byId("date").value=byId("date").min=localDate(today);
   const last=new Date(today);last.setDate(last.getDate()+14);byId("date").max=localDate(last);
   const clear=()=>{clearTimeout(expiry);latestObservation=null;byId("results").replaceChildren();
-    byId("copyObservation").disabled=true;byId("copyFallback").value="";
+    byId("copyObservation").disabled=true;byId("prepareComparison").disabled=true;byId("copyFallback").value="";
     byId("copyFallbackLabel").hidden=true;byId("copyStatus").textContent="No observation ready to copy.";};
   const controls=()=>{
     byId("search").disabled=!connected||pending||Date.now()<cooldownUntil;
@@ -54,7 +54,7 @@
         article.append(heading,details);byId("results").append(article);
       }
       if(!offers.length)byId("status").textContent="No matching offers in the inspected subset. Other slots may exist.";
-      else{latestObservation=observation;byId("copyObservation").disabled=false;byId("copyStatus").textContent="Observed offers are ready. Copy only if you want them in GetACourt's shared comparison screen.";}
+      else{latestObservation=observation;byId("copyObservation").disabled=false;byId("prepareComparison").disabled=false;byId("copyStatus").textContent="Observed offers are ready. Open a private comparison or copy a sanitized report.";}
       expiry=setTimeout(()=>{++epoch;clear();byId("status").textContent="Observation expired. Search again to check the club.";},60000);
     }catch(error){if(current===epoch)byId("status").textContent=error.message;}
     finally{pending=false;controls();}
@@ -76,6 +76,22 @@
       byId("copyFallback").focus();byId("copyFallback").select();
       byId("copyStatus").textContent="Automatic clipboard blocked. Copy the selected sanitized report manually (Ctrl+C), then paste into GetACourt.";
     }
+  });
+  byId("prepareComparison").addEventListener("click",async()=>{
+    const current=latestObservation;
+    if(!current){byId("copyStatus").textContent="Search your club first.";return;}
+    let sanitized;
+    try{sanitized=validate(current);}catch{clear();byId("copyStatus").textContent="Observation failed validation.";return;}
+    if(!Number.isFinite(Date.parse(sanitized.capturedAt))||Date.now()-Date.parse(sanitized.capturedAt)>=60000){
+      clear();byId("copyStatus").textContent="Observation expired. Search again.";return;
+    }
+    byId("prepareComparison").disabled=true;
+    try{
+      const result=await send({action:"prepareComparison",observation:sanitized});
+      if(result?.status!=="comparison_prepared")throw Error(result?.error||"Comparison unavailable.");
+      byId("copyStatus").textContent="GetACourt comparison opened. Run the same search, choose Receive Reader offers, then click this extension icon in that exact GetACourt tab to deliver the report.";
+    }catch(error){byId("copyStatus").textContent=error.message||"Comparison unavailable. No offers were shared.";}
+    finally{byId("prepareComparison").disabled=!latestObservation;}
   });
   byId("filters").addEventListener("input",()=>{++epoch;clear();byId("status").textContent="Filters changed. Search to inspect these offers.";});
   byId("showClub").addEventListener("click",async()=>{

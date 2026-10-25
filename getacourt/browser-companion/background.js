@@ -1,5 +1,7 @@
-importScripts("capture.js");
-const VERSION="0.2.1";
+importScripts("capture.js","observation.js");
+const VERSION="0.2.2";
+const COMPARISON_PAGE="https://getacourt.com/search-all.html";
+const COMPARISON_KEY="comparisonObservation";
 let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 // Fixed messages only: never return a browser/provider exception or credential.
 const errors=Object.freeze({
@@ -22,6 +24,10 @@ const errors=Object.freeze({
   NO_EXPANDED_OFFERS:"No matching explicit priced offer was found in the inspected subset. Other slots may exist.",
   OFFER_FORMAT_CHANGED:"The offer layout is unsupported. No availability was inferred.",
   TOO_MANY_OFFERS:"Close some expanded offers before reading.",
+  COMPARISON_PREP_REQUIRED:"Search this club first, then open the GetACourt comparison from the Reader.",
+  COMPARISON_EXPIRED:"The prepared observation expired. Search the club again.",
+  COMPARISON_PAGE_REQUIRED:"Open GetACourt Search across sources in this browser, then use this extension icon.",
+  COMPARISON_DELIVERY_FAILED:"The GetACourt page could not receive the observation. No offers were shared.",
   READ_FAILED:"The search could not be completed. No offers were shared."
 });
 const fail=code=>{throw Object.assign(new Error("Reader unavailable"),{readerCode:code});};
@@ -33,8 +39,13 @@ const sourceAllowed=value=>{
   try {const u=new URL(value);return u.origin==="https://playtomic.com"&&/^\/clubs\/[a-z0-9-]+$/.test(u.pathname)&&!u.search&&!u.hash;}
   catch{return false;}
 };
+const comparisonPageAllowed=value=>{
+  try{return new URL(value).href===COMPARISON_PAGE;}catch{return false;}
+};
+const nonceAllowed=value=>typeof value==="string"&&/^[A-Za-z0-9_-]{24,128}$/.test(value);
 function caller(sender){
   if(sender?.id!==chrome.runtime.id)fail("REQUEST_REJECTED");
+  if(sender.tab&&Number.isInteger(sender.tab.id)&&sender.frameId===0&&comparisonPageAllowed(sender.url))return "page";
   if(sender.url===chrome.runtime.getURL("popup.html"))return "popup";
   if(sender.url===chrome.runtime.getURL("reader.html")&&(sender.frameId===undefined||sender.frameId===0))return "reader";
   fail("REQUEST_REJECTED");
@@ -57,11 +68,50 @@ function consentOperation(operation){
 async function clearConsent(){
   const {approvedTab}=await chrome.storage.session.get("approvedTab");
   await chrome.storage.local.remove("approvedSource");
+  await chrome.storage.session.remove(COMPARISON_KEY);
   // Reconnecting must not reset the browser session's global attempt budget.
   await chrome.storage.session.remove("approvedTab");
   if(Number.isInteger(approvedTab)) {
     try{await chrome.tabs.sendMessage(approvedTab,{action:"cancelPersonalSearch"});}catch{}
   }
+}
+function comparisonObservation(value){
+  const keys=["capturedAt","coverage","date","offers","provider","source","sourceFreshness","sourceUrl","sport","timezone","venue"];
+  if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).sort().join(",")!==keys.join(","))fail("REQUEST_REJECTED");
+  let observed;
+  try{observed=globalThis.GetACourtPersonalSourceObservation.validateObservation(value);}catch{fail("REQUEST_REJECTED");}
+  const captured=Date.parse(observed.capturedAt);
+  if(!Number.isFinite(captured)||captured>Date.now()+5000||Date.now()-captured>=60000)fail("COMPARISON_EXPIRED");
+  return observed;
+}
+async function preparedComparison(){
+  const {comparisonObservation:observed}=await chrome.storage.session.get(COMPARISON_KEY);
+  if(!observed)fail("COMPARISON_PREP_REQUIRED");
+  return comparisonObservation(observed);
+}
+async function prepareComparison(observation){
+  const observed=comparisonObservation(observation);
+  await chrome.storage.session.set({[COMPARISON_KEY]:observed});
+  await chrome.tabs.create({url:COMPARISON_PAGE});
+  return {status:"comparison_prepared",version:VERSION};
+}
+async function enableComparisonBridge(){
+  await preparedComparison();
+  const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+  if(!Number.isInteger(tab?.id)||!comparisonPageAllowed(tab.url))fail("COMPARISON_PAGE_REQUIRED");
+  try{await chrome.scripting.executeScript({target:{tabId:tab.id},files:["bridge-content.js"]});}
+  catch{fail("COMPARISON_DELIVERY_FAILED");}
+  return {status:"comparison_bridge_ready",version:VERSION};
+}
+async function deliverComparison(nonce,sender){
+  if(!nonceAllowed(nonce))fail("REQUEST_REJECTED");
+  const observed=await preparedComparison();
+  try{await chrome.tabs.sendMessage(sender.tab.id,{action:"deliverComparisonObservation",nonce,observation:observed});}
+  catch{fail("COMPARISON_DELIVERY_FAILED");}
+  // The page-specific listener acknowledges delivery before this single-use copy
+  // is cleared. It is never placed in a URL, clipboard or persistent storage.
+  await chrome.storage.session.remove(COMPARISON_KEY);
+  return {status:"comparison_delivered",version:VERSION};
 }
 async function disconnect(){
   generation++;
@@ -145,8 +195,11 @@ async function runSearch(query){
 }
 async function handle(message,sender){
   const role=caller(sender);
-  if(!message||typeof message!=="object"||Array.isArray(message)||
-    Object.keys(message).some(k=>k!=="action"&&!(message.action==="search"&&k==="query")))fail("REQUEST_REJECTED");
+  const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],
+    search:["action","query"],showClub:["action"],prepareComparison:["action","observation"],
+    enableComparisonBridge:["action"],pageBridgeReady:["action","nonce"]});
+  if(!message||typeof message!=="object"||Array.isArray(message)||!Object.hasOwn(actionKeys,message.action)||
+    Object.keys(message).some(k=>!actionKeys[message.action].includes(k)))fail("REQUEST_REJECTED");
   if(message.action==="status")return status();
   if(message.action==="revoke")return disconnect();
   if(message.action==="approve"&&role==="popup"){
@@ -164,6 +217,9 @@ async function handle(message,sender){
     await chrome.windows.update(tab.windowId,{focused:true});
     return {status:"opened",version:VERSION};
   }
+  if(message.action==="prepareComparison"&&role==="reader")return prepareComparison(message.observation);
+  if(message.action==="enableComparisonBridge"&&role==="popup")return enableComparisonBridge();
+  if(message.action==="pageBridgeReady"&&role==="page")return deliverComparison(message.nonce,sender);
   fail("REQUEST_REJECTED");
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{

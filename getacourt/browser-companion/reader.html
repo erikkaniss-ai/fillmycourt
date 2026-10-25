@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>GetACourt · Your Playtomic club</title><link rel="stylesheet" href="reader.css"></head>
 <body><main>
-<header><p class="brand">GetACourt · Personal reader v0.2.0</p><h1>Find a court at your club</h1><p>Search the offers shown in one club you have allowed. Your Playtomic login stays in its own tab.</p></header>
+<header><p class="brand">GetACourt · Personal reader v0.2.2</p><h1>Find a court at your club</h1><p>Search the offers shown in one club you have allowed. Your Playtomic login stays in its own tab.</p></header>
 <section class="connection" aria-labelledby="connectionTitle"><h2 id="connectionTitle">Your connection</h2><p id="connection" role="status">Checking your selected club…</p><p id="club" class="muted"></p><div class="actions"><button id="showClub" class="secondary" type="button">Show club tab</button><button id="disconnect" class="secondary" type="button">Disconnect and clear</button></div></section>
 <form id="searchForm"><fieldset id="filters"><legend>One club, one day</legend><div class="filters">
 <label>Date<input id="date" type="date" required></label><label>Sport<select id="sport"><option>Padel</option><option>Tennis</option></select></label>
@@ -11,7 +11,8 @@
 <button id="search" type="submit">Search this club</button><p id="cooldown" class="muted"></p></form>
 <section aria-labelledby="offersTitle"><h2 id="offersTitle">Observed offers</h2><p id="status" role="status">No search yet.</p><div id="results" aria-live="polite"></div>
 <div class="transfer"><h3>Compare with other systems</h3>
-<p>After a successful search, copy only the observed courts, times and prices. In GetACourt's <strong>Search across sources</strong> screen, run the same search and paste the report under Personal Playtomic offers. Your provider login, cookies and tokens never leave this extension. Copying is optional and expires after 60 seconds.</p>
+<p>After a successful search, open the browser-local GetACourt comparison without copying data. The receiving page must be opened in this browser and explicitly request this short-lived report. Your provider login, cookies and tokens never leave this extension. Clipboard copy remains optional.</p>
+<button id="prepareComparison" class="secondary" type="button" disabled>Open GetACourt comparison</button>
 <button id="copyObservation" class="secondary" type="button" disabled>Copy observed offers to compare</button>
 <label id="copyFallbackLabel" for="copyFallback" hidden>Manual copy (if clipboard is blocked)<textarea id="copyFallback" rows="3" readonly spellcheck="false" autocomplete="off"></textarea></label>
 <p id="copyStatus" role="status" class="muted">No observation ready to copy.</p></div>

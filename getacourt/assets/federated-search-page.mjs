@@ -6,14 +6,36 @@ const form=document.querySelector('#search'),status=document.querySelector('#sea
 const sourceBox=document.querySelector('#sourceStatus'),offerBox=document.querySelector('#offers'),clubBox=document.querySelector('#clubs');
 const date=form.elements.namedItem('date');date.value=localDay();date.min=localDay();
 date.max=new Date(Date.parse(date.min+'T00:00:00Z')+90*86400000).toISOString().slice(0,10);
-let generation=0,controller=null,expiry=null,personalExpiry=null,personal=null,latestQuery=null,latestSources=null;
+let generation=0,controller=null,expiry=null,personalExpiry=null,personal=null,latestQuery=null,latestSources=null,pendingBridge=null;
 const personalBox=document.querySelector('#personalCards'),personalStatus=document.querySelector('#personalStatus');
 const personalPayload=document.querySelector('#personalPayload');
+const bridgeRequest=document.querySelector('#requestPersonalBridge');
+const clearBridge=()=>{pendingBridge=null;delete document.documentElement.dataset.gacPersonalBridgeRequest;};
 function clearPersonal(message='No personal observation imported.'){
-  clearTimeout(personalExpiry);personalExpiry=null;personal=null;
+  clearTimeout(personalExpiry);personalExpiry=null;personal=null;clearBridge();
   personalPayload.value='';personalBox.replaceChildren();
   personalStatus.textContent=message;
   if(latestSources)sourceRows(latestSources);
+}
+function importPersonal(raw,query,ticket){
+  if(ticket!==generation||query!==latestQuery)return;
+  let imported;
+  try{
+    imported=normalizePersonalObservation(raw,query,{now:Date.now(),validator:window.GetACourtPersonalSourceObservation?.validateObservation});
+  }catch(error){
+    personalPayload.value='';personalStatus.textContent=
+      error?.message==='OBSERVATION_EXPIRED'?'The reader observation is older than 60 seconds. Search again in the extension.':
+      error?.message==='OBSERVATION_QUERY_MISMATCH'?'Reader sport/date does not match your GetACourt search.':
+      error?.message==='NO_MATCHING_OBSERVED_OFFERS'?'No observed offers match this search time/duration. Other slots may exist.':
+      'Observation not accepted. Copy only the recent sanitized offers from your GetACourt Reader.';return;
+  }
+  clearPersonal();
+  personal=imported;paintPersonal();sourceRows(latestSources);
+  const expires=Date.parse(imported.expiresAt);
+  personalExpiry=setTimeout(()=>{
+    if(ticket!==generation)return;
+    clearPersonal('Personal observation expired; search in the extension to refresh.');
+  },Math.max(0,expires-Date.now()));
 }
 function paintPersonal(){
   personalBox.replaceChildren();
@@ -85,25 +107,21 @@ document.querySelector('#reviewPersonal').addEventListener('click',async()=>{
     }
   }
   if(ticket!==generation || query!==latestQuery)return;
-  let imported;
-  try{
-    imported=normalizePersonalObservation(raw,query,{
-      now:Date.now(),validator:window.GetACourtPersonalSourceObservation?.validateObservation
-    });
-  }catch(error){
-    personalPayload.value='';personalStatus.textContent=
-      error?.message==='OBSERVATION_EXPIRED'?'The reader observation is older than 60 seconds. Search again in the extension.':
-      error?.message==='OBSERVATION_QUERY_MISMATCH'?'Reader sport/date does not match your GetACourt search.':
-      error?.message==='NO_MATCHING_OBSERVED_OFFERS'?'No observed offers match this search time/duration. Other slots may exist.':
-      'Observation not accepted. Copy only the recent sanitized offers from your GetACourt Reader.';return;
-  }
-  clearPersonal();
-  personal=imported;paintPersonal();sourceRows(latestSources);
-  const expires=Date.parse(imported.expiresAt);
-  personalExpiry=setTimeout(()=>{
-    if(ticket!==generation)return;
-    clearPersonal('Personal observation expired; search in the extension to refresh.');
-  },Math.max(0,expires-Date.now()));
+  importPersonal(raw,query,ticket);
+});
+bridgeRequest.addEventListener('click',()=>{
+  if(!latestQuery){personalStatus.textContent='Search a location/date/time first, then request your own Reader observation.';return;}
+  const nonce=crypto.getRandomValues(new Uint8Array(24)).reduce((text,value)=>text+value.toString(16).padStart(2,'0'),'');
+  pendingBridge={nonce,query:latestQuery,ticket:generation};
+  document.documentElement.dataset.gacPersonalBridgeRequest=nonce;
+  personalStatus.textContent='Reader handoff requested. Click the GetACourt extension icon in this exact tab, then choose Deliver prepared Reader offers here.';
+  window.dispatchEvent(new CustomEvent('gac:request-personal-observation',{detail:{nonce}}));
+});
+window.addEventListener('gac:personal-observation',event=>{
+  const detail=event.detail,pending=pendingBridge;
+  if(!pending||!detail||typeof detail!=='object'||Array.isArray(detail)||Object.keys(detail).sort().join(',')!=='nonce,observation'||detail.nonce!==pending.nonce)return;
+  clearBridge();
+  importPersonal(JSON.stringify(detail.observation),pending.query,pending.ticket);
 });
 document.querySelector('#clearPersonal').addEventListener('click',()=>clearPersonal('Personal observation cleared from this page.'));
 form.addEventListener('input',()=>clear('Search changed. Previous offers cleared; press Search to check again.'));

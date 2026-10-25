@@ -64,7 +64,7 @@ rejects unsupported coordinate parameters instead of silently ignoring them.
 
 No automatic initial search or background polling. Requests use same-origin GET
 and no-store; only hosting's normal same-origin session may accompany them.
-No player password, token, extension bridge or third-party session is used.
+No player password, token, server-visible extension bridge or third-party session is used.
 All text is inserted with textContent; source links have exact host/path rules,
 no query/account identifiers and no automatic navigation. No booking controls.
 Offer snapshots expire after 60 seconds, on changed filters, and on page exit.
@@ -104,4 +104,30 @@ The bridge validates exact allowed top-level and per-offer fields, verifies the 
 
 CI: getacourt/tests/personal-observation-bridge.test.mjs checks strict evidence boundaries, time/DST uncertainty, price cents, unknown/foreign source, sensitive fields, stale data, no network/storage/booking and no false Core authority. The existing dedicated federated-search CI now runs those Node tests plus 320/390/1440 Chromium fixture cases that compare a fictional Playtomic observed court beside two fictional Core offers and reject injected tokens/mismatched dates. Personal Reader's mandatory Chromium tests now verify explicit sanitized copy and clearance after 60 seconds. None of these fictional observations proves a live provider feed, player authentication, official permitted redistribution or production acceptance.
 
-**Still required for end-state:** true one-click source-to-shared-search flow without clipboard handoff, multi-venue delegated player discovery, provider-specific approved connectors (TiePlayer, Racket ID, Smashpro, club internal), legitimate provider/club permissions, protected hosting and real owner's Playtomic v0.2 source/UI acceptance. Do not interpret passing source CI as completed nationwide free-slot searching.
+**Still required for end-state:** multi-venue delegated player discovery, provider-specific approved connectors (TiePlayer, Racket ID, Smashpro, club internal), legitimate provider/club permissions, protected hosting and real owner's Playtomic v0.2.2 source/UI acceptance. The browser-local handoff below removes clipboard/paste but deliberately remains multi-gesture so the extension receives `activeTab` only after the player chooses the exact receiving page. Do not interpret passing source CI as completed nationwide free-slot searching.
+
+## G2.1: browser-local no-clipboard handoff (source-only)
+
+Reader v0.2.2 can retain one already validated `user_ui_observation` in
+extension session storage for less than 60 seconds and open the fixed public
+comparison URL without adding any data to the URL. It does not use
+`externally_connectable`, permanent host permissions, a web-accessible resource,
+provider HTTP, cookies, token forwarding, clipboard read/write or server
+upload.
+
+The player first searches the same date/time in the page, explicitly requests
+the prepared Reader observation, and then invokes the extension action in that
+same exact `https://getacourt.com/search-all.html` tab. Only that `activeTab`
+gesture allows the extension to inject its tiny local relay. The relay returns a
+single strict sanitized report to the page's one-time request; success deletes
+the session copy, as do expiry and disconnect. A forged/extra-field observation,
+wrong origin/path, missing request, stale capture or changed page query is
+rejected by the existing strict page validator. The observation remains
+user-observed, partial, timezone/freshness-unknown and non-bookable.
+
+Node contracts cover strict sender/page selection, no URL/clipboard payload,
+single-use delivery, expired/credential-bearing rejection and disconnect
+clearance. The federated Chromium fixture additionally covers unsolicited page
+events, user-gesture nonce matching and hostile extra fields. This is not live
+Playtomic acceptance and cannot work on an older hosted Get page until this
+exact source is separately approved and deployed.

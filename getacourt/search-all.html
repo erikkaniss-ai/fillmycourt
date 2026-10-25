@@ -31,10 +31,10 @@
   <section aria-labelledby="offersHeading"><h2 id="offersHeading">Native court offers</h2><p>Observed in Core at the search time; not reserved. Prices and availability must be rechecked before any booking.</p><div id="offers" class="cards"></div></section>
   <section id="personalOffers" aria-labelledby="personalHeading">
     <h2 id="personalHeading">Personal Playtomic offers</h2>
-    <p>Search in the GetACourt browser companion, click Copy observed offers, then click Compare here to import from the clipboard. If browser clipboard access is blocked, paste the report into the field first. No background integration or account access; never paste passwords, cookies or tokens.</p>
+    <p>Search in the GetACourt browser companion, then use its explicit browser-local comparison handoff or copy observed offers. The direct handoff needs a separate extension-icon click in this exact page; it has no provider account access. If clipboard access is blocked, paste the short sanitized report instead. Never paste passwords, cookies or tokens.</p>
     <label for="personalPayload">Paste the personal Reader's observed offers (not account data)</label>
     <textarea id="personalPayload" rows="3" maxlength="16384" spellcheck="false" autocomplete="off" placeholder="Optional manual paste if browser clipboard read is blocked. Nothing is uploaded or stored."></textarea>
-    <div class="personal-actions"><button id="reviewPersonal" type="button">Compare observed offers</button><button id="clearPersonal" type="button">Clear personal data</button></div>
+    <div class="personal-actions"><button id="requestPersonalBridge" type="button">Receive prepared Reader offers</button><button id="reviewPersonal" type="button">Compare observed offers</button><button id="clearPersonal" type="button">Clear personal data</button></div>
     <p id="personalStatus" role="status" aria-live="polite">No personal observation imported. This website cannot read your Playtomic login.</p>
     <div id="personalCards" class="cards"></div>
   </section>
@@ -42,7 +42,7 @@
   <details id="readerGuide"><summary>Use your private Playtomic reader</summary>
     <p>The personal reader opens inside the GetACourt extension. There are no IDs or pairing codes to copy, and this web page cannot read your provider session.</p>
     <ol><li>Open the intended Playtomic club in the Chrome/Edge profile where you normally sign in.</li><li>Click the GetACourt extension icon, then <strong>Connect and open GetACourt</strong>.</li><li>Choose one day, sport and start-time range, then press <strong>Search this club</strong>.</li></ol>
-    <p>Existing installations need one reload in Chrome's extensions page for version 0.2.0. Renew the club grant after a browser restart or lost access; no code is needed.</p>
+    <p>Existing installations need one reload in Chrome's extensions page for version 0.2.2. Renew the club grant after a browser restart or lost access; no code is needed.</p>
     <p>The reader uses the approved club's normal filters and offer disclosures in a compact window. It never presses Book or payment controls. Results expire after 60 seconds. Disconnect is available in both reader and popup.</p>
     <p>Coverage is partial and provider freshness unknown. TiePlayer, Racket ID and Smashpro are not connected in this extension.</p>
   </details>

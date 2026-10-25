@@ -1,4 +1,4 @@
-# GetACourt personal Playtomic reader v0.2.0
+# GetACourt personal Playtomic reader v0.2.2
 
 This is a browser-local, explicitly requested search of one personally approved
 Playtomic club. It is not a provider API integration or an unattended supply
@@ -8,7 +8,7 @@ endpoint is used. No deployment is needed.
 ## Connect without copying codes
 
 1. Existing owners reload the unpacked `getacourt/browser-companion` extension
-   once for v0.2.0. New owners review and load that same folder in Chrome/Edge.
+   once for v0.2.2. New owners review and load that same folder in Chrome/Edge.
    Permissions remain only `activeTab`, `scripting` and `storage`.
 2. Sign into Playtomic personally in that browser profile and open the intended
    official `https://playtomic.com/clubs/<slug>` page.
@@ -99,6 +99,32 @@ price. Results exist only in that reader page, expire after 60 seconds, and
 clear when filters change, the page exits or access is withdrawn. They are
 not uploaded, persisted, inserted into Core/main inventory, booked or paid.
 
+## Browser-local comparison handoff
+
+v0.2.2 adds an optional no-clipboard handoff for a current observation. After
+an explicit successful Reader search, the user clicks **Open GetACourt
+comparison**. The extension keeps only the already validated observation in
+`chrome.storage.session` for its existing 60-second lifetime and opens exactly
+`https://getacourt.com/search-all.html`, with no observation, identifier or
+capability in the URL.
+
+The receiving page first requires the user to complete the same Get search and
+click **Receive prepared Reader offers**. The user must then click the
+extension icon in that exact GetACourt tab and explicitly choose **Deliver
+prepared Reader offers here**. `activeTab` grants a one-tab injection only for
+that browser action; the extension has no host permission, web-accessible
+resource or `externally_connectable` receiver. The tiny injected script can
+deliver only the strict sanitized observation to the page's pending one-time
+request. It has no network, provider, cookie, clipboard or persistent-storage
+access. Delivery consumes the session copy; disconnect also clears it.
+
+This is a browser-local convenience path, not a provider API bridge. The Get
+page still validates the same date, sport, range, duration, strict field set
+and 60-second capture bound before displaying a partial, non-bookable card.
+Clipboard/manual paste remains an optional fallback. Until the matching Get
+page source is protected-hosted, this path is source-only and must not be
+presented as deployed acceptance.
+
 TiePlayer, Racket ID and Smashpro are not connected in this companion.
 Licensed API delegation, redistribution rights, Portugal-wide coverage,
 production activation and deployment remain separate scopes requiring their
@@ -123,7 +149,7 @@ own evidence/authorization.
 
 The earlier v0.1.1 real owner session demonstrated one explicit offer transfer,
 60-second expiry, changed-tab rejection and disconnect. It does not establish
-v0.2.0's automatic filtering/window behavior. After source CI, v0.2.0 needs the
+v0.2.0's automatic filtering/window behavior. After source CI, v0.2.2 needs the
 owner's one-time extension reload and a fresh no-code Search/Disconnect check
 in their own signed-in browser. Record actual results separately; never
 substitute these fictional tests for live acceptance.

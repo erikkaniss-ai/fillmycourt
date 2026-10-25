@@ -207,3 +207,41 @@ def test_clipboard_one_click_import_and_old_search_race_rejection(browser_page):
     expect(page.locator("#personalStatus")).to_contain_text("cleared")
     assert page.locator("#personalPayload").input_value() == ""
     assert not forbidden
+
+
+def test_direct_reader_handoff_needs_a_page_gesture_and_strict_payload(browser_page, fixture_url):
+    page, context, forbidden, _ = browser_page
+    page.get_by_role("button", name="Search across sources").click()
+    expect(page.locator("#offers .card")).to_have_count(2)
+    date = page.locator('[name="date"]').input_value()
+    observed = {
+        "provider":"playtomic","source":"user_ui_observation",
+        "sourceUrl":"https://playtomic.com/clubs/cascais-padel-club",
+        "venue":"Cascais Padel & Nature","date":date,"sport":"Padel",
+        "capturedAt":page.evaluate("new Date().toISOString()"),"timezone":None,"sourceFreshness":"unknown",
+        "coverage":"expanded_offers_only",
+        "offers":[{"court":"Direct bridge court","startLabel":"6:30 PM","endLabel":"8:00 PM",
+                   "durationMinutes":90,"priceEur":36}]
+    }
+    # An unsolicited page event cannot import anything.
+    page.evaluate("""data => window.dispatchEvent(new CustomEvent('gac:personal-observation', {
+      detail:{nonce:'x'.repeat(48),observation:data}
+    }))""", observed)
+    expect(page.locator("#personalCards .card")).to_have_count(0)
+    page.get_by_role("button", name="Receive prepared Reader offers").click()
+    nonce = page.evaluate("document.documentElement.dataset.gacPersonalBridgeRequest")
+    assert isinstance(nonce, str) and len(nonce) == 48
+    page.evaluate("""data => window.dispatchEvent(new CustomEvent('gac:personal-observation', {
+      detail:{nonce:document.documentElement.dataset.gacPersonalBridgeRequest,observation:data}
+    }))""", {**observed, "access_token":"forbidden"})
+    expect(page.locator("#personalCards .card")).to_have_count(0)
+    expect(page.locator("#personalStatus")).to_contain_text("not accepted")
+    page.get_by_role("button", name="Receive prepared Reader offers").click()
+    page.evaluate("""data => window.dispatchEvent(new CustomEvent('gac:personal-observation', {
+      detail:{nonce:document.documentElement.dataset.gacPersonalBridgeRequest,observation:data}
+    }))""", observed)
+    expect(page.locator("#personalCards .card")).to_have_count(1)
+    expect(page.locator("#personalCards")).to_contain_text("Direct bridge court")
+    assert context.request.get(fixture_url + "/__counts").json()["coreRequests"] == 1
+    assert page.evaluate("localStorage.length + sessionStorage.length") == 0
+    assert not forbidden
