@@ -2,11 +2,16 @@
 
 ## Working slice
 
-The existing `personal-sources.html` route now contains a real read-only search
-form and a shared results screen. It calls `GET /api/gac/search-all`. The existing
-profile link reaches this route; the original homepage, native search, account,
-Watch and booking flows are not replaced. The no-code Playtomic reader setup is
-retained in an accessible disclosure. The extension itself is unchanged.
+The new `search-all.html` page contains a real read-only search form and a
+shared results screen calling `GET /api/gac/search-all`. The existing profile
+link reaches `personal-sources.html`, which remains inert guidance (no script
+or network) and now has an ordinary link to the new page. The original homepage,
+native search, account, Watch and booking flows are not replaced. No-code
+Playtomic setup is retained; the extension itself is unchanged.
+
+The initial candidate incorrectly reused the legacy guide route and failed its
+existing no-script regression. The new screen was moved to its own route and
+the inert page restored. No legacy security assertion was relaxed or removed.
 
 The handler executes independent source adapters with a bounded timeout and
 AbortSignal. An unavailable Core source cannot erase the club directory. Native
@@ -75,9 +80,11 @@ and source URL policy. Nine Chromium cases test the actual page and actual
 handler at 320/390/1440 with an in-process **fictional** Core, source/API failures,
 query races and expiry. This is not real club inventory or hosted acceptance.
 The local container browser denies loopback navigation; do not describe that
-attempt as a passed browser check. The dedicated GitHub workflow must finish
-successfully before claiming browser acceptance. Existing Platform, accessibility
-and offline/privacy regressions remain required and unchanged.
+attempt as a passed browser check. The initial dedicated GitHub workflow
+40146625736 passed all nine browser cases and 13 Node groups, but full Platform CI
+rejected the guide-route conflict. The corrected exact HEAD must pass every
+workflow before overall acceptance. Existing Platform, accessibility and
+offline/privacy regressions remain required and unchanged.
 
 Next: integrate the current personal Playtomic observation path into common
 source-labelled results without treating an owner's session as a shared supply

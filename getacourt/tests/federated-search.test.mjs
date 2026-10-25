@@ -91,8 +91,10 @@ test('HTTP route reads only configured Core GET, preserving exact cents and dire
   }finally{globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;}
 });
 test('served page is a real search UI with same-origin GET and retains no-code reader guide',()=>{
-  const html=fs.readFileSync(new URL('../personal-sources.html',import.meta.url),'utf8');
+  const html=fs.readFileSync(new URL('../search-all.html',import.meta.url),'utf8');
   const js=fs.readFileSync(new URL('../assets/federated-search-page.mjs',import.meta.url),'utf8');
+  const guide=fs.readFileSync(new URL('../personal-sources.html',import.meta.url),'utf8');
+  assert.doesNotMatch(guide,/<script|id="pairing"|id="extension"/);assert.match(guide,/href="search-all.html"/);
   assert.match(html,/id="search"/);assert.match(html,/Connect and open GetACourt/);assert.match(html,/federated-search-page.mjs/);assert.match(js,/\/api\/gac\/search-all\?/);
   for(const pattern of [/localStorage/,/sessionStorage/,/chrome\.runtime/,/setInterval/,/innerHTML/])assert.doesNotMatch(js,pattern);
   assert.match(js,/ticket!==generation/);assert.match(js,/pagehide/);assert.match(js,/expires-now/);

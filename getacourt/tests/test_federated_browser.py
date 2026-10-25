@@ -40,7 +40,7 @@ def browser_page(fixture_url):
         page = context.new_page()
         page.on("pageerror", lambda error: errors.append(str(error)))
         context.request.get(fixture_url + "/__fixture?mode=ok")
-        page.goto(fixture_url + "/personal-sources.html")
+        page.goto(fixture_url + "/search-all.html")
         yield page, context, forbidden, errors
         assert forbidden == []
         assert errors == []
