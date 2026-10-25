@@ -213,6 +213,7 @@ def test_direct_reader_handoff_needs_a_page_gesture_and_strict_payload(browser_p
     page, context, forbidden, _ = browser_page
     page.get_by_role("button", name="Search across sources").click()
     expect(page.locator("#offers .card")).to_have_count(2)
+    before = context.request.get(fixture_url + "/__counts").json()["coreRequests"]
     date = page.locator('[name="date"]').input_value()
     observed = {
         "provider":"playtomic","source":"user_ui_observation",
@@ -242,6 +243,8 @@ def test_direct_reader_handoff_needs_a_page_gesture_and_strict_payload(browser_p
     }))""", observed)
     expect(page.locator("#personalCards .card")).to_have_count(1)
     expect(page.locator("#personalCards")).to_contain_text("Direct bridge court")
-    assert context.request.get(fixture_url + "/__counts").json()["coreRequests"] == 1
+    # The handoff itself must not make another Core/provider request. The
+    # isolated fixture count before this point can vary with browser timing.
+    assert context.request.get(fixture_url + "/__counts").json()["coreRequests"] == before
     assert page.evaluate("localStorage.length + sessionStorage.length") == 0
     assert not forbidden
