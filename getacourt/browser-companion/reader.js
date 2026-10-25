@@ -1,12 +1,14 @@
 (() => {
   const byId=id=>document.getElementById(id);
   const validate=globalThis.GetACourtPersonalSourceObservation.validateObservation;
-  let connected=false,pending=false,epoch=0,expiry,cooldownTimer,cooldownUntil=0;
+  let connected=false,pending=false,epoch=0,expiry,cooldownTimer,cooldownUntil=0,latestObservation=null;
   const today=new Date();
   const localDate=date=>[date.getFullYear(),String(date.getMonth()+1).padStart(2,"0"),String(date.getDate()).padStart(2,"0")].join("-");
   byId("date").value=byId("date").min=localDate(today);
   const last=new Date(today);last.setDate(last.getDate()+14);byId("date").max=localDate(last);
-  const clear=()=>{clearTimeout(expiry);byId("results").replaceChildren();};
+  const clear=()=>{clearTimeout(expiry);latestObservation=null;byId("results").replaceChildren();
+    byId("copyObservation").disabled=true;byId("copyFallback").value="";
+    byId("copyFallbackLabel").hidden=true;byId("copyStatus").textContent="No observation ready to copy.";};
   const controls=()=>{
     byId("search").disabled=!connected||pending||Date.now()<cooldownUntil;
     byId("filters").disabled=pending;
@@ -52,9 +54,28 @@
         article.append(heading,details);byId("results").append(article);
       }
       if(!offers.length)byId("status").textContent="No matching offers in the inspected subset. Other slots may exist.";
+      else{latestObservation=observation;byId("copyObservation").disabled=false;byId("copyStatus").textContent="Observed offers are ready. Copy only if you want them in GetACourt's shared comparison screen.";}
       expiry=setTimeout(()=>{++epoch;clear();byId("status").textContent="Observation expired. Search again to check the club.";},60000);
     }catch(error){if(current===epoch)byId("status").textContent=error.message;}
     finally{pending=false;controls();}
+  });
+  byId("copyObservation").addEventListener("click",async()=>{
+    const current=latestObservation;
+    if(!current){byId("copyStatus").textContent="Search your club first.";return;}
+    if(!Number.isFinite(Date.parse(current.capturedAt))||Date.now()-Date.parse(current.capturedAt)>=60000){
+      clear();byId("copyStatus").textContent="Observation expired. Search again.";return;
+    }
+    let sanitized;
+    try{sanitized=JSON.stringify(validate(current));}catch{clear();byId("copyStatus").textContent="Observation failed validation.";return;}
+    try{
+      if(!navigator.clipboard?.writeText)throw Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(sanitized);
+      byId("copyStatus").textContent="Copied observed offers only (no account data). Paste into GetACourt Search across sources. Expires 60 seconds after capture.";
+    }catch{
+      byId("copyFallback").value=sanitized;byId("copyFallbackLabel").hidden=false;
+      byId("copyFallback").focus();byId("copyFallback").select();
+      byId("copyStatus").textContent="Automatic clipboard blocked. Copy the selected sanitized report manually (Ctrl+C), then paste into GetACourt.";
+    }
   });
   byId("filters").addEventListener("input",()=>{++epoch;clear();byId("status").textContent="Filters changed. Search to inspect these offers.";});
   byId("showClub").addEventListener("click",async()=>{
