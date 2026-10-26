@@ -1,5 +1,5 @@
 importScripts("capture.js","observation.js");
-const VERSION="0.2.3";
+const VERSION="0.2.4";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
 const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html";

@@ -1,4 +1,9 @@
-# GetACourt personal Playtomic reader v0.2.3
+# GetACourt personal Playtomic reader v0.2.4
+
+## 26 October 2026: import acknowledgment repair (source only)
+
+Reader 0.2.4 changes the receiving-page handshake: sending a DOM event no longer consumes the protected 60-second observation. The comparison page must first accept the exact query and fresh, strictly validated offers and synchronously acknowledge its matching nonce. A rejected or missing acknowledgment preserves the prepared report for an explicit retry before original expiry; a successful acknowledgment consumes it once. Transport failures and response rejection now have regression coverage. The packaged extension must be reloaded after source update. This is a code-only Draft PR revision, not an approved new protected deploy or an authenticated owner Playtomic live acceptance.
+
 
 ## 26 October 2026: protected comparison acceptance
 
@@ -26,7 +31,7 @@ the protected static receiver described above.
 ## Connect without copying codes
 
 1. Existing owners reload the unpacked `getacourt/browser-companion` extension
-   once for v0.2.3. New owners review and load that same folder in Chrome/Edge.
+   once for v0.2.4. New owners review and load that same folder in Chrome/Edge.
    Permissions remain only `activeTab`, `scripting` and `storage`.
 2. Sign into Playtomic personally in that browser profile and open the intended
    official `https://playtomic.com/clubs/<slug>` page.
@@ -171,7 +176,7 @@ The earlier v0.1.1 real owner session demonstrated one explicit offer transfer,
 installed v0.2.2 also completed a real 26 October Cascais Search with two
 explicit NATUREZA 90-minute EUR36 offers, expiry and Disconnect clearing.
 These expired observations are historical evidence, not current inventory.
-The v0.2.3 protected-receiver handoff still requires its separate live
+The v0.2.4 protected-receiver handoff still requires its separate live
 owner-session acceptance. Record actual results separately; never substitute
 fictional tests or deployment success for that acceptance.
 
