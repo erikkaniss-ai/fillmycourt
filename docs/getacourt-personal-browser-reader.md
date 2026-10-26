@@ -20,12 +20,13 @@ not-yet-published public receiver are refused. Public promotion is still separat
 This is a browser-local, explicitly requested search of one personally approved
 Playtomic club. It is not a provider API integration or an unattended supply
 feed. No booking, hold, payment, provider credential, token, cookie or private
-endpoint is used. No deployment is needed.
+endpoint is used. Reader search needs no website deployment; comparison uses
+the protected static receiver described above.
 
 ## Connect without copying codes
 
 1. Existing owners reload the unpacked `getacourt/browser-companion` extension
-   once for v0.2.2. New owners review and load that same folder in Chrome/Edge.
+   once for v0.2.3. New owners review and load that same folder in Chrome/Edge.
    Permissions remain only `activeTab`, `scripting` and `storage`.
 2. Sign into Playtomic personally in that browser profile and open the intended
    official `https://playtomic.com/clubs/<slug>` page.
@@ -118,11 +119,12 @@ not uploaded, persisted, inserted into Core/main inventory, booked or paid.
 
 ## Browser-local comparison handoff
 
-v0.2.2 adds an optional no-clipboard handoff for a current observation. After
+The optional no-clipboard handoff shares only a current observation. After
 an explicit successful Reader search, the user clicks **Open GetACourt
 comparison**. The extension keeps only the already validated observation in
 `chrome.storage.session` for its existing 60-second lifetime and opens exactly
-`https://getacourt.com/search-all.html`, with no observation, identifier or
+`https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html`,
+with no observation, identifier or
 capability in the URL.
 
 The receiving page first requires the user to complete the same Get search and
@@ -138,9 +140,9 @@ access. Delivery consumes the session copy; disconnect also clears it.
 This is a browser-local convenience path, not a provider API bridge. The Get
 page still validates the same date, sport, range, duration, strict field set
 and 60-second capture bound before displaying a partial, non-bookable card.
-Clipboard/manual paste remains an optional fallback. Until the matching Get
-page source is protected-hosted, this path is source-only and must not be
-presented as deployed acceptance.
+Clipboard/manual paste remains an optional fallback. The receiving page is
+protected-hosted for isolated acceptance. Successful deployment and fictional
+browser tests do not establish a live owner-session transfer.
 
 TiePlayer, Racket ID and Smashpro are not connected in this companion.
 Licensed API delegation, redistribution rights, Portugal-wide coverage,
@@ -165,11 +167,13 @@ own evidence/authorization.
   claim native extension installation proof.
 
 The earlier v0.1.1 real owner session demonstrated one explicit offer transfer,
-60-second expiry, changed-tab rejection and disconnect. It does not establish
-v0.2.0's automatic filtering/window behavior. After source CI, v0.2.2 needs the
-owner's one-time extension reload and a fresh no-code Search/Disconnect check
-in their own signed-in browser. Record actual results separately; never
-substitute these fictional tests for live acceptance.
+60-second expiry, changed-tab rejection and disconnect. On 25 October the
+installed v0.2.2 also completed a real 26 October Cascais Search with two
+explicit NATUREZA 90-minute EUR36 offers, expiry and Disconnect clearing.
+These expired observations are historical evidence, not current inventory.
+The v0.2.3 protected-receiver handoff still requires its separate live
+owner-session acceptance. Record actual results separately; never substitute
+fictional tests or deployment success for that acceptance.
 
 ## 25 October 2026 — observed public Playtomic grid variant, price popup and strictly bounded Reader support
 
