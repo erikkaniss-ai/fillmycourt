@@ -39,7 +39,9 @@ async function gate(){
     const result=await api('/actions/runs?head_sha='+sha+'&event=pull_request&per_page=100');
     if(ciState(result.workflow_runs??[],sha)){
       if(!approved(await api('/pulls/5'),sha))throw Error('PR_CHANGED');
-      const r=await fetch('https://getacourt-staging--getacourt-preview.netlify.app/',{redirect:'manual',signal:AbortSignal.timeout(15000)});
+      // The staging branch alias is the published branch, not the protected PR
+      // preview. Use the previously established, actual PR5 Deploy Preview.
+      const r=await fetch('https://deploy-preview-5--getacourt-preview.netlify.app/',{redirect:'manual',signal:AbortSignal.timeout(15000)});
       if(r.status!==401)throw Error('EXISTING_NONPRODUCTION_PROTECTION_UNVERIFIED');
       console.log('Exact PR5 approval, required CI and existing protected preview verified.');return;
     }
