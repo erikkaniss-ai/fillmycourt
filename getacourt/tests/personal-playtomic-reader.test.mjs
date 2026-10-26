@@ -17,7 +17,7 @@ function observation(){return {sourceUrl:source,date:query.date,sport:query.spor
 function validObservation(){return {provider:"playtomic",source:"user_ui_observation",sourceUrl:source,venue:"Fictional club",date:query.date,sport:query.sport,capturedAt:"2026-10-24T10:00:00.000Z",timezone:null,sourceFreshness:"unknown",coverage:"expanded_offers_only",offers:[{court:"Court 1",startLabel:"2:00 PM",endLabel:"3:30 PM",durationMinutes:90,priceEur:36}]};}
 function harness(shared){
   const localStore=shared?.localStore||{},session=shared?.session||{},handlers={},created=[],windows=[],canceled=[],injected=[];
-  let calls=0,clock=Date.parse("2026-10-24T10:00:00.000Z"),tabUrl=source,activeUrl=source,activeTabId=1,readImpl,tabMissing=false,compactFailure=false,setImpl;
+  let calls=0,clock=Date.parse("2026-10-24T10:00:00.000Z"),tabUrl=source,activeUrl=source,activeTabId=1,readImpl,tabMissing=false,compactFailure=false,setImpl,deliveryResponse={status:"delivered"};
   const area=data=>({
     async get(keys){return Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(k=>[k,data[k]]));},
     async set(value){if(setImpl)await setImpl();Object.assign(data,value);},
@@ -27,7 +27,7 @@ function harness(shared){
     runtime:{id:"reader",getURL:p=>"chrome-extension://reader/"+p,onMessage:{addListener:f=>handlers.internal=f},onMessageExternal:{addListener:()=>{throw Error("No external receiver allowed");}}},
     storage:{local:area(localStore),session:area(session)},
     tabs:{query:async()=>[{id:activeTabId,windowId:5,url:activeUrl}],get:async()=>{if(tabMissing)throw Error("fictional-private-tab");return {id:1,windowId:5,url:tabUrl};},
-      create:async data=>{created.push({...data});return {id:2};},update:async()=>{},sendMessage:async(id,data)=>{canceled.push({id,...data});}},
+      create:async data=>{created.push({...data});return {id:2};},update:async()=>{},sendMessage:async(id,data)=>{canceled.push({id,...data});if(data.action==="deliverComparisonObservation"){if(deliveryResponse==="throw")throw Error("fictional-private-browser");return deliveryResponse;}}},
     windows:{get:async()=>({width:1200}),create:async data=>{if(compactFailure)throw Error("fictional-private-window");windows.push({...data});return {id:6};},update:async()=>{}},
     scripting:{executeScript:async options=>{if(options.files){injected.push({...options});return [];}calls++;return readImpl?readImpl():[{frameId:0,result:observation()}];}}
   };
@@ -38,6 +38,7 @@ function harness(shared){
   return {localStore,session,handlers,created,windows,canceled,injected,call,connect:()=>call({action:"approve"},popup),
     advance:()=>clock+=60000,changeTab:()=>tabUrl="https://playtomic.com/padel-courts",closeTab:()=>tabMissing=true,
     setActiveComparison:()=>{activeUrl=comparisonUrl;activeTabId=9;},
+    setDeliveryResponse:value=>deliveryResponse=value,
     captureResult:value=>readImpl=async()=>[{frameId:0,result:value}],rejectInjection:()=>readImpl=async()=>{throw Error("fictional-private-browser");},
     breakCompact:()=>compactFailure=true,get calls(){return calls;},
     defer:()=>{let resolve;readImpl=()=>new Promise(r=>resolve=r);return value=>resolve(value);},
@@ -203,4 +204,41 @@ test("package has unchanged narrow permissions, no external bridge, no credentia
   assert.match(search,/"bg-white"/);
   assert.doesNotMatch(search,/(?:book|continue|checkout|pay)\.click\s*\(|submit\s*\(|requestSubmit\s*\(/i);
   assert.match(search,/courtStarts>=2/);assert.match(search,/slice\(0,3\)/);
+});
+
+test("page rejection, missing acknowledgment and transport failure retain prepared observation",async()=>{
+  const h=harness();await h.connect();
+  assert.equal((await h.call({action:"prepareComparison",observation:validObservation()})).status,"comparison_prepared");
+  const nonce="b".repeat(48);
+  for(const outcome of [{status:"rejected"},undefined,"throw"]){
+    h.setDeliveryResponse(outcome);
+    assert.equal((await h.call({action:"pageBridgeReady",nonce},page)).code,"COMPARISON_DELIVERY_FAILED");
+    assert.ok(h.session.comparisonObservation);
+  }
+  h.setDeliveryResponse({status:"delivered"});
+  assert.equal((await h.call({action:"pageBridgeReady",nonce},page)).status,"comparison_delivered");
+  assert.equal(h.session.comparisonObservation,undefined);
+});
+test("content bridge requires receiver ACK, not merely successful DOM dispatch",()=>{
+  const script=readFileSync(new URL("bridge-content.js",root),"utf8");
+  const listeners=new Map(),pending=[];
+  const win={
+    addEventListener(type,fn){const v=listeners.get(type)||[];v.push(fn);listeners.set(type,v);},
+    removeEventListener(type,fn){listeners.set(type,(listeners.get(type)||[]).filter(x=>x!==fn));},
+    dispatchEvent(event){for(const fn of [...(listeners.get(event.type)||[])])fn(event);}
+  };win.top=win;
+  const nonce="c".repeat(48),rootElement={dataset:{gacPersonalBridgeRequest:nonce}};
+  const mockChrome={runtime:{id:"reader",sendMessage:()=>Promise.resolve(),onMessage:{addListener:fn=>pending.push(fn)}}};
+  const E=class{constructor(type,{detail}){this.type=type;this.detail=detail;}};
+  vm.runInNewContext(script,{window:win,document:{documentElement:rootElement},chrome:mockChrome,CustomEvent:E});
+  let receipt;const message={action:"deliverComparisonObservation",nonce,observation:validObservation()};
+  pending[0](message,null,r=>receipt=r);
+  assert.equal(receipt.status,"rejected");
+  assert.equal(rootElement.dataset.gacPersonalBridgeRequest,nonce);
+  win.addEventListener("gac:personal-observation",event=>{
+    win.dispatchEvent(new E("gac:personal-observation-accepted",{detail:{nonce:event.detail.nonce}}));
+  });
+  pending[0](message,null,r=>receipt=r);
+  assert.equal(receipt.status,"delivered");
+  assert.equal(rootElement.dataset.gacPersonalBridgeRequest,undefined);
 });

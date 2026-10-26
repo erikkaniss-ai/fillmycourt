@@ -22,8 +22,18 @@
         message.action!=="deliverComparisonObservation"||!validNonce(message.nonce)||root.dataset.gacPersonalBridgeRequest!==message.nonce){
         reply({status:"rejected"});return;
       }
+      let accepted=false;
+      const confirm=event=>{
+        const detail=event?.detail;
+        if(detail&&typeof detail==="object"&&!Array.isArray(detail)&&
+          Object.keys(detail).join(",")==="nonce"&&detail.nonce===message.nonce)accepted=true;
+      };
+      window.addEventListener("gac:personal-observation-accepted",confirm);
+      try{
+        window.dispatchEvent(new CustomEvent("gac:personal-observation",{detail:{nonce:message.nonce,observation:message.observation}}));
+      }finally{window.removeEventListener("gac:personal-observation-accepted",confirm);}
+      if(!accepted){reply({status:"rejected"});return;}
       delete root.dataset.gacPersonalBridgeRequest;
-      window.dispatchEvent(new CustomEvent("gac:personal-observation",{detail:{nonce:message.nonce,observation:message.observation}}));
       reply({status:"delivered"});
     });
   }

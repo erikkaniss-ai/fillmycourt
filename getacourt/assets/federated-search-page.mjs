@@ -18,7 +18,7 @@ function clearPersonal(message='No personal observation imported.'){
   if(latestSources)sourceRows(latestSources);
 }
 function importPersonal(raw,query,ticket){
-  if(ticket!==generation||query!==latestQuery)return;
+  if(ticket!==generation||query!==latestQuery)return false;
   let imported;
   try{
     imported=normalizePersonalObservation(raw,query,{now:Date.now(),validator:window.GetACourtPersonalSourceObservation?.validateObservation});
@@ -27,7 +27,7 @@ function importPersonal(raw,query,ticket){
       error?.message==='OBSERVATION_EXPIRED'?'The reader observation is older than 60 seconds. Search again in the extension.':
       error?.message==='OBSERVATION_QUERY_MISMATCH'?'Reader sport/date does not match your GetACourt search.':
       error?.message==='NO_MATCHING_OBSERVED_OFFERS'?'No observed offers match this search time/duration. Other slots may exist.':
-      'Observation not accepted. Copy only the recent sanitized offers from your GetACourt Reader.';return;
+      'Observation not accepted. Copy only the recent sanitized offers from your GetACourt Reader.';return false;
   }
   clearPersonal();
   personal=imported;paintPersonal();sourceRows(latestSources);
@@ -36,6 +36,7 @@ function importPersonal(raw,query,ticket){
     if(ticket!==generation)return;
     clearPersonal('Personal observation expired; search in the extension to refresh.');
   },Math.max(0,expires-Date.now()));
+  return true;
 }
 function paintPersonal(){
   personalBox.replaceChildren();
@@ -120,8 +121,9 @@ bridgeRequest.addEventListener('click',()=>{
 window.addEventListener('gac:personal-observation',event=>{
   const detail=event.detail,pending=pendingBridge;
   if(!pending||!detail||typeof detail!=='object'||Array.isArray(detail)||Object.keys(detail).sort().join(',')!=='nonce,observation'||detail.nonce!==pending.nonce)return;
-  clearBridge();
-  importPersonal(JSON.stringify(detail.observation),pending.query,pending.ticket);
+  // Only a validated, accepted personal offer earns a delivery receipt.
+  if(importPersonal(JSON.stringify(detail.observation),pending.query,pending.ticket))
+    window.dispatchEvent(new CustomEvent('gac:personal-observation-accepted',{detail:{nonce:pending.nonce}}));
 });
 document.querySelector('#clearPersonal').addEventListener('click',()=>clearPersonal('Personal observation cleared from this page.'));
 form.addEventListener('input',()=>clear('Search changed. Previous offers cleared; press Search to check again.'));

@@ -108,10 +108,11 @@ async function enableComparisonBridge(){
 async function deliverComparison(nonce,sender){
   if(!nonceAllowed(nonce))fail("REQUEST_REJECTED");
   const observed=await preparedComparison();
-  try{await chrome.tabs.sendMessage(sender.tab.id,{action:"deliverComparisonObservation",nonce,observation:observed});}
+  let receipt;
+  try{receipt=await chrome.tabs.sendMessage(sender.tab.id,{action:"deliverComparisonObservation",nonce,observation:observed});}
   catch{fail("COMPARISON_DELIVERY_FAILED");}
-  // The page-specific listener acknowledges delivery before this single-use copy
-  // is cleared. It is never placed in a URL, clipboard or persistent storage.
+  // A completed browser transport is not evidence that the page accepted it.
+  if(receipt?.status!=="delivered")fail("COMPARISON_DELIVERY_FAILED");
   await chrome.storage.session.remove(COMPARISON_KEY);
   return {status:"comparison_delivered",version:VERSION};
 }
