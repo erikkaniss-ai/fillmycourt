@@ -1,6 +1,8 @@
 importScripts("capture.js","observation.js");
-const VERSION="0.2.2";
-const COMPARISON_PAGE="https://getacourt.com/search-all.html";
+const VERSION="0.2.3";
+// Exact owner-authorised, Team Login protected static UAT receiver. Public
+// promotion remains separate; the public search-all path is not deployed yet.
+const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html";
 const COMPARISON_KEY="comparisonObservation";
 let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 // Fixed messages only: never return a browser/provider exception or credential.

@@ -10,7 +10,8 @@ const search=readFileSync(new URL("search.js",root),"utf8");
 const source="https://playtomic.com/clubs/fictional-club";
 const popup={id:"reader",url:"chrome-extension://reader/popup.html"};
 const reader={id:"reader",url:"chrome-extension://reader/reader.html",frameId:0};
-const page={id:"reader",url:"https://getacourt.com/search-all.html",frameId:0,tab:{id:9,url:"https://getacourt.com/search-all.html"}};
+const comparisonUrl="https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html";
+const page={id:"reader",url:comparisonUrl,frameId:0,tab:{id:9,url:comparisonUrl}};
 const query={date:"2026-10-25",sport:"Padel",from:"14:00",to:"20:00",durationMinutes:90};
 function observation(){return {sourceUrl:source,date:query.date,sport:query.sport,offers:[]};}
 function validObservation(){return {provider:"playtomic",source:"user_ui_observation",sourceUrl:source,venue:"Fictional club",date:query.date,sport:query.sport,capturedAt:"2026-10-24T10:00:00.000Z",timezone:null,sourceFreshness:"unknown",coverage:"expanded_offers_only",offers:[{court:"Court 1",startLabel:"2:00 PM",endLabel:"3:30 PM",durationMinutes:90,priceEur:36}]};}
@@ -36,7 +37,7 @@ function harness(shared){
   const call=(message,sender=reader)=>new Promise(resolve=>handlers.internal(message,sender,resolve));
   return {localStore,session,handlers,created,windows,canceled,injected,call,connect:()=>call({action:"approve"},popup),
     advance:()=>clock+=60000,changeTab:()=>tabUrl="https://playtomic.com/padel-courts",closeTab:()=>tabMissing=true,
-    setActiveComparison:()=>{activeUrl="https://getacourt.com/search-all.html";activeTabId=9;},
+    setActiveComparison:()=>{activeUrl=comparisonUrl;activeTabId=9;},
     captureResult:value=>readImpl=async()=>[{frameId:0,result:value}],rejectInjection:()=>readImpl=async()=>{throw Error("fictional-private-browser");},
     breakCompact:()=>compactFailure=true,get calls(){return calls;},
     defer:()=>{let resolve;readImpl=()=>new Promise(r=>resolve=r);return value=>resolve(value);},
@@ -128,7 +129,7 @@ test("a Reader-only, single-use comparison handoff needs an exact GetACourt page
   const h=harness();await h.connect();
   const prepared=await h.call({action:"prepareComparison",observation:validObservation()});
   assert.equal(prepared.status,"comparison_prepared");
-  assert.deepEqual(h.created.at(-1),{url:"https://getacourt.com/search-all.html"});
+  assert.deepEqual(h.created.at(-1),{url:comparisonUrl});
   assert.ok(h.session.comparisonObservation);assert.equal(JSON.stringify(h.created).includes("Court 1"),false);
   h.setActiveComparison();
   assert.equal((await h.call({action:"enableComparisonBridge"},popup)).status,"comparison_bridge_ready");
@@ -149,6 +150,9 @@ test("comparison handoff rejects stale data, extra fields and foreign pages; dis
   await fresh.call({action:"revoke"});assert.equal(fresh.session.comparisonObservation,undefined);
   const foreign={...page,url:"https://evil.example/search-all.html",tab:{id:9,url:"https://evil.example/search-all.html"}};
   assert.equal((await fresh.call({action:"pageBridgeReady",nonce:"a".repeat(48)},foreign)).code,"REQUEST_REJECTED");
+  for(const url of ['https://getacourt.com/search-all.html',comparisonUrl+'?next=foreign',comparisonUrl+'#data',comparisonUrl.replace('get-pr5-reader-uat','other-preview')]){
+    assert.equal((await fresh.call({action:"pageBridgeReady",nonce:"a".repeat(48)},{...page,url})).code,"REQUEST_REJECTED");
+  }
 });
 test("a revoke queued during approval wins without a late restored grant",async()=>{
   const h=harness();const finish=h.deferConsent();
@@ -190,7 +194,7 @@ test("package has unchanged narrow permissions, no external bridge, no credentia
   const page=readFileSync(new URL("reader.html",root),"utf8"),ui=readFileSync(new URL("reader.js",root),"utf8"),bridge=readFileSync(new URL("bridge-content.js",root),"utf8");
   assert.doesNotMatch(page,/id="(?:pairing|extension)"/);assert.doesNotMatch(ui,/localStorage|sessionStorage|indexedDB/);
   assert.doesNotMatch(background+capture+search,/\bfetch\s*\(|XMLHttpRequest|document\.cookie|setInterval|webRequest|debugger/);
-  assert.match(background,/const COMPARISON_PAGE="https:\/\/getacourt\.com\/search-all\.html"/);
+  assert.ok(background.includes('const COMPARISON_PAGE="'+comparisonUrl+'"'));
   assert.doesNotMatch(bridge,/\bfetch\s*\(|XMLHttpRequest|document\.cookie|localStorage|sessionStorage|clipboard|https?:\/\//);
   // White DIV-grid disclosures and named Close are now necessary for the
   // verified Playtomic UI. Continue/Book/Pay and form submissions stay forbidden.

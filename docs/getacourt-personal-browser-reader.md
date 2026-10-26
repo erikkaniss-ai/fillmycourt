@@ -1,4 +1,21 @@
-# GetACourt personal Playtomic reader v0.2.2
+# GetACourt personal Playtomic reader v0.2.3
+
+## 26 October 2026: protected comparison acceptance
+
+The public `getacourt.com/search-all.html` currently returns 404. The Reader now
+opens only `https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html`.
+This exact receiving page is a Team Login protected static UAT draft. It has no
+server functions, Core connector or booking UI. A private comparison acceptance
+does not publish the public website or activate any provider feed.
+
+The existing federated workflow prepares only the reviewed comparison page and
+six required assets, requires the current single owner-approved PR5 SHA and the
+other mandatory CI, then uploads a draft to the existing Get preview site. The
+federated browser job must also pass. Both existing preview and new draft must
+deny anonymous access. The existing team deploy credential stays inside Actions.
+All 60-second observation, separate page/extension gestures, strict-schema,
+single-use and disconnect protections remain in force. Other aliases and the
+not-yet-published public receiver are refused. Public promotion is still separate.
 
 This is a browser-local, explicitly requested search of one personally approved
 Playtomic club. It is not a provider API integration or an unattended supply
