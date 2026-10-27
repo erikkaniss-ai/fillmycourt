@@ -25,6 +25,31 @@ test('config is server-reviewed, bounded, exact-club scoped, HTTPS only and cann
   assert.throws(()=>readClubFeeds(JSON.stringify([{...grant,clubId:123}]),now));
   assert.throws(()=>readClubFeeds(JSON.stringify([{...grant,validUntil:'2027-02-30T12:00:00Z'}]),now));
 });
+test('a club-owned feed can hand off to an explicitly reviewed official Playtomic club page',()=>{
+  const official='https://playtomic.com/clubs/fixture-consenting-club';
+  const permitted={...grant,bookingProvider:'playtomic',bookingApprovalRef:'FICTIONAL-BOOKING-MAPPING-REVIEW',bookingUrl:official};
+  assert.equal(readClubFeeds(JSON.stringify([permitted]),now).length,1);
+  const [o]=normalizeClubFeed(payload,permitted,query,now).offers;
+  assert.equal(o.handoffUrl,official);
+  assert.equal(o.handoffKind,'provider_club_page');
+  assert.equal(o.evidence,'club_feed');
+  assert.equal(o.bookingEnabled,false);
+  // The booking destination grants no right to access the provider's slots.
+  const rejected=[
+    {...grant,bookingUrl:official},
+    {...permitted,bookingApprovalRef:''},
+    {...permitted,bookingApprovalRef:undefined},
+    {...permitted,bookingProvider:'tiesports'},
+    {...permitted,bookingProvider:'club'},
+    {...permitted,bookingUrl:'https://playtomic.com/clubs/fixture-consenting-club?token=wrong'},
+    {...permitted,bookingUrl:'https://playtomic.com/checkout'},
+    {...permitted,bookingUrl:'https://playtomic.com.evil.example.org/clubs/fixture'},
+    {...permitted,bookingUrl:'https://racket.id/booking'},
+    {...permitted,feedUrl:'https://playtomic.com/clubs/fixture-consenting-club'},
+    {...grant,bookingApprovalRef:'FICTIONAL-NOT-NEEDED'}
+  ];
+  for(const candidate of rejected)assert.throws(()=>readClubFeeds(JSON.stringify([candidate]),now));
+});
 test('strict feed preserves exact money, court, date, UTC, local offset, expiry and official club handoff',()=>{
   const {offers}=normalizeClubFeed(payload,grant,query,now);assert.equal(offers.length,1);
   const o=offers[0];assert.equal(o.priceMinor,3600);assert.equal(o.duration,90);assert.equal(o.courtName,'FICTIONAL COURT');assert.equal(o.sourceId,'club_internal');assert.equal(o.evidence,'club_feed');assert.equal(o.handoffUrl,grant.bookingUrl);assert.equal(o.expiresAt,'2026-10-27T12:00:30.000Z');assert.equal(o.bookingEnabled,false);

@@ -23,7 +23,7 @@ export function readClubFeeds(raw,now=new Date()){
   const feeds=JSON.parse(raw);if(!Array.isArray(feeds)||feeds.length>5)deny();
   const seen=new Set();
   for(const f of feeds){
-    if(!own(f,['id','clubId','clubName','areas','timezone','feedUrl','bookingUrl','courts','approvalRef','validUntil','maxAgeSeconds','authority'])||
+    if(!own(f,['id','clubId','clubName','areas','timezone','feedUrl','bookingUrl','bookingProvider','bookingApprovalRef','courts','approvalRef','validUntil','maxAgeSeconds','authority'])||
       !id(f.id)||!id(f.clubId)||!text(f.clubName)||f.authority!=='club_canonical'||
       !Array.isArray(f.areas)||!f.areas.length||f.areas.length>10||!f.areas.every(a=>text(a,80)&&fold(a))||
       !text(f.timezone,80)||!text(f.approvalRef,120)||!instant(f.validUntil)||Date.parse(f.validUntil)<=now.getTime()||
@@ -35,7 +35,17 @@ export function readClubFeeds(raw,now=new Date()){
     const feed=publicUrl(f.feedUrl),book=publicUrl(f.bookingUrl);
     // The club must control both URLs. This adapter cannot impersonate a
     // Playtomic/TieSports/Racket ID/Smashpro API or accept their session cookies.
-    if(feed.origin!==book.origin||/(?:^|\.)(?:playtomic\.com|playtomic\.io|tiesports\.com|racket\.id|smashpro\.pt|smashpro\.co)$/.test(feed.hostname))deny();
+    if(/(?:^|\.)(?:playtomic\.com|playtomic\.io|tiesports\.com|racket\.id|smashpro\.pt|smashpro\.co)$/.test(feed.hostname))deny();
+    // A club may own its availability feed but use an official external
+    // booking platform. The server-owned source config must explicitly declare
+    // that separately reviewed handoff; never treat it as provider data access.
+    const bookingProvider=f.bookingProvider??'club';
+    if(bookingProvider==='club'){
+      if(feed.origin!==book.origin||f.bookingApprovalRef!==undefined)deny();
+    }else if(bookingProvider==='playtomic'){
+      if(!text(f.bookingApprovalRef,120)||book.hostname!=='playtomic.com'||
+        !/^\/clubs\/[a-z0-9-]+\/?$/.test(book.pathname))deny();
+    }else deny();
     seen.add(f.id);seen.add('club:'+f.clubId);
   }
   return feeds;
@@ -60,7 +70,7 @@ export function normalizeClubFeed(payload,f,query,now=new Date()){
     if(!o){invalidRows++;continue;}
     const offer={...o,id:['club',f.id,row.id].join('|'),clubId:'club:'+f.clubId,sourceId:'club_internal',evidence:'club_feed',
       observedAt:new Date(observed).toISOString(),expiresAt:until,providerFreshness:'source_timestamped',
-      handoffUrl:f.bookingUrl,handoffKind:'club_page'};
+      handoffUrl:f.bookingUrl,handoffKind:f.bookingProvider==='playtomic'?'provider_club_page':'club_page'};
     if(conflicts.has(offer.id))continue;
     const previous=offers.get(offer.id);
     if(previous&&JSON.stringify(previous)!==JSON.stringify(offer)){offers.delete(offer.id);conflicts.add(offer.id);invalidRows++;continue;}

@@ -63,7 +63,18 @@ All values below are **FICTIONAL EXAMPLES**, not a live club or grant:
 One explicit search sends a GET to the exact reviewed HTTPS feed URL with
 `sport`, `date`, `from`, `to`, `duration`. It sends no player location, caller
 authorization, cookies, provider token or credentials. Feed and booking URLs
-must share the club-controlled origin. URL credentials, nonstandard ports,
+must share the club-controlled origin by default. An explicitly reviewed
+alternative is `"bookingProvider":"playtomic"` plus a nonempty
+`"bookingApprovalRef"` referring to independently checked ownership and
+club-to-Playtomic mapping evidence: `bookingUrl` must be a clean official
+`https://playtomic.com/clubs/<slug>` URL (no query, hash or credentials).
+The feed remains club-owned and must not be a Playtomic/TieSports/provider
+endpoint. This allows a consenting club to show its **own** fresh inventory
+and hand off to its official booking provider, without reading a provider
+account or claiming slot-specific deep-link availability. Approval strings
+are pointers to original evidence, not independent authorization; do not
+configure either without an actual grant. Other cross-origin booking hosts
+stay denied. URL credentials, nonstandard ports,
 queries/fragments in configuration, literal/local hosts and vendor API origins
 are refused. No browser-supplied URL is accepted. Redirects are refused. URLs
 and their public DNS ownership must be reviewed before configuration.
