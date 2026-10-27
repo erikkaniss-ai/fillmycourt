@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'">
+  <title>GetACourt — Find an available court</title>
+  <link rel="stylesheet" href="assets/federated-search.css">
+  <script type="module" src="assets/court-search-page.mjs"></script>
+</head>
+<body>
+<a class="skip" href="#search">Skip to search</a>
+<header><a class="brand" href="index.html">GetACourt</a><span>Find a court. Continue with the club to book.</span></header>
+<main>
+  <section class="intro"><p class="eyebrow">COURT SEARCH</p><h1>Find your next game.</h1>
+    <p>Choose where and when you want to play. Offers show the court, time, duration, total price and source.</p>
+    <p class="notice">Coverage depends on connected clubs. A missing result does not mean every court is taken.</p></section>
+  <form id="search" novalidate>
+    <label>City, area or exact club name<input name="location" value="Cascais" required maxlength="80" autocomplete="off"></label>
+    <label>Sport<select name="sport"><option value="padel">Padel</option><option value="tennis">Tennis</option><option value="squash">Squash</option><option value="badminton">Badminton</option><option value="pickleball">Pickleball</option></select></label>
+    <label>Date<input name="date" type="date" required></label>
+    <label>Starts from<input name="from" type="time" value="08:00" required></label>
+    <label>Starts before<input name="to" type="time" value="23:00" required></label>
+    <label>Duration<select name="duration"><option value="any">60 or 90 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label>
+    <button type="submit">Find courts</button>
+  </form>
+  <p id="searchStatus" role="status" aria-live="polite">Choose a time and search.</p>
+  <section aria-labelledby="offersHeading"><h2 id="offersHeading">Available court offers</h2>
+    <p>Offers are short-lived and are not reserved. The club confirms the final price and availability.</p><div id="offers" class="cards"></div></section>
+  <section aria-labelledby="coverageHeading"><h2 id="coverageHeading">Sources checked</h2><div id="sourceStatus" class="source-grid"></div></section>
+</main>
+<footer>GetACourt · No automatic reservation or payment</footer>
+</body></html>

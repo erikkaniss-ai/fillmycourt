@@ -16,7 +16,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const artifactDir=process.env.GAC_INTEGRATION_ARTIFACT_DIR;
 if(artifactDir)await mkdir(artifactDir,{recursive:true});
 const MIME={".js":"text/javascript; charset=utf-8",".html":"text/html; charset=utf-8",
-  ".css":"text/css; charset=utf-8",".webmanifest":"application/manifest+json",".png":"image/png"};
+  ".css":"text/css; charset=utf-8",".mjs":"text/javascript; charset=utf-8",".webmanifest":"application/manifest+json",".png":"image/png"};
 
 function sendJson(res,status,obj){
   res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});
@@ -40,7 +40,7 @@ const server=createServer(async(req,res)=>{
   }
   const requested=url.pathname==="/"?"/index.html":url.pathname;
   const relative=requested.slice(1);
-  if(!/^(index\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png))$/.test(relative)){
+  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|federated-search\.mjs|source-catalog\.mjs|federated-search\.css))$/.test(relative)){
     sendJson(res,404,{error:"NOT_FOUND"});return;
   }
   try{
@@ -181,6 +181,15 @@ try{
       await page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done))));
       await page.screenshot({path:join(artifactDir,`get-integrated-${width}-FIXTURE-ONLY.png`),fullPage:true});
     }
+    // New release entry is extension-free and does not contact any source on load.
+    await page.goto(origin+'/find.html',{waitUntil:'domcontentloaded'});
+    await page.getByRole('button',{name:'Find courts',exact:true}).waitFor();
+    await page.addScriptTag({content:axeSource});
+    assert.deepEqual(await evaluateAxe(),[],width+' direct search WCAG 2.2 A/AA audit');
+    assert.equal(await page.locator('#personalPayload').count(),0);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
+    assert.deepEqual(errors,[],width+' direct search JS errors');
+    if(artifactDir)await page.screenshot({path:join(artifactDir,`get-direct-${width}-FIXTURE-ONLY.png`),fullPage:true});
     // External CDN assets are deliberately denied; they are not part of source UAT.
     assert.ok(blocked.every(host=>host==="unpkg.com"),width+" unexpected external origins "+blocked);
     completed++;

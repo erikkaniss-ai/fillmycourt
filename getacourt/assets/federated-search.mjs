@@ -52,10 +52,12 @@ export function mergeResults(query,results,now=new Date()) {
     const result=results.find(r=>r?.id===source.id);
     const status=STATES.has(result?.status)?result.status:'invalid_response';
     const isCore=source.id==='core' && status==='ok';
+    const isClub=source.id==='club_internal' && status==='ok';
     const sourceOffers=[];
-    if(isCore)for(const offer of (Array.isArray(result.offers)?result.offers:[]).slice(0,1000)){
-      // Only the native adapter supplies server offers in this release.
-      if(offer?.sourceId!=='core'||offer.evidence!=='core_reported'||offer.date!==query.date||offer.bookingEnabled!==false)continue;
+    if(isCore||isClub)for(const offer of (Array.isArray(result.offers)?result.offers:[]).slice(0,1000)){
+      // Only the native adapter and the validated, explicitly configured club
+      // feed can supply server offers. Directory providers never supply slots.
+      if(offer?.sourceId!==source.id||offer.evidence!==(isCore?'core_reported':'club_feed')||offer.date!==query.date||offer.bookingEnabled!==false)continue;
       if(conflicts.has(offer.id))continue;
       const prev=offers.get(offer.id);
       if(prev && (prev.priceMinor!==offer.priceMinor||prev.currency!==offer.currency||prev.clubName!==offer.clubName||prev.courtName!==offer.courtName)){
@@ -71,10 +73,10 @@ export function mergeResults(query,results,now=new Date()) {
         const url=safeSourceUrl(s.id,s.url);if(url)target.sources.push({id:s.id,label:source.label,url,kind:s.kind,reviewedOn:s.reviewedOn});
       }
     }
-    sources.push({id:source.id,label:source.label,status,offerCount:sourceOffers.length,coverage:isCore?'approved_core_only':'no_live_feed',invalidRows:Number.isSafeInteger(result?.invalidRows)?result.invalidRows:0});
+    sources.push({id:source.id,label:source.label,status,offerCount:sourceOffers.length,coverage:isCore?'approved_core_only':isClub?'approved_club_feeds_only':'no_live_feed',invalidRows:Number.isSafeInteger(result?.invalidRows)?result.invalidRows:0,failedFeeds:Number.isSafeInteger(result?.failedFeeds)?result.failedFeeds:0});
   }
   const ordered=[...offers.values()].sort((a,b)=>Date.parse(a.startsAt)-Date.parse(b.startsAt)||a.priceMinor-b.priceMinor||a.id.localeCompare(b.id));
-  sources.find(s=>s.id==='core').offerCount=ordered.length;
+  for(const source of sources)source.offerCount=ordered.filter(o=>o.sourceId===source.id).length;
   return {version:'gac-federated-search/v1',query:{...query},generatedAt:now.toISOString(),expiresAt:new Date(now.getTime()+60000).toISOString(),
     coverage:'partial',complete:false,sources,offers:ordered,directory:[...clubs.values()],conflictingOffers:conflicts.size,
     bookingEnabled:false,notice:'Directory entries are not free courts. Missing or empty source results do not establish that clubs are sold out.'};

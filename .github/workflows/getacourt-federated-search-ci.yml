@@ -36,13 +36,16 @@ jobs:
           node --check getacourt/assets/personal-observation-bridge.mjs
           node --check getacourt/browser-companion/reader.js
           node --test getacourt/tests/private-reader-preview.test.mjs
+          node --test getacourt/tests/private-search-preview.test.mjs
+          node --check getacourt/assets/court-search-page.mjs
+          node --experimental-strip-types --test getacourt/tests/club-availability.test.mjs
           node --experimental-strip-types --test getacourt/tests/federated-search.test.mjs getacourt/tests/personal-observation-bridge.test.mjs
       - name: Install pinned browser test dependencies
         run: |
           python -m pip install pytest==8.4.2 playwright==1.56.0
           python -m playwright install --with-deps chromium
       - name: Actual browser and handler with isolated fictional Core
-        run: python -m pytest getacourt/tests/test_federated_browser.py -v
+        run: python -m pytest getacourt/tests/test_federated_browser.py getacourt/tests/test_court_search_browser.py -v
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -51,7 +54,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
   private-reader-draft:
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 5
+    # Reader work is parked. Only an explicit exact-head Reader scope may run
+    # its old static acceptance draft; release-path changes do not revive it.
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 5 && contains(github.event.pull_request.body, format('<!-- GET_STAGING_UAT_APPROVED_SHA:{0} -->', github.event.pull_request.head.sha))
     needs: search-contract-and-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -89,3 +94,37 @@ jobs:
             > "$RUNNER_TEMP/get-reader-static-result.json"
       - name: Verify new draft requires Team Login
         run: node getacourt/qa/private-reader-preview.mjs --verify
+  private-search-draft:
+    if: github.event_name == 'pull_request' && github.event.pull_request.number == 5 && contains(github.event.pull_request.body, format('<!-- GET_SEARCH_UAT_APPROVED_SHA:{0} -->', github.event.pull_request.head.sha))
+    needs: search-contract-and-browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Require exact search scope, complete CI and existing Team Login
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node getacourt/qa/private-search-preview.mjs --gate
+      - run: npm install --no-save --no-audit --no-fund netlify-cli@27.12.1
+      - run: node getacourt/qa/private-search-preview.mjs --prepare
+      - name: Recheck reviewed source and scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node getacourt/qa/private-search-preview.mjs --gate
+      - name: Upload protected DRAFT with only one read-only search function
+        working-directory: ${{ runner.temp }}/get-search-direct
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.FILL_NETLIFY_AUTH_TOKEN }}
+        run: |
+          test -n "$NETLIFY_AUTH_TOKEN" || { echo 'Existing team deploy credential unavailable'; exit 1; }
+          "$GITHUB_WORKSPACE/node_modules/.bin/netlify" deploy --site 5dbcc4a3-5c87-4c75-959f-9a4f9fbc9570 --dir getacourt --functions netlify/functions --alias get-pr5-search-uat --no-build --json > "$RUNNER_TEMP/get-search-result.json"
+      - name: Verify protected page and API
+        run: node getacourt/qa/private-search-preview.mjs --verify
