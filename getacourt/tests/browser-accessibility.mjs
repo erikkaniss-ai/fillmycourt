@@ -184,7 +184,9 @@ try{
     // New release entry is extension-free and does not contact any source on load.
     await page.goto(origin+'/find.html',{waitUntil:'domcontentloaded'});
     await page.getByRole('button',{name:'Find courts',exact:true}).waitFor();
-    await page.addScriptTag({content:axeSource});
+    // Execute the auditor through the isolated test driver. The page's strict
+    // CSP correctly refuses inserting an inline script element.
+    await page.evaluate(axeSource);
     assert.deepEqual(await evaluateAxe(),[],width+' direct search WCAG 2.2 A/AA audit');
     assert.equal(await page.locator('#personalPayload').count(),0);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);

@@ -2,10 +2,12 @@
 import {fold} from '../../getacourt/assets/source-catalog.mjs';
 import {normalizeCoreSlot} from '../../getacourt/assets/federated-search.mjs';
 const ID=/^[a-zA-Z0-9_-]{1,80}$/;
+const id=v=>typeof v==='string'&&ID.test(v);
 const INSTANT=/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/;
 const own=(v,keys)=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).every(k=>keys.includes(k));
 const text=(v,n=160)=>typeof v==='string'&&v.length>0&&v.length<=n&&!/[\u0000-\u001f\u007f]/.test(v);
-const instant=v=>typeof v==='string'&&INSTANT.test(v)&&Number.isFinite(Date.parse(v));
+const instant=v=>typeof v==='string'&&INSTANT.test(v)&&Number.isFinite(Date.parse(v))&&
+  new Date(v.slice(0,10)+'T00:00:00Z').toISOString().slice(0,10)===v.slice(0,10);
 const deny=()=>{throw Error('INVALID_SOURCE');};
 const caches=new WeakMap(); // Per runtime, bounded; no database or disk writes.
 function publicUrl(value){
@@ -22,12 +24,12 @@ export function readClubFeeds(raw,now=new Date()){
   const seen=new Set();
   for(const f of feeds){
     if(!own(f,['id','clubId','clubName','areas','timezone','feedUrl','bookingUrl','courts','approvalRef','validUntil','maxAgeSeconds','authority'])||
-      !ID.test(f.id??'')||!ID.test(f.clubId??'')||!text(f.clubName)||f.authority!=='club_canonical'||
+      !id(f.id)||!id(f.clubId)||!text(f.clubName)||f.authority!=='club_canonical'||
       !Array.isArray(f.areas)||!f.areas.length||f.areas.length>10||!f.areas.every(a=>text(a,80)&&fold(a))||
       !text(f.timezone,80)||!text(f.approvalRef,120)||!instant(f.validUntil)||Date.parse(f.validUntil)<=now.getTime()||
       !Number.isInteger(f.maxAgeSeconds)||f.maxAgeSeconds<1||f.maxAgeSeconds>300||
       !Array.isArray(f.courts)||!f.courts.length||f.courts.length>50||
-      !f.courts.every(c=>own(c,['id','name','sport'])&&ID.test(c.id??'')&&text(c.name)&&['padel','tennis','squash','badminton','pickleball'].includes(c.sport))||
+      !f.courts.every(c=>own(c,['id','name','sport'])&&id(c.id)&&text(c.name)&&['padel','tennis','squash','badminton','pickleball'].includes(c.sport))||
       new Set(f.courts.map(c=>c.id)).size!==f.courts.length||seen.has(f.id)||seen.has('club:'+f.clubId))deny();
     try{new Intl.DateTimeFormat('en',{timeZone:f.timezone}).format(now);}catch{deny();}
     const feed=publicUrl(f.feedUrl),book=publicUrl(f.bookingUrl);
@@ -47,7 +49,7 @@ export function normalizeClubFeed(payload,f,query,now=new Date()){
   const until=new Date(Math.min(t+60000,expires,Date.parse(f.validUntil))).toISOString();
   const offers=new Map(),conflicts=new Set();let invalidRows=0;
   for(const row of payload.offers){
-    if(!own(row,['id','courtId','startsAt','endsAt','priceMinor','currency'])||!ID.test(row.id??'')||!instant(row.startsAt)||!instant(row.endsAt))deny();
+    if(!own(row,['id','courtId','startsAt','endsAt','priceMinor','currency'])||!id(row.id)||!instant(row.startsAt)||!instant(row.endsAt))deny();
     const court=f.courts.find(c=>c.id===row.courtId),minutes=(Date.parse(row.endsAt)-Date.parse(row.startsAt))/60000;
     if(!court||court.sport!==query.sport||Date.parse(row.startsAt)<=t||row.currency!=='EUR'){invalidRows++;continue;}
     // Reuse the existing date/range/DST/price validation, then give the result

@@ -22,6 +22,8 @@ test('config is server-reviewed, bounded, exact-club scoped, HTTPS only and cann
   assert.equal(readClubFeeds(raw,now).length,1);
   for(const patch of [{authority:'playtomic'},{validUntil:now.toISOString()},{approvalRef:''},{timezone:undefined},{maxAgeSeconds:0},{maxAgeSeconds:301},{feedUrl:'http://club.example.org/feed'},{feedUrl:'https://127.0.0.1/feed'},{feedUrl:'https://localhost/feed'},{feedUrl:'https://user:secret@fixture-club.example.org/feed'},{feedUrl:grant.feedUrl+'?token=x'},{feedUrl:grant.feedUrl+'#x'},{feedUrl:'https://other.example.org/feed'},{feedUrl:'https://playtomic.com/feed',bookingUrl:'https://playtomic.com/book'},{customer_email:'PRIVATE'}])assert.throws(()=>readClubFeeds(JSON.stringify([{...grant,...patch}]),now));
   assert.throws(()=>readClubFeeds(JSON.stringify([grant,grant]),now));
+  assert.throws(()=>readClubFeeds(JSON.stringify([{...grant,clubId:123}]),now));
+  assert.throws(()=>readClubFeeds(JSON.stringify([{...grant,validUntil:'2027-02-30T12:00:00Z'}]),now));
 });
 test('strict feed preserves exact money, court, date, UTC, local offset, expiry and official club handoff',()=>{
   const {offers}=normalizeClubFeed(payload,grant,query,now);assert.equal(offers.length,1);
