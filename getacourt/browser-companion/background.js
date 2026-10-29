@@ -1,5 +1,5 @@
-importScripts("capture.js","observation.js");
-const VERSION="0.4.0";
+importScripts("capture.js","observation.js","playtomic-club-catalog.js");
+const VERSION="0.4.1";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
 const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
@@ -272,6 +272,94 @@ async function autoSearchFromGet(query) {
     return await runSearch(query);
   }finally{autoBusy=false;}
 }
+
+// A single Playtomic player account/Chrome site grant supports bounded
+// read-only searches at up to FOUR independently reviewed first-party clubs.
+// No club-admin feed, API, hidden endpoints, authentication export or
+// unattended polling. Temporary browser tabs/windows are cleaned afterward.
+function multiPlaytomicQueryValid(query){
+  if(!query||typeof query!=="object"||Array.isArray(query)||
+     Object.keys(query).sort().join(",")!=="date,durationMinutes,from,location,sport,to"||
+     typeof query.location!=="string"||query.location.length<1||query.location.length>80)return false;
+  const {location,...filters}=query;
+  return queryValid(filters)&&!!location.trim();
+}
+async function autoSearchPlaytomicClubsFromGet(query){
+  if(!multiPlaytomicQueryValid(query))fail("QUERY_INVALID");
+  if(busy||autoBusy||consentPending)fail("READ_BUSY");
+  autoBusy=true;
+  const epoch=generation;
+  let tempWindow=null,tempTab=null;
+  try{
+    const {approvedSource}=await chrome.storage.local.get("approvedSource");
+    if(!sourceAllowed(approvedSource))fail("CONNECT_REQUIRED");
+    if(!await chrome.permissions.contains({origins:["https://playtomic.com/*"]}))
+      fail("SITE_ACCESS_REQUIRED");
+    const registry=globalThis.GetACourtPlaytomicClubCatalog;
+    if(!registry||typeof registry.matching!=="function")fail("READ_FAILED");
+    const clubs=registry.matching(query);
+    if(!Array.isArray(clubs)||clubs.length>4)fail("READ_FAILED");
+    if(!clubs.length)return {status:"partial",sources:[],coverage:"no_reviewed_club_in_area",version:VERSION};
+    if(clubs.some(c=>!sourceAllowed(c.sourceUrl)))fail("CLUB_PAGE_REQUIRED");
+    const {lastAttempt=0}=await chrome.storage.session.get("lastAttempt");
+    if(Date.now()-lastAttempt<60000)fail("RATE_LIMITED");
+    await chrome.storage.session.set({lastAttempt:Date.now()});
+    const providerQuery={date:query.date,sport:query.sport,from:query.from,to:query.to,
+      durationMinutes:query.durationMinutes};
+    const results=[];
+    for(const club of clubs){
+      if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+      const result={provider:"playtomic",sourceUrl:club.sourceUrl,
+        status:"unavailable",code:"READ_FAILED"};
+      try{
+        let tab;
+        // Only our OWN temporary worker window is compacted or closed.
+        if(tempWindow===null){
+          tab=await chrome.tabs.create({url:club.sourceUrl,active:false});
+          tempTab=tab.id;
+          const window=await chrome.windows.create({
+            tabId:tab.id,type:"normal",width:480,height:850,focused:false
+          });
+          tempWindow=window.id;
+        }else{
+          tab=await chrome.tabs.create({
+            url:club.sourceUrl,active:false,windowId:tempWindow
+          });
+        }
+        await waitForPage(tab.id);
+        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+        await chrome.scripting.executeScript({
+          target:{tabId:tab.id},files:["capture.js","search.js"]
+        });
+        const rows=await chrome.scripting.executeScript({
+          target:{tabId:tab.id},func:async q=>searchPlaytomic(q),args:[providerQuery]
+        });
+        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+        const observed=rows?.find(x=>x.frameId===0)?.result;
+        if(observed?.readerError)fail(observed.readerError);
+        if(!observed||observed.sourceUrl!==club.sourceUrl||
+           observed.date!==query.date||observed.sport!==query.sport)
+          fail("SCHEDULE_NOT_READY");
+        result.observation=globalThis.GetACourtPersonalSourceObservation.validateObservation(observed);
+        result.status="observed";delete result.code;
+      }catch(error){
+        result.code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
+      }
+      results.push(result);
+      // One failure must not blank another club's genuine observation.
+    }
+    return {status:"partial",sources:results,
+      coverage:"bounded_reviewed_club_pages_only",version:VERSION};
+  }finally{
+    if(Number.isInteger(tempWindow)&&typeof chrome.windows.remove==="function"){
+      try{await chrome.windows.remove(tempWindow);}catch{}
+    }else if(Number.isInteger(tempTab)&&typeof chrome.tabs.remove==="function"){
+      try{await chrome.tabs.remove(tempTab);}catch{}
+    }
+    autoBusy=false;
+  }
+}
+
 async function autoStatus() {
   const {approvedSource}=await chrome.storage.local.get("approvedSource");
   let hasHostAccess=false;
@@ -344,7 +432,7 @@ async function runSearch(query){
 async function handle(message,sender){
   const role=caller(sender);
   const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],
-    search:["action","query"],autoSearchFromGet:["action","query"],autoStatus:["action"],
+    search:["action","query"],autoSearchFromGet:["action","query"],autoSearchPlaytomicClubsFromGet:["action","query"],autoStatus:["action"],
     autoSearchAdditionalFromGet:["action","query"],approveAdditional:["action"],
     showClub:["action"],prepareComparison:["action","observation"],
     enableComparisonBridge:["action"],pageBridgeReady:["action","nonce"]});
@@ -353,6 +441,7 @@ async function handle(message,sender){
   if(message.action==="status")return status();
   if(message.action==="autoStatus"&&role==="page")return autoStatus();
   if(message.action==="autoSearchFromGet"&&role==="page")return autoSearchFromGet(message.query);
+  if(message.action==="autoSearchPlaytomicClubsFromGet"&&role==="page")return autoSearchPlaytomicClubsFromGet(message.query);
   if(message.action==="autoSearchAdditionalFromGet"&&role==="page")return autoSearchAdditionalFromGet(message.query);
   if(message.action==="approveAdditional"&&role==="popup")return approveAdditional();
   if(message.action==="revoke")return disconnect();

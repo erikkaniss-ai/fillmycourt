@@ -78,12 +78,40 @@ window.addEventListener('gac:auto-search-response',event=>{
      request.revision!==revision||query!==request.query)return;
   cancelAuto();
   if(detail.result?.status==='observed'){
+    // Compatibility with existing single-club reader in the protected beta.
     let raw;
     try{raw=JSON.stringify(detail.result.observation);}catch{
       personalStatus.textContent='The player observation could not be validated.';return;
     }
     if(importPersonal(raw,request.query,request.revision))
       status.textContent='Verified personal observation received. Select a court to continue with Playtomic.';
+  }else if(detail.result?.status==='partial'&&Array.isArray(detail.result.sources)){
+    // One first-party Playtomic site grant, several independently checked named
+    // clubs. Absence of an offer from a club is NEVER a sold-out claim.
+    const checked=detail.result.sources.slice(0,4);
+    let accepted=0,unavailable=0;
+    for(const result of checked){
+      if(result?.provider!=='playtomic'){unavailable++;continue;}
+      if(result.status==='observed'){
+        let raw;
+        try{raw=JSON.stringify(result.observation);}catch{raw='';}
+        if(raw&&importPersonal(raw,request.query,request.revision))accepted++;
+        else unavailable++;
+      }else unavailable++;
+    }
+    if(accepted>0){
+      status.textContent='Compared '+checked.length+' reviewed Playtomic club(s); '+accepted+
+        ' supplied fresh personally observed priced court offers. Confirm on the official site.';
+      personalStatus.textContent=unavailable+
+        ' club(s) incomplete or unverified; no provider-wide sold-out conclusion.';
+    }else if(checked.length===0){
+      status.textContent='No reviewed Playtomic club in this exact area yet. Try Cascais, Parede, Carcavelos or Alcabideche.';
+      personalStatus.textContent='No availability claim was made for unsupported areas.';
+    }else{
+      status.textContent='Checked '+checked.length+
+        ' reviewed Playtomic club page(s), but no complete priced offer was verified.';
+      personalStatus.textContent='One or more clubs require a valid login, compatible booking layout or a different date. Other slots may exist.';
+    }
   }else{
     personalStatus.textContent=autoError(detail.result);
     status.textContent='No verified available offers received. Other courts may exist.';
@@ -149,7 +177,7 @@ function renderSources(){
   const text=(id,initial)=>has(id)?'Player-visible offer loaded · partial · expires shortly':
     additionalStates.get(id)||initial;
   const names=[
-    ['Playtomic',text('playtomic','Connect once in Chrome; subsequent searches run on your own player session')],
+    ['Playtomic',text('playtomic','One login for up to four reviewed Cascais-area clubs per Find; additional areas are not verified')],
     ['TiePlayer / TieSports',text('tiesports','Not connected: open an official player booking page and grant access once')],
     ['Racket ID',text('racket_id','Not connected: player booking UI access unverified')],
     ['Smashpro',text('smashpro','Not connected: only claimed, real bookable club pages qualify')],
@@ -230,7 +258,7 @@ form.addEventListener('submit',event=>{
   query=next;
   byId('requestPersonalBridge').disabled=false;
   byId('comparePersonal').disabled=false;
-  status.textContent='Searching this club through your own Playtomic browser session. No server inventory request was made.';
+  status.textContent='Searching reviewed clubs through your own first-party Playtomic browser session. No server inventory request was made.';
   personalStatus.textContent='Waiting for the installed GetACourt Reader to respond.';
   startAutomaticSearch();
 });

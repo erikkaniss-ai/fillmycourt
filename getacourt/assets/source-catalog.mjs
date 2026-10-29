@@ -13,6 +13,18 @@ const records = [
   {id:'pt-cascais-padel-nature', name:'Cascais Padel & Nature', area:'Cascais',
    areas:['cascais','lisboa','lisbon'], sports:['padel'],
    sources:[{id:'playtomic', url:'https://playtomic.com/clubs/cascais-padel-club', kind:'club_page', reviewedOn:'2026-10-24'}]},
+  // Official first-party club pages verified 29 Oct 2026. These provide
+  // DIRECTORY routes only; actual player-visible offers require an on-demand
+  // user-session UI observation with a complete EUR price and dated court.
+  {id:'pt-sports-club-cascais', name:'Sports Club Cascais', area:'Alcabideche',
+   areas:['alcabideche','cascais'], sports:['padel'],
+   sources:[{id:'playtomic',url:'https://playtomic.com/clubs/sports-club-cascais',kind:'club_page',reviewedOn:'2026-10-29'}]},
+  {id:'pt-padel-set-parede', name:'Padel Set Club Parede', area:'Parede',
+   areas:['parede','cascais'], sports:['padel'],
+   sources:[{id:'playtomic',url:'https://playtomic.com/clubs/padel-set-club-parede',kind:'club_page',reviewedOn:'2026-10-29'}]},
+  {id:'pt-quinta-dos-lombos-padel', name:'Quinta dos Lombos Padel', area:'Carcavelos',
+   areas:['carcavelos','cascais'], sports:['padel'],
+   sources:[{id:'playtomic',url:'https://playtomic.com/clubs/quinta-dos-lombos-padel',kind:'club_page',reviewedOn:'2026-10-29'}]},
   {id:'pt-rackets-pro-quinta-marinha', name:'Rackets Pro Academy — Quinta da Marinha', area:'Cascais',
    areas:['cascais','quinta da marinha','lisboa','lisbon'], sports:['padel','tennis'],
    website:'https://www.racketspro.pt/quinta-da-marinha',

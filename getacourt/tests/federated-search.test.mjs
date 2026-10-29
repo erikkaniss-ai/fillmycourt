@@ -11,7 +11,7 @@ const row={venue_id:'real-club',venue_name:'Fictional CI Club',id:'court-1',name
 const adapters=()=>Object.fromEntries(SOURCES.map(s=>[s.id,q=>directorySource(s.id,q)]));
 
 test('directory matches exact area/sport and merges Racket ID + Smashpro by reviewed canonical venue ID',()=>{
-  const r=mergeResults(query,[],now);assert.equal(r.directory.length,2);assert.equal(r.offers.length,0);
+  const r=mergeResults(query,[],now);assert.equal(r.directory.length,5);assert.equal(r.offers.length,0);
   const quinta=r.directory.find(c=>c.id==='pt-rackets-pro-quinta-marinha');assert.deepEqual(quinta.sources.map(s=>s.id),['racket_id','smashpro']);
   assert.equal(directoryMatches({...query,location:'Oeiras'}).length,1);
   assert.equal(directoryMatches({...query,location:'London'}).length,0);
@@ -49,17 +49,17 @@ test('duplicate offers collapse but contradictory prices are suppressed; no raw 
 });
 test('external directory adapters cannot masquerade as native inventory',()=>{
   const fake={...normalizeCoreSlot(row,query,approved),sourceId:'playtomic'};
-  const r=mergeResults(query,[{id:'playtomic',status:'ok',offers:[fake]}],now);assert.equal(r.offers.length,0);assert.equal(r.directory.length,2);
+  const r=mergeResults(query,[{id:'playtomic',status:'ok',offers:[fake]}],now);assert.equal(r.offers.length,0);assert.equal(r.directory.length,5);
 });
 test('source failures and auth denials preserve other sources and avoid leaking error text',async()=>{
   for(const status of [401,403,500]){
     const a=adapters();a.core=()=>{throw Object.assign(new Error('private bearer'),{status});};
-    const r=await searchFederated(query,a,{now});assert.equal(r.directory.length,2);assert.equal(r.sources[0].status,status===500?'error':'needs_auth');assert.ok(!JSON.stringify(r).includes('private bearer'));
+    const r=await searchFederated(query,a,{now});assert.equal(r.directory.length,5);assert.equal(r.sources[0].status,status===500?'error':'needs_auth');assert.ok(!JSON.stringify(r).includes('private bearer'));
   }
 });
 test('timeout aborts only its adapter and late completion cannot mutate returned snapshot',async()=>{
   const a=adapters();let signal,resolve;a.core=(q,s)=>{signal=s;return new Promise(r=>{resolve=r;});};
-  const r=await searchFederated(query,a,{now,timeoutMs:5});assert.equal(r.sources[0].status,'timeout');assert.equal(signal.aborted,true);assert.equal(r.directory.length,2);
+  const r=await searchFederated(query,a,{now,timeoutMs:5});assert.equal(r.sources[0].status,'timeout');assert.equal(signal.aborted,true);assert.equal(r.directory.length,5);
   resolve({status:'ok',offers:[normalizeCoreSlot(row,query,approved)]});await new Promise(r=>setTimeout(r,1));assert.equal(r.offers.length,0);
 });
 test('URL policy refuses credentials, queries, fragments, foreign hosts and checkout paths',()=>{
@@ -75,7 +75,7 @@ test('HTTP route refuses writes, duplicate/unknown parameters and performs no re
     assert.equal((await handler(new Request(url+'&sport=tennis'))).status,422);
     assert.equal((await handler(new Request(url+'&token=secret'))).status,422);
     const response=await handler(new Request(url));assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
-    const data=await response.json();assert.equal(data.sources[0].status,'not_configured');assert.equal(data.offers.length,0);assert.equal(data.directory.length,2);assert.equal(calls,0);
+    const data=await response.json();assert.equal(data.sources[0].status,'not_configured');assert.equal(data.offers.length,0);assert.equal(data.directory.length,5);assert.equal(calls,0);
   }finally{globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;}
 });
 test('HTTP route reads only configured Core GET, preserving exact cents and directory on errors',async()=>{
@@ -87,7 +87,7 @@ test('HTTP route reads only configured Core GET, preserving exact cents and dire
     const result=await(await handler(new Request(url,{headers:{authorization:'Bearer never-forward'}}))).json();assert.equal(result.offers.length,2);assert.equal(result.offers[0].priceMinor,2650);assert.equal(calls.length,2);
     for(const [url,init] of calls){assert.equal(new URL(url).origin,'https://core.invalid');assert.equal(init.method,undefined);assert.equal(init.headers.has('authorization'),false);assert.equal(init.redirect,'error');assert.ok(init.signal);}
     globalThis.fetch=async()=>new Response(JSON.stringify({message:'PRIVATE ERROR'}),{status:403});
-    const failed=await(await handler(new Request(url))).json();assert.equal(failed.sources[0].status,'needs_auth');assert.equal(failed.directory.length,2);assert.ok(!JSON.stringify(failed).includes('PRIVATE ERROR'));
+    const failed=await(await handler(new Request(url))).json();assert.equal(failed.sources[0].status,'needs_auth');assert.equal(failed.directory.length,5);assert.ok(!JSON.stringify(failed).includes('PRIVATE ERROR'));
   }finally{globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;}
 });
 test('historical federated page stays testable, but active personal guide routes to client-only search',()=>{

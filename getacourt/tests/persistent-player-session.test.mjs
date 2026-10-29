@@ -112,8 +112,9 @@ test('site permission is optional and Get relay is limited to the exact protecte
   };
   window.top=window;
   const context={window,location:{href:getPage},chrome:{runtime:{sendMessage:async message=>{
-    assert.equal(message.action,'autoSearchFromGet');
+    assert.equal(message.action,'autoSearchPlaytomicClubsFromGet');
     assert.equal(message.query.sport,'Padel');
+    assert.equal(message.query.location,'Cascais');
     assert.equal(message.query.durationMinutes,90);
     return {status:'observed',observation:{sourceUrl:source}};
   }}},CustomEvent:class{constructor(type,init){this.type=type;this.detail=init.detail;}}};

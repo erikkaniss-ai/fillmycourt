@@ -42,6 +42,8 @@ jobs:
           node --check getacourt/browser-companion/visible-provider-offers.js
           node --check getacourt/browser-companion/visible-provider-page.js
           node --test getacourt/tests/visible-provider-offers.test.mjs getacourt/tests/visible-provider-page.test.mjs getacourt/tests/multi-provider-player-flow.test.mjs
+          node --check getacourt/browser-companion/playtomic-club-catalog.js
+          node --test getacourt/tests/playtomic-multi-club.test.mjs
           node --test getacourt/tests/persistent-player-session.test.mjs
           node --experimental-strip-types --test getacourt/tests/club-availability.test.mjs
           node --experimental-strip-types --test getacourt/tests/federated-search.test.mjs getacourt/tests/personal-observation-bridge.test.mjs

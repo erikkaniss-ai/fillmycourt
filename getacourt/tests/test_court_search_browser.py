@@ -179,3 +179,56 @@ def test_auto_search_provider_login_expiry_is_explicit(browser_page,fixture_url)
     expect(page.locator('#personalStatus')).to_contain_text('sign in')
     assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
     assert forbidden==[]
+
+
+@pytest.mark.parametrize('width', [320, 390, 1440])
+def test_one_find_combines_multiple_personal_playtomic_clubs_without_fabricating_unavailable(browser_page,fixture_url,width):
+    page,context,forbidden,_=browser_page
+    page.set_viewport_size({'width':width,'height':900})
+    context.request.get(fixture_url+'/__fixture?mode=direct')
+    page.goto(fixture_url+'/find.html')
+    page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
+    day=page.locator('[name="date"]').input_value()
+    record=sample(page)
+    other={**record,
+        'sourceUrl':'https://playtomic.com/clubs/padel-set-club-parede',
+        'venue':'Padel Set Club Parede',
+        'offers':[{'court':'Campo 2 - Paviténis','startLabel':'7:00 PM',
+                   'endLabel':'8:30 PM','durationMinutes':90,'priceEur':42}]}
+    page.evaluate("""data => {
+      window.searches=0;
+      window.addEventListener('gac:auto-search-request',ev=>{
+        window.searches++;
+        const nonce=ev.detail.nonce;
+        window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',{detail:{nonce}}));
+        window.dispatchEvent(new CustomEvent('gac:auto-search-response',{detail:{
+          nonce,result:{status:'partial',coverage:'bounded_reviewed_club_pages_only',sources:[
+            {provider:'playtomic',sourceUrl:data.good.sourceUrl,
+             status:'observed',observation:data.good},
+            {provider:'playtomic',sourceUrl:data.other.sourceUrl,
+             status:'observed',observation:data.other},
+            {provider:'playtomic',sourceUrl:'https://playtomic.com/clubs/sports-club-cascais',
+             status:'unavailable',code:'NO_EXPANDED_OFFERS'},
+            {provider:'playtomic',sourceUrl:'https://playtomic.com/clubs/quinta-dos-lombos-padel',
+             status:'unavailable',code:'CHALLENGE_REQUIRED'}
+          ]}
+        }}));
+      });
+    }""",{'good':record,'other':other})
+    page.get_by_role('button',name='Find courts',exact=True).click()
+    expect(page.locator('#offers .card')).to_have_count(2)
+    assert page.evaluate('window.searches') == 1
+    expect(page.locator('#searchStatus')).to_contain_text('2 supplied fresh')
+    expect(page.locator('#personalStatus')).to_contain_text('2 club(s) incomplete')
+    expect(page.locator('#offers')).to_contain_text('€36.00')
+    expect(page.locator('#offers')).to_contain_text('€42.00')
+    expect(page.get_by_role('link',name='Continue on Playtomic (recheck availability)')).to_have_count(2)
+    links=page.get_by_role('link',name='Continue on Playtomic (recheck availability)')
+    assert set(links.evaluate_all('(items)=>items.map(x=>x.href)'))=={
+      record['sourceUrl'],other['sourceUrl']
+    }
+    assert context.request.get(fixture_url+'/__counts').json()=={
+      'coreRequests':0,'clubRequests':0
+    }
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+    assert forbidden==[]

@@ -22,8 +22,9 @@
     const nonce=detail.nonce;
     publish("gac:auto-search-accepted",{nonce});
     const providerQuery={date:q.date,sport:q.sport==="padel"?"Padel":"Tennis",
-      from:q.from,to:q.to,durationMinutes:q.duration==="any"?0:Number(q.duration)};
-    chrome.runtime.sendMessage({action:"autoSearchFromGet",query:providerQuery})
+      location:q.location,from:q.from,to:q.to,
+      durationMinutes:q.duration==="any"?0:Number(q.duration)};
+    chrome.runtime.sendMessage({action:"autoSearchPlaytomicClubsFromGet",query:providerQuery})
       .then(result=>publish("gac:auto-search-response",{nonce,result}))
       .catch(()=>publish("gac:auto-search-response",{nonce,
         result:{status:"unavailable",code:"READER_UNAVAILABLE"}}));

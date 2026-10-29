@@ -53,7 +53,7 @@ def test_live_handler_fixture_and_layout(browser_page, fixture_url, width):
     assert context.request.get(fixture_url + "/__counts").json()["coreRequests"] == 0
     page.get_by_role("button", name="Search across sources").click()
     expect(page.locator("#offers .card")).to_have_count(2)
-    expect(page.locator("#clubs .card")).to_have_count(2)
+    expect(page.locator("#clubs .card")).to_have_count(5)
     expect(page.locator("#sourceStatus .source")).to_have_count(7)
     expect(page.locator("#offers")).to_contain_text("€26.50")
     expect(page.locator("#searchStatus")).to_contain_text("partial source coverage")
@@ -73,7 +73,7 @@ def test_provider_or_api_failure_preserves_directory(browser_page, fixture_url, 
     page, context, _, _ = browser_page
     context.request.get(fixture_url + "/__fixture?mode=" + mode)
     page.get_by_role("button", name="Search across sources").click()
-    expect(page.locator("#clubs .card")).to_have_count(2)
+    expect(page.locator("#clubs .card")).to_have_count(5)
     expect(page.locator("#offers .card")).to_have_count(0)
     expect(page.locator("main")).to_contain_text(expected)
 
@@ -99,7 +99,7 @@ def test_observation_expiry_clears_only_offers(browser_page, fixture_url):
     expect(page.locator("#offers .card")).to_have_count(2)
     expect(page.locator("#searchStatus")).to_contain_text("snapshot expired", timeout=5000)
     expect(page.locator("#offers .card")).to_have_count(0)
-    expect(page.locator("#clubs .card")).to_have_count(2)
+    expect(page.locator("#clubs .card")).to_have_count(5)
 
 
 @pytest.mark.parametrize("width", [320, 390, 1440])
