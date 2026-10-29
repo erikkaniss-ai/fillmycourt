@@ -15,9 +15,9 @@ function observedOnly(data) {
  if(!KEYSET(data,ROOT)||ROOT.some(k=>!Object.hasOwn(data,k)))throw Error('INVALID_OBSERVATION');
  if(!Array.isArray(data.offers)||data.offers.length<1||data.offers.length>20||
     data.offers.some(o=>!KEYSET(o,OFFER)||OFFER.some(k=>!Object.hasOwn(o,k))))throw Error('INVALID_OBSERVATION');
- if(data.provider!=='playtomic'||data.source!=='user_ui_observation'||data.sourceFreshness!=='unknown'||
+ if(!['playtomic','tiesports','racket_id','smashpro','matchi'].includes(data.provider)||data.source!=='user_ui_observation'||data.sourceFreshness!=='unknown'||
     data.coverage!=='expanded_offers_only'||data.timezone!==null)throw Error('INVALID_OBSERVATION');
- if(!safeSourceUrl('playtomic',data.sourceUrl))throw Error('INVALID_OBSERVATION');
+ if(!safeSourceUrl(data.provider,data.sourceUrl))throw Error('INVALID_OBSERVATION');
  return data;
 }
 /**
@@ -35,7 +35,10 @@ export function normalizePersonalObservation(raw,query,{now=Date.now(),validator
  const timestamp=dateMs(v.capturedAt);
  if(!Number.isFinite(timestamp)||timestamp>now+5000||now-timestamp>=60000)throw Error('OBSERVATION_EXPIRED');
  if(query.sport!==v.sport.toLowerCase()||query.date!==v.date)throw Error('OBSERVATION_QUERY_MISMATCH');
- const known=CLUBS.find(c=>c.sources.some(s=>s.id==='playtomic'&&s.url===v.sourceUrl));
+ const unclaimed=CLUBS.some(c=>c.sources.some(s=>s.id===v.provider&&s.url===v.sourceUrl&&s.kind==='unclaimed_listing'));
+ if(unclaimed)throw Error('UNCLAIMED_SOURCE');
+ const known=CLUBS.find(c=>c.sources.some(s=>s.id===v.provider&&s.url===v.sourceUrl&&
+   s.kind!=='unclaimed_listing'&&(s.kind==='club_page'||fold(c.name)===fold(v.venue))));
  // A legitimate imported offer must not be presented as answering a search
  // in the wrong area. For unmapped clubs allow only exact venue-name searches;
  // a guessed city from a slug or raw observation is not geographic evidence.
@@ -53,7 +56,7 @@ export function normalizePersonalObservation(raw,query,{now=Date.now(),validator
    const elapsed=(end-start+1440)%1440;
    if(!elapsed||elapsed!==offer.durationMinutes)return [];
    return [Object.freeze({
-     id:'personal:'+i,sourceId:'playtomic',evidence:'user_ui_observation',
+     id:v.provider+':personal:'+i,sourceId:v.provider,evidence:'user_ui_observation',
      clubId:known?.id||null,clubName:known?.name||v.venue,
      courtName:offer.court,date:v.date,startLabel:offer.startLabel,endLabel:offer.endLabel,
      duration:offer.durationMinutes,priceMinor:Math.round(offer.priceEur*100),
@@ -63,7 +66,7 @@ export function normalizePersonalObservation(raw,query,{now=Date.now(),validator
  });
  if(!offers.length)throw Error('NO_MATCHING_OBSERVED_OFFERS');
  return Object.freeze({
-   sourceId:'playtomic',status:'personal_observed',clubId:known?.id||null,
+   sourceId:v.provider,status:'personal_observed',clubId:known?.id||null,
    capturedAt:v.capturedAt,expiresAt:new Date(timestamp+60000).toISOString(),
    venue:v.venue,sourceUrl:v.sourceUrl,
    offers:Object.freeze(offers),

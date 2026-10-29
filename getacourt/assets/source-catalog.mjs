@@ -6,6 +6,7 @@ export const SOURCES = Object.freeze([
   {id:'tiesports', label:'TieSports / TiePlayer'},
   {id:'racket_id', label:'Racket ID'},
   {id:'smashpro', label:'Smashpro'},
+  {id:'matchi', label:'MATCHi'},
   {id:'club_internal', label:'Club internal systems'}
 ].map(Object.freeze));
 const records = [
@@ -46,6 +47,7 @@ export function safeSourceUrl(sourceId, value) {
       tiesports:()=>u.hostname==='clubs.tiesports.com' && /^\/(en|pt)\/[A-Za-z0-9-]+\/[A-Za-z0-9-]+\/?$/.test(u.pathname),
       racket_id:()=>u.hostname==='racket.id' && u.pathname==='/booking',
       smashpro:()=>u.hostname==='smashpro.pt' && /^\/pt\/c\/[a-z0-9-]+$/.test(u.pathname),
+      matchi:()=>u.hostname==='www.matchi.se' && /^\/facilities\/[a-z0-9_-]+$/.test(u.pathname),
       club_website:()=>u.hostname==='www.racketspro.pt' && u.pathname==='/quinta-da-marinha'
     };
     return rules[sourceId]?.() ? u.href : null;

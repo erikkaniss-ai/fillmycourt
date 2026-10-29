@@ -99,7 +99,8 @@ function renderSources(){
     ['Playtomic', observations.size ? 'Personal observation loaded — partial and expires' : 'Connect once in Chrome; next searches run automatically while provider login remains valid'],
     ['TiePlayer / TieSports','Not connected: player UI verification pending'],
     ['Racket ID','Not connected: player UI verification pending'],
-    ['Smashpro','Not connected: player UI verification pending']
+    ['Smashpro','Not connected: player UI verification pending'],
+    ['MATCHi','Player web booking exists; client reader acceptance pending']
   ];
   for(const [name,detail] of names){
     const card=make('article',undefined,'source');
@@ -117,12 +118,14 @@ function paint(){
   offersHost.replaceChildren();
   for(const {o,captured} of rows){
     const card=make('article',undefined,'card');
-    card.append(make('span','Playtomic · personally observed · partial','badge'),
+    const names={playtomic:'Playtomic',tiesports:'TiePlayer / TieSports',racket_id:'Racket ID',
+      smashpro:'Smashpro',matchi:'MATCHi'};
+    card.append(make('span',(names[o.sourceId]||'Unknown source')+' · personally observed · partial','badge'),
       make('h3',o.clubName),make('p','Court: '+o.courtName),
       make('p',o.date+' · '+o.startLabel+'–'+o.endLabel+' · '+o.duration+' min'),
       make('p',new Intl.NumberFormat('en-IE',{style:'currency',currency:'EUR'}).format(o.priceMinor/100),'price'),
       make('small','Observed '+captured+' UTC · provider freshness/timezone unknown · not reserved'));
-    const a=make('a','Continue on Playtomic (recheck availability)');
+    const a=make('a','Continue on '+(names[o.sourceId]||'official provider')+' (recheck availability)');
     a.href=o.sourceUrl;a.target='_blank';a.rel='noopener noreferrer';
     card.append(a);offersHost.append(card);
   }
