@@ -13,8 +13,8 @@ const getPage='https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.ht
 const sender={id:'reader',url:getPage,frameId:0,tab:{id:9,url:getPage}};
 const query={date:new Date().toISOString().slice(0,10),sport:'Padel',from:'08:00',to:'23:00',durationMinutes:90};
 
-function fixture({approvedSource=source,grant=true,previousSession={}}={}){
-  const local={...(approvedSource?{approvedSource}:{})},session={...previousSession};
+function fixture({approvedSource=source,grant=true,previousSession={},extraSources=null}={}){
+  const local={...(approvedSource?{approvedSource}:{}),...(extraSources?{approvedExtraSources:extraSources}:{})},session={...previousSession};
   const handlers={},created=[],windows=[];let searchCount=0,newWindow=false;
   const store=data=>({
     async get(key){return Object.fromEntries((Array.isArray(key)?key:[key]).map(k=>[k,data[k]]));},
@@ -126,4 +126,30 @@ test('site permission is optional and Get relay is limited to the exact protecte
   otherWindow.top=otherWindow;
   vm.runInNewContext(relay,{...context,window:otherWindow,location:{href:'https://evil.invalid/find.html'}});
   assert.equal(Object.keys(otherListeners).length,0);
+});
+
+
+test('extra provider browser-only search requires a saved, separately approved first-party site',async()=>{
+  const src='https://clubs.tiesports.com/en/lisboa/OeirasPadelAcademy';
+  const none=fixture({extraSources:{tiesports:src},grant:false});
+  const missing=await none.call({action:'autoSearchAdditionalFromGet',query});
+  assert.equal(missing.status,'partial');
+  assert.equal(missing.sources.length,1);
+  assert.equal(missing.sources[0].code,'SITE_ACCESS_REQUIRED');
+  assert.equal(none.created.length,0);
+  const valid=fixture({extraSources:{tiesports:src},grant:true});
+  const output=await valid.call({action:'autoSearchAdditionalFromGet',query});
+  // Test harness deliberately returns a Playtomic result for a TieSports tab:
+  // must fail closed rather than laundering source identifiers across sites.
+  assert.equal(output.status,'partial');
+  assert.equal(output.sources.length,1);
+  assert.equal(output.sources[0].status,'unavailable');
+  assert.equal(output.sources[0].code,'OFFER_FORMAT_CHANGED');
+  assert.equal(valid.created.length,1);
+  assert.equal(valid.created[0].url,src);
+  const rejected=await valid.call({action:'autoSearchAdditionalFromGet',query},
+    {id:'reader',url:'https://evil.invalid/find.html',frameId:0,tab:{id:9}});
+  assert.equal(rejected.code,'REQUEST_REJECTED');
+  await valid.call({action:'revoke'});
+  assert.equal(valid.local.approvedExtraSources,undefined);
 });

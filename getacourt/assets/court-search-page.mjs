@@ -8,7 +8,8 @@ const offersHost=byId('offers'),sourcesHost=byId('sourceStatus'),payload=byId('p
 const date=form.elements.namedItem('date');
 const today=localDay();date.value=date.min=today;
 date.max=new Date(Date.parse(today+'T00:00:00Z')+14*86400000).toISOString().slice(0,10);
-let query=null,revision=0,pendingBridge=null,pendingAuto=null,autoAckTimer=null,autoResultTimer=null,timer=null;
+let query=null,revision=0,pendingBridge=null,pendingAuto=null,autoAckTimer=null,autoResultTimer=null,timer=null,additionalPending=null,additionalTimer=null;
+const additionalStates=new Map();
 const observations=new Map();
 const make=(tag,label,cls)=>{const el=document.createElement(tag);if(label!==undefined)el.textContent=String(label);if(cls)el.className=cls;return el;};
 const allowed=()=>Boolean(query);
@@ -19,6 +20,9 @@ function clearPending(){
 function cancelAuto(){
   clearTimeout(autoAckTimer);clearTimeout(autoResultTimer);
   autoAckTimer=autoResultTimer=null;pendingAuto=null;
+}
+function cancelAdditional(){
+  clearTimeout(additionalTimer);additionalTimer=null;additionalPending=null;
 }
 function autoError(result){
   const code=result?.code;
@@ -39,8 +43,17 @@ function startAutomaticSearch(){
   if(!query)return;
   const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
   const request={nonce,query,revision,acked:false};
-  cancelAuto();pendingAuto=request;
-  status.textContent='Searching via your remembered Playtomic browser connection…';
+  cancelAuto();cancelAdditional();pendingAuto=request;
+  additionalPending={nonce,query,revision};
+  additionalTimer=setTimeout(()=>{
+    if(additionalPending?.nonce===nonce){
+      additionalPending=null;
+      additionalStates.set('additional','Search incomplete — no conclusion about availability');
+      renderSources();
+    }
+  },45000);
+  status.textContent='Searching your connected personal booking systems…';
+  window.dispatchEvent(new CustomEvent('gac:additional-sources-request',{detail:{nonce,query}}));
   autoAckTimer=setTimeout(()=>{
     if(pendingAuto!==request||request.acked)return;
     cancelAuto();
@@ -76,8 +89,45 @@ window.addEventListener('gac:auto-search-response',event=>{
     status.textContent='No verified available offers received. Other courts may exist.';
   }
 });
+
+window.addEventListener('gac:additional-sources-response',event=>{
+  const pending=additionalPending,detail=event?.detail;
+  if(!pending||!detail||detail.nonce!==pending.nonce||
+    pending.revision!==revision||pending.query!==query)return;
+  cancelAdditional();
+  const entries=detail.result?.sources;
+  if(!Array.isArray(entries)||entries.length>4)return;
+  const supported=new Set(['tiesports','racket_id','smashpro','matchi']);
+  let accepted=0;
+  for(const row of entries){
+    if(!row||!supported.has(row.provider))continue;
+    if(row.status==='observed'){
+      let raw;
+      try{raw=JSON.stringify(row.observation);}catch{raw='';}
+      if(raw&&importPersonal(raw,pending.query,pending.revision)){
+        accepted++;additionalStates.set(row.provider,'Fresh player-visible priced observation · partial');
+      }else additionalStates.set(row.provider,'Client observation rejected; availability unverified');
+    }else{
+      const reasons={
+        SITE_ACCESS_REQUIRED:'Chrome site permission not granted',
+        CHALLENGE_REQUIRED:'Provider sign-in or security check required',
+        OFFER_SECTION_MISSING:'Booking layout unsupported; no verified slots',
+        DATE_AMBIGUOUS:'Exact date not verified in player UI',
+        SPORT_AMBIGUOUS:'Sport not verified in player UI',
+        SCHEDULE_NOT_READY:'Provider booking filters not confirmed',
+        NO_EXPANDED_OFFERS:'No complete priced offers in inspected UI subset',
+        SOURCE_UNCLAIMED:'Club listing unclaimed; not a booking source',
+        RATE_LIMITED:'Wait before rechecking this provider'
+      };
+      additionalStates.set(row.provider,reasons[row.code]||'Provider unavailable or not verified');
+    }
+  }
+  if(accepted>0)status.textContent='Retrieved '+accepted+' additional player-visible source(s). Recheck on the official booking site.';
+  renderSources();
+});
+
 function clearOffers(message){
-  revision++;clearPending();cancelAuto();clearTimeout(timer);timer=null;
+  revision++;clearPending();cancelAuto();cancelAdditional();additionalStates.clear();clearTimeout(timer);timer=null;
   observations.clear();payload.value='';
   offersHost.replaceChildren(make('p','No fresh personal offers yet.','empty'));
   personalStatus.textContent=message||'No personal offers imported.';
@@ -95,12 +145,15 @@ function minute(value){
 }
 function renderSources(){
   sourcesHost.replaceChildren();
+  const has=id=>[...observations.values()].some(record=>record.sourceId===id);
+  const text=(id,initial)=>has(id)?'Player-visible offer loaded · partial · expires shortly':
+    additionalStates.get(id)||initial;
   const names=[
-    ['Playtomic', observations.size ? 'Personal observation loaded — partial and expires' : 'Connect once in Chrome; next searches run automatically while provider login remains valid'],
-    ['TiePlayer / TieSports','Not connected: player UI verification pending'],
-    ['Racket ID','Not connected: player UI verification pending'],
-    ['Smashpro','Not connected: player UI verification pending'],
-    ['MATCHi','Player web booking exists; client reader acceptance pending']
+    ['Playtomic',text('playtomic','Connect once in Chrome; subsequent searches run on your own player session')],
+    ['TiePlayer / TieSports',text('tiesports','Not connected: open an official player booking page and grant access once')],
+    ['Racket ID',text('racket_id','Not connected: player booking UI access unverified')],
+    ['Smashpro',text('smashpro','Not connected: only claimed, real bookable club pages qualify')],
+    ['MATCHi',text('matchi','Not connected: client booking UI read not yet live-accepted')]
   ];
   for(const [name,detail] of names){
     const card=make('article',undefined,'source');

@@ -40,7 +40,8 @@ jobs:
           node --check getacourt/assets/court-search-page.mjs
           node --check getacourt/browser-companion/get-page-relay.js
           node --check getacourt/browser-companion/visible-provider-offers.js
-          node --test getacourt/tests/visible-provider-offers.test.mjs
+          node --check getacourt/browser-companion/visible-provider-page.js
+          node --test getacourt/tests/visible-provider-offers.test.mjs getacourt/tests/visible-provider-page.test.mjs
           node --test getacourt/tests/persistent-player-session.test.mjs
           node --experimental-strip-types --test getacourt/tests/club-availability.test.mjs
           node --experimental-strip-types --test getacourt/tests/federated-search.test.mjs getacourt/tests/personal-observation-bridge.test.mjs

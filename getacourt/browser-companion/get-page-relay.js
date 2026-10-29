@@ -28,4 +28,25 @@
       .catch(()=>publish("gac:auto-search-response",{nonce,
         result:{status:"unavailable",code:"READER_UNAVAILABLE"}}));
   });
+  // Independent, on-demand reads from the player's other explicitly connected
+  // websites. A provider failure is not a Playtomic failure or "sold out".
+  window.addEventListener("gac:additional-sources-request",event=>{
+    const detail=event?.detail;
+    if(!detail||typeof detail!=="object"||Array.isArray(detail)||
+      Object.keys(detail).sort().join(",")!=="nonce,query"||
+      !nonceOk(detail.nonce))return;
+    const q=detail.query;
+    if(!q||typeof q!=="object"||Array.isArray(q)||
+      Object.keys(q).sort().join(",")!=="date,duration,from,location,sport,to"||
+      !dateOk(q.date)||!timeOk(q.from)||!timeOk(q.to)||q.from>=q.to||
+      !["padel","tennis"].includes(q.sport)||!["any","60","90"].includes(q.duration))return;
+    const nonce=detail.nonce;
+    const providerQuery={date:q.date,sport:q.sport==="padel"?"Padel":"Tennis",
+      from:q.from,to:q.to,durationMinutes:q.duration==="any"?0:Number(q.duration)};
+    chrome.runtime.sendMessage({action:"autoSearchAdditionalFromGet",query:providerQuery})
+      .then(result=>publish("gac:additional-sources-response",{nonce,result}))
+      .catch(()=>publish("gac:additional-sources-response",{nonce,
+        result:{status:"unavailable",code:"READER_UNAVAILABLE"}}));
+  });
+
 })();

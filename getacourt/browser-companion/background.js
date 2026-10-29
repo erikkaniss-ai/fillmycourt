@@ -1,5 +1,5 @@
 importScripts("capture.js","observation.js");
-const VERSION="0.3.0";
+const VERSION="0.4.0";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
 const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
@@ -8,6 +8,7 @@ let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 // Fixed messages only: never return a browser/provider exception or credential.
 const errors=Object.freeze({
   REQUEST_REJECTED:"Open GetACourt from its extension icon.",
+  SOURCE_UNCLAIMED:"This club page does not offer verified client booking inventory.",
   CONNECT_REQUIRED:"Connect Playtomic once from the GetACourt extension icon on a Playtomic club page.",
   SITE_ACCESS_REQUIRED:"Allow Playtomic site access once in the GetACourt extension popup. No provider password is shared.",
   CLUB_PAGE_REQUIRED:"Open an official Playtomic /clubs/ page before connecting.",
@@ -42,6 +43,87 @@ const sourceAllowed=value=>{
   try {const u=new URL(value);return u.origin==="https://playtomic.com"&&/^\/clubs\/[a-z0-9-]+$/.test(u.pathname)&&!u.search&&!u.hash;}
   catch{return false;}
 };
+// Additional player-visible web origins. A supported public route is NOT
+// proof of availability or an authorized account. Consent is by named domain.
+const EXTRA_PROVIDERS=Object.freeze({
+  tiesports:Object.freeze({origin:"https://clubs.tiesports.com/*",
+    route:/^https:\/\/clubs\.tiesports\.com\/(?:en|pt)\/[A-Za-z0-9-]+\/[A-Za-z0-9-]+$/}),
+  racket_id:Object.freeze({origin:"https://racket.id/*",
+    route:/^https:\/\/racket\.id\/booking$/}),
+  smashpro:Object.freeze({origin:"https://smashpro.pt/*",
+    route:/^https:\/\/smashpro\.pt\/pt\/c\/[a-z0-9-]+$/}),
+  matchi:Object.freeze({origin:"https://www.matchi.se/*",
+    route:/^https:\/\/www\.matchi\.se\/facilities\/[a-z0-9_-]+$/})
+});
+function additionalProviderRoute(value) {
+  try{
+    const url=new URL(value);
+    if(url.protocol!=="https:"||url.username||url.password||url.port||url.hash)return null;
+    if([...url.searchParams.keys()].some(k=>k!=="lang"||url.hostname!=="www.matchi.se"))return null;
+    const clean=url.origin+url.pathname;
+    for(const [provider,rule] of Object.entries(EXTRA_PROVIDERS))
+      if(rule.route.test(clean))return {provider,sourceUrl:clean,origin:rule.origin};
+  }catch{}
+  return null;
+}
+async function approveAdditional() {
+  const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+  const parsed=additionalProviderRoute(tab?.url);
+  if(!parsed)fail("CLUB_PAGE_REQUIRED");
+  const granted=await chrome.permissions.contains({origins:[parsed.origin]});
+  if(!granted)fail("SITE_ACCESS_REQUIRED");
+  const {approvedExtraSources={}}=await chrome.storage.local.get("approvedExtraSources");
+  const next={...approvedExtraSources,[parsed.provider]:parsed.sourceUrl};
+  if(Object.keys(next).length>4)fail("REQUEST_REJECTED");
+  await chrome.storage.local.set({approvedExtraSources:next});
+  return {status:"connected",provider:parsed.provider,sourceUrl:parsed.sourceUrl,version:VERSION};
+}
+let extraBusy=false;
+async function autoSearchAdditionalFromGet(query) {
+  if(!queryValid(query))fail("QUERY_INVALID");
+  if(extraBusy)fail("READ_BUSY");
+  extraBusy=true;
+  const epoch=generation;
+  try{
+    const {approvedExtraSources={}}=await chrome.storage.local.get("approvedExtraSources");
+    const verified=Object.entries(approvedExtraSources).filter(([provider,url])=>
+      Object.hasOwn(EXTRA_PROVIDERS,provider)&&additionalProviderRoute(url)?.provider===provider);
+    const results=[];
+    for(const [provider,sourceUrl] of verified.slice(0,4)){
+      const result={provider,status:"unavailable",code:"READ_FAILED"};
+      try{
+        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+        if(!await chrome.permissions.contains({origins:[EXTRA_PROVIDERS[provider].origin]}))
+          fail("SITE_ACCESS_REQUIRED");
+        const key="lastAttemptExtra:"+provider;
+        const previous=await chrome.storage.session.get(key);
+        if(Date.now()-(previous[key]||0)<60000)fail("RATE_LIMITED");
+        await chrome.storage.session.set({[key]:Date.now()});
+        // The source page runs in this player's own ordinary Chrome profile.
+        // No provider API, cross-account session, cookie read or remote agent.
+        const tab=await chrome.tabs.create({url:sourceUrl,active:false});
+        await waitForPage(tab.id);
+        if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+        await chrome.scripting.executeScript({target:{tabId:tab.id},
+          files:["visible-provider-offers.js","visible-provider-page.js"]});
+        const captured=await chrome.scripting.executeScript({target:{tabId:tab.id},
+          func:async q=>readVisibleProviderPage(q),args:[query]});
+        const observation=captured?.find(x=>x.frameId===0)?.result;
+        if(observation?.readerError)fail(observation.readerError);
+        if(observation?.provider!==provider||observation?.sourceUrl!==sourceUrl)
+          fail("OFFER_FORMAT_CHANGED");
+        // Fail closed on any unexpected field, price, origin or user identity.
+        const sanitized=globalThis.GetACourtPersonalSourceObservation.validateObservation(observation);
+        result.status="observed";result.observation=sanitized;delete result.code;
+      }catch(error){
+        result.code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
+      }
+      results.push(result);
+    }
+    return {status:"partial",sources:results,version:VERSION};
+  }finally{extraBusy=false;}
+}
+
 const comparisonPageAllowed=value=>{
   try{return new URL(value).href===COMPARISON_PAGE;}catch{return false;}
 };
@@ -71,6 +153,7 @@ function consentOperation(operation){
 async function clearConsent(){
   const {approvedTab}=await chrome.storage.session.get("approvedTab");
   await chrome.storage.local.remove("approvedSource");
+  await chrome.storage.local.remove("approvedExtraSources");
   await chrome.storage.session.remove(COMPARISON_KEY);
   // Reconnecting must not reset the browser session's global attempt budget.
   await chrome.storage.session.remove("approvedTab");
@@ -261,13 +344,17 @@ async function runSearch(query){
 async function handle(message,sender){
   const role=caller(sender);
   const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],
-    search:["action","query"],autoSearchFromGet:["action","query"],autoStatus:["action"],showClub:["action"],prepareComparison:["action","observation"],
+    search:["action","query"],autoSearchFromGet:["action","query"],autoStatus:["action"],
+    autoSearchAdditionalFromGet:["action","query"],approveAdditional:["action"],
+    showClub:["action"],prepareComparison:["action","observation"],
     enableComparisonBridge:["action"],pageBridgeReady:["action","nonce"]});
   if(!message||typeof message!=="object"||Array.isArray(message)||!Object.hasOwn(actionKeys,message.action)||
     Object.keys(message).some(k=>!actionKeys[message.action].includes(k)))fail("REQUEST_REJECTED");
   if(message.action==="status")return status();
   if(message.action==="autoStatus"&&role==="page")return autoStatus();
   if(message.action==="autoSearchFromGet"&&role==="page")return autoSearchFromGet(message.query);
+  if(message.action==="autoSearchAdditionalFromGet"&&role==="page")return autoSearchAdditionalFromGet(message.query);
+  if(message.action==="approveAdditional"&&role==="popup")return approveAdditional();
   if(message.action==="revoke")return disconnect();
   if(message.action==="approve"&&role==="popup"){
     const result=await approve();await openReader();return result;

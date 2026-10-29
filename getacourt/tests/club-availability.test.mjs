@@ -106,12 +106,12 @@ test('active Get consumer release is player-session only; legacy club feed remai
   const js=fs.readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
   assert.match(html,/Find courts/);
   assert.match(html,/personalPayload/);
-  assert.match(html,/Connect Playtomic once/);
+  assert.match(html,/Connect each supported provider once/);
   assert.match(js,/startAutomaticSearch/);
   assert.match(js,/gac:auto-search-request/);
   assert.match(js,/normalizePersonalObservation/);
   assert.match(js,/gac:personal-observation-accepted/);
-  assert.match(js,/Continue on Playtomic/);
+  assert.match(js,/Continue on /);assert.match(js,/names\[o.sourceId\]/);
   for(const pattern of [/\/api\/gac\/search-all/,/\bfetch\s*\(/,/\bXMLHttpRequest\b/,/\bWebSocket\b/,/\bchrome\./,
     /\/api\/availability/,/GETACOURT_CLUB_FEEDS/,/localStorage/,/sessionStorage/,/innerHTML/,/setInterval/]){
     assert.doesNotMatch(js,pattern,'Get player module must not contact a provider or server feed');

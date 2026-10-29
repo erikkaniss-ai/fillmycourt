@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "GetACourt Personal Playtomic Reader",
-  "version": "0.3.0",
-  "description": "Connect Playtomic once in your Chrome profile; search visible user offers from GetACourt on request. No bookings, passwords or payments.",
+  "version": "0.4.0",
+  "description": "One-time player browser connection for named booking systems. On-demand read-only court search; no credentials or bookings.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -18,7 +18,11 @@
     "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"
   },
   "optional_host_permissions": [
-    "https://playtomic.com/*"
+    "https://playtomic.com/*",
+    "https://clubs.tiesports.com/*",
+    "https://racket.id/*",
+    "https://smashpro.pt/*",
+    "https://www.matchi.se/*"
   ],
   "content_scripts": [
     {

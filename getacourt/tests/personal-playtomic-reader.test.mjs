@@ -190,7 +190,7 @@ test("collector accepts only rendered explicit offers, strips account queries an
 test("package retains only bounded, opt-in per-provider access without credential extraction",()=>{
   const manifest=JSON.parse(readFileSync(new URL("manifest.json",root),"utf8"));
   assert.deepEqual(manifest.permissions,["activeTab","scripting","storage"]);assert.equal(manifest.host_permissions,undefined);
-  assert.deepEqual(manifest.optional_host_permissions,["https://playtomic.com/*"]);
+  assert.deepEqual(manifest.optional_host_permissions,["https://playtomic.com/*","https://clubs.tiesports.com/*","https://racket.id/*","https://smashpro.pt/*","https://www.matchi.se/*"]);
   assert.deepEqual(manifest.content_scripts.map(s=>s.matches),
     [["https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html"]]);
   assert.equal(manifest.externally_connectable,undefined);assert.equal(manifest.web_accessible_resources,undefined);
