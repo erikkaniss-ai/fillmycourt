@@ -35,7 +35,7 @@ function ui({host='https://clubs.tiesports.com/en/lisboa/OeirasPadelAcademy',
   };
   const location={href:host};
   const context=vm.createContext({document,location,URL,Date,setTimeout,
-    getComputedStyle:()=>({visibility:'visible'}),globalThis:null});
+    getComputedStyle:()=>({visibility:'visible'})});
   vm.runInContext(pure,context);vm.runInContext(reader,context);
   return {read:()=>context.readVisibleProviderPage(query),document};
 }
