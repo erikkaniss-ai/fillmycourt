@@ -54,7 +54,7 @@ def test_live_handler_fixture_and_layout(browser_page, fixture_url, width):
     page.get_by_role("button", name="Search across sources").click()
     expect(page.locator("#offers .card")).to_have_count(2)
     expect(page.locator("#clubs .card")).to_have_count(2)
-    expect(page.locator("#sourceStatus .source")).to_have_count(6)
+    expect(page.locator("#sourceStatus .source")).to_have_count(7)
     expect(page.locator("#offers")).to_contain_text("€26.50")
     expect(page.locator("#searchStatus")).to_contain_text("partial source coverage")
     quinta = page.locator("#clubs .card").filter(has_text="Quinta da Marinha")
