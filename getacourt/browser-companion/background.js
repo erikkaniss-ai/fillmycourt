@@ -1,8 +1,8 @@
 importScripts("capture.js","observation.js");
-const VERSION="0.2.4";
+const VERSION="0.2.5";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
-const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html";
+const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
 const COMPARISON_KEY="comparisonObservation";
 let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 // Fixed messages only: never return a browser/provider exception or credential.
@@ -28,7 +28,7 @@ const errors=Object.freeze({
   TOO_MANY_OFFERS:"Close some expanded offers before reading.",
   COMPARISON_PREP_REQUIRED:"Search this club first, then open the GetACourt comparison from the Reader.",
   COMPARISON_EXPIRED:"The prepared observation expired. Search the club again.",
-  COMPARISON_PAGE_REQUIRED:"Open GetACourt Search across sources in this browser, then use this extension icon.",
+  COMPARISON_PAGE_REQUIRED:"Open the protected GetACourt personal search page in this browser, then use this extension icon.",
   COMPARISON_DELIVERY_FAILED:"The GetACourt page could not receive the observation. No offers were shared.",
   READ_FAILED:"The search could not be completed. No offers were shared."
 });

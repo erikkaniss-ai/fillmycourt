@@ -40,7 +40,7 @@ const server=createServer(async(req,res)=>{
   }
   const requested=url.pathname==="/"?"/index.html":url.pathname;
   const relative=requested.slice(1);
-  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|federated-search\.mjs|source-catalog\.mjs|federated-search\.css))$/.test(relative)){
+  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|federated-search\.mjs|source-catalog\.mjs|personal-source-observation\.js|personal-observation-bridge\.mjs|federated-search\.css))$/.test(relative)){
     sendJson(res,404,{error:"NOT_FOUND"});return;
   }
   try{
@@ -188,7 +188,7 @@ try{
     // CSP correctly refuses inserting an inline script element.
     await page.evaluate(axeSource);
     assert.deepEqual(await evaluateAxe(),[],width+' direct search WCAG 2.2 A/AA audit');
-    assert.equal(await page.locator('#personalPayload').count(),0);
+    assert.equal(await page.locator('#personalPayload').count(),1);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     assert.deepEqual(errors,[],width+' direct search JS errors');
     if(artifactDir)await page.screenshot({path:join(artifactDir,`get-direct-${width}-FIXTURE-ONLY.png`),fullPage:true});

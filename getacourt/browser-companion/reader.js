@@ -70,7 +70,7 @@
     try{
       if(!navigator.clipboard?.writeText)throw Error("Clipboard unavailable");
       await navigator.clipboard.writeText(sanitized);
-      byId("copyStatus").textContent="Copied observed offers only (no account data). Paste into GetACourt Search across sources. Expires 60 seconds after capture.";
+      byId("copyStatus").textContent="Copied observed offers only (no account data). Paste into GetACourt personal search. Expires 60 seconds after capture.";
     }catch{
       byId("copyFallback").value=sanitized;byId("copyFallbackLabel").hidden=false;
       byId("copyFallback").focus();byId("copyFallback").select();
@@ -89,7 +89,7 @@
     try{
       const result=await send({action:"prepareComparison",observation:sanitized});
       if(result?.status!=="comparison_prepared")throw Error(result?.error||"Comparison unavailable.");
-      byId("copyStatus").textContent="GetACourt comparison opened. Run the same search, choose Receive Reader offers, then click this extension icon in that exact GetACourt tab to deliver the report.";
+      byId("copyStatus").textContent="GetACourt personal search opened. Run the same search, choose Receive Reader offers, then click this extension icon in that exact GetACourt tab to deliver the report.";
     }catch(error){byId("copyStatus").textContent=error.message||"Comparison unavailable. No offers were shared.";}
     finally{byId("prepareComparison").disabled=!latestObservation;}
   });

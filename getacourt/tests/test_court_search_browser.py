@@ -1,60 +1,130 @@
-"""Release UI + real handler + FICTIONAL club feed, no external network."""
+"""Standalone GetACourt: real static browser UI with FICTIONAL personal reports.
+No provider requests, credentials, Core availability, or club-owned feed.
+"""
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
 import pytest
 from playwright.sync_api import expect
 from test_federated_browser import browser_page, fixture_url, ROOT
 
-def prepare(page, context, fixture_url, mode):
-    context.request.get(fixture_url + '/__fixture?mode=' + mode)
-    page.goto(fixture_url + '/find.html')
-    page.locator('[name="date"]').fill((datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat())
 
-@pytest.mark.parametrize('width', [320, 390, 1440])
-def test_search_from_direct_club_without_extension(browser_page, fixture_url, width):
-    page, context, forbidden, _ = browser_page
-    page.set_viewport_size({'width': width, 'height': 900})
-    prepare(page, context, fixture_url, 'direct')
-    assert context.request.get(fixture_url + '/__counts').json()['clubRequests'] == 0
-    page.get_by_role('button', name='Find courts', exact=True).click()
+def sample(page, *, patch=None):
+    today=page.locator('[name="date"]').input_value()
+    captured=page.evaluate("new Date().toISOString()")
+    record={
+        "provider":"playtomic", "source":"user_ui_observation",
+        "sourceUrl":"https://playtomic.com/clubs/cascais-padel-club",
+        "venue":"Cascais Padel & Nature", "date":today, "sport":"Padel",
+        "capturedAt":captured, "timezone":None, "sourceFreshness":"unknown",
+        "coverage":"expanded_offers_only",
+        "offers":[{"court":"FICTIONAL COURT 1", "startLabel":"6:00 PM",
+                   "endLabel":"7:30 PM", "durationMinutes":90, "priceEur":36}]
+    }
+    return {**record, **(patch or {})}
+
+
+def ready(page, context, base):
+    context.request.get(base+'/__fixture?mode=direct')
+    page.goto(base+'/find.html')
+    page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
+    page.locator('[name="duration"]').select_option('90')
+    page.get_by_role('button',name='Find courts',exact=True).click()
+    expect(page.locator('#searchStatus')).to_contain_text('Ready:')
+    return sample(page)
+
+
+@pytest.mark.parametrize('width', [320,390,1440])
+def test_player_observation_produces_a_real_client_only_result_and_official_handoff(browser_page,fixture_url,width):
+    page,context,forbidden,_=browser_page
+    page.set_viewport_size({'width':width,'height':900})
+    record=ready(page,context,fixture_url)
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    page.locator('#personalPayload').fill(json.dumps(record))
+    page.get_by_role('button',name='Compare pasted offers').click()
     expect(page.locator('#offers .card')).to_have_count(1)
-    expect(page.locator('#offers')).to_contain_text('FICTIONAL DIRECT CLUB')
-    expect(page.locator('#offers')).to_contain_text('FICTIONAL DIRECT COURT')
-    expect(page.locator('#offers')).to_contain_text('€36.00')
+    expect(page.locator('#offers')).to_contain_text('FICTIONAL COURT 1')
+    expect(page.locator('#offers')).to_contain_text('6:00 PM')
     expect(page.locator('#offers')).to_contain_text('90 min')
-    expect(page.get_by_role('link', name='Open club booking')).to_have_attribute('href', 'https://fixture-club.example.org/book')
-    expect(page.locator('#searchStatus')).to_contain_text('1 court offer')
-    assert 'Reader' not in page.locator('main').inner_text()
-    assert page.locator('#personalPayload').count() == 0
-    assert page.evaluate('localStorage.length + sessionStorage.length') == 0
-    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-    counts = context.request.get(fixture_url + '/__counts').json()
-    assert counts == {'coreRequests': 0, 'clubRequests': 1}
-    assert not forbidden
-    Path(ROOT / 'test-artifacts').mkdir(exist_ok=True)
-    page.screenshot(path=str(ROOT / f'test-artifacts/find-{width}-FICTIONAL-CLUB.png'), full_page=True)
+    expect(page.locator('#offers')).to_contain_text('€36.00')
+    expect(page.locator('#offers')).to_contain_text('provider freshness/timezone unknown')
+    expect(page.get_by_role('link',name='Continue on Playtomic (recheck availability)')).to_have_attribute(
+        'href','https://playtomic.com/clubs/cascais-padel-club')
+    assert 'FillMyCourt / Core' not in page.locator('main').inner_text()
+    assert page.evaluate('localStorage.length + sessionStorage.length')==0
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
+    Path(ROOT/'test-artifacts').mkdir(exist_ok=True)
+    page.screenshot(path=str(ROOT/f'test-artifacts/player-search-{width}-FICTIONAL.png'),full_page=True)
 
-@pytest.mark.parametrize('mode', ['direct_stale', 'direct_unpriced', 'empty'])
-def test_unverified_or_disconnected_supply_does_not_create_offers(browser_page, fixture_url, mode):
-    page, context, _, _ = browser_page
-    prepare(page, context, fixture_url, mode)
-    page.get_by_role('button', name='Find courts', exact=True).click()
-    expect(page.locator('#offers .empty')).to_be_visible()
+
+def test_exact_nonce_and_page_ack_are_required_before_direct_extension_handoff(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    record=ready(page,context,fixture_url)
+    page.evaluate("""() => {
+      window._acked=false;
+      window.addEventListener('gac:personal-observation-accepted',()=>window._acked=true);
+    }""")
+    # Without the user action and matching nonce no report is accepted.
+    page.evaluate("""record => window.dispatchEvent(new CustomEvent(
+      'gac:personal-observation',{detail:{nonce:'a'.repeat(48),observation:record}}
+    ))""",record)
     expect(page.locator('#offers .card')).to_have_count(0)
-    assert page.locator('#clubs').count() == 0
-    assert page.get_by_role('link', name='Open club booking').count() == 0
-
-def test_feed_expiry_and_changed_search_clear_offers(browser_page, fixture_url):
-    page, context, _, _ = browser_page
-    prepare(page, context, fixture_url, 'direct_expiring')
-    page.get_by_role('button', name='Find courts', exact=True).click()
+    assert page.evaluate('window._acked') is False
+    page.get_by_role('button',name='Receive prepared Reader offers').click()
+    nonce=page.evaluate('document.documentElement.dataset.gacPersonalBridgeRequest')
+    assert len(nonce)==48
+    page.evaluate("""({nonce,record}) => window.dispatchEvent(new CustomEvent(
+      'gac:personal-observation',{detail:{nonce,observation:record}}
+    ))""",{'nonce':nonce,'record':record})
     expect(page.locator('#offers .card')).to_have_count(1)
-    expect(page.locator('#searchStatus')).to_contain_text('Offers expired', timeout=5000)
+    assert page.evaluate('window._acked') is True
+    assert page.evaluate('document.documentElement.dataset.gacPersonalBridgeRequest') is None
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
+
+
+@pytest.mark.parametrize('patch,expected',[
+    ({'access_token':'INJECTED-SECRET'},'report was rejected'),
+    ({'date':'2026-10-20'},'date or sport differs'),
+    ({'sourceUrl':'https://evil.invalid/clubs/test'},'report was rejected'),
+    ({'offers':[{'court':'FAKE COURT','startLabel':'6:00 PM','endLabel':'7:30 PM',
+                'durationMinutes':90,'priceEur':0}]},'report was rejected')
+])
+def test_sensitive_invalid_or_mismatched_observations_never_create_offers(browser_page,fixture_url,patch,expected):
+    page,context,_,_=browser_page
+    record=ready(page,context,fixture_url)
+    record.update(patch)
+    page.locator('#personalPayload').fill(json.dumps(record))
+    page.get_by_role('button',name='Compare pasted offers').click()
     expect(page.locator('#offers .card')).to_have_count(0)
-    prepare(page, context, fixture_url, 'direct_slow')
-    page.get_by_role('button', name='Find courts', exact=True).click()
+    expect(page.locator('#personalStatus')).to_contain_text(expected)
+    assert page.locator('#personalPayload').input_value()==''
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+
+
+def test_old_user_observation_cannot_be_reused(browser_page,fixture_url):
+    page,context,_,_=browser_page
+    record=ready(page,context,fixture_url)
+    record['capturedAt']=(datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat(timespec='milliseconds').replace('+00:00','Z')
+    page.locator('#personalPayload').fill(json.dumps(record))
+    page.get_by_role('button',name='Compare pasted offers').click()
+    expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('#personalStatus')).to_contain_text('expired')
+
+
+def test_query_edit_clear_and_provider_failure_isolation(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    record=ready(page,context,fixture_url)
+    page.locator('#personalPayload').fill(json.dumps(record))
+    page.get_by_role('button',name='Compare pasted offers').click()
+    expect(page.locator('#offers .card')).to_have_count(1)
     page.locator('[name="location"]').fill('Oeiras')
-    page.get_by_role('button', name='Find courts', exact=True).click()
-    expect(page.locator('#searchStatus')).to_contain_text('No free courts have been verified')
-    page.wait_for_timeout(700)
     expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.get_by_role('button',name='Receive prepared Reader offers')).to_be_disabled()
+    expect(page.locator('#sourceStatus')).to_contain_text('TiePlayer / TieSports')
+    expect(page.locator('#sourceStatus')).to_contain_text('Not connected')
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]

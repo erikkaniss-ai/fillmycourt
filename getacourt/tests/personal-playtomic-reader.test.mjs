@@ -10,7 +10,7 @@ const search=readFileSync(new URL("search.js",root),"utf8");
 const source="https://playtomic.com/clubs/fictional-club";
 const popup={id:"reader",url:"chrome-extension://reader/popup.html"};
 const reader={id:"reader",url:"chrome-extension://reader/reader.html",frameId:0};
-const comparisonUrl="https://get-pr5-reader-uat--getacourt-preview.netlify.app/search-all.html";
+const comparisonUrl="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
 const page={id:"reader",url:comparisonUrl,frameId:0,tab:{id:9,url:comparisonUrl}};
 const query={date:"2026-10-25",sport:"Padel",from:"14:00",to:"20:00",durationMinutes:90};
 function observation(){return {sourceUrl:source,date:query.date,sport:query.sport,offers:[]};}

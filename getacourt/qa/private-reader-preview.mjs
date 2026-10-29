@@ -5,7 +5,7 @@ export const SITE='5dbcc4a3-5c87-4c75-959f-9a4f9fbc9570';
 export const RECEIVER='https://get-pr5-reader-uat--getacourt-preview.netlify.app';
 const REPO='erikkaniss-ai/fillmycourt';
 const SHA=/^[a-f0-9]{40}$/;
-export const FILES=['source-catalog.mjs','federated-search.mjs','federated-search-page.mjs',
+export const FILES=['source-catalog.mjs','federated-search.mjs','court-search-page.mjs',
   'personal-source-observation.js','personal-observation-bridge.mjs','federated-search.css'];
 export function approved(pr,sha){
   const marks=[...(pr?.body??'').matchAll(/<!-- GET_STAGING_UAT_APPROVED_SHA:([a-f0-9]{40}) -->/g)];
@@ -54,11 +54,11 @@ async function prepare(){
   if(!SHA.test(sha??'')||!temp||process.env.GITHUB_ACTIONS!=='true')throw Error('CI_STATIC_PACKAGE_ONLY');
   const output=resolve(temp,'get-reader-static');
   await mkdir(join(output,'assets'),{recursive:true});await mkdir(join(output,'functions'),{recursive:true});
-  const html=await readFile('getacourt/search-all.html','utf8');
-  await writeFile(join(output,'search-all.html'),html.replace('<main>','<main><p class="notice">Private Reader acceptance: Core API is disconnected on this static draft. Personal offers are short-lived browser observations.</p>'));
+  const html=await readFile('getacourt/find.html','utf8');
+  await writeFile(join(output,'find.html'),html);
   for(const file of FILES)await copyFile('getacourt/assets/'+file,join(output,'assets',file));
   await writeFile(join(output,'preview-build.json'),JSON.stringify({kind:'GET_READER_STATIC_UAT',source_sha:sha,site_id:SITE,functions:0,provider_requests:0}));
-  await writeFile(join(output,'_redirects'),'/ /search-all.html 302\n/index.html /search-all.html 302\n');
+  await writeFile(join(output,'_redirects'),'/ /find.html 302\n/index.html /find.html 302\n');
   await writeFile(join(output,'netlify.toml'),'[build]\npublish = "."\n[functions]\ndirectory = "functions"\n');
   await writeFile(join(output,'_headers'),"/*\n  X-Robots-Tag: noindex, nofollow, noarchive\n  Cache-Control: private, no-store\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  X-Frame-Options: DENY\n  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'\n");
   console.log('Static Reader package prepared: no server functions, native booking UI or secrets.');
@@ -67,7 +67,7 @@ async function verify(){
   const result=JSON.parse(await readFile(join(process.env.RUNNER_TEMP,'get-reader-static-result.json'),'utf8'));
   if(new URL(result.deploy_url||result.deployUrl||result.url||'').origin!==RECEIVER||
     (result.site_id&&result.site_id!==SITE))throw Error('UNEXPECTED_DEPLOY_TARGET');
-  const r=await fetch(RECEIVER+'/search-all.html',{redirect:'manual',signal:AbortSignal.timeout(15000)});
+  const r=await fetch(RECEIVER+'/find.html',{redirect:'manual',signal:AbortSignal.timeout(15000)});
   if(r.status!==401)throw Error('NEW_DRAFT_PROTECTION_UNVERIFIED');
   console.log('Protected Reader draft anonymous HTTP 401 verified: '+RECEIVER);
   console.log('Reviewed source SHA: '+process.env.SOURCE_SHA+'; deploy ID: '+result.deploy_id);

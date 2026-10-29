@@ -1,3 +1,9 @@
+# Frozen historical direct-feed proposal — 29 October 2026
+
+This document describes the **previously implemented, now forbidden** direct-club/API source path. Under active Product Decision #105 it must **not be activated or used as a GetACourt consumer inventory source**. The replacement P0 module is standalone \`getacourt/find.html\`, backed only by user-initiated Playtomic Reader observations from the user's normal browser session; results link to the original booking provider. No private or public deploy of the former direct-feed path may be inferred from old exact-SHA staging permissions. Do not resume external provider/club outreach or API discovery without new owner authorization.
+
+---
+
 # GetACourt release search: source decision and implementation
 
 Owner direction, 27 October: park the browser extension and deliver ordinary web
