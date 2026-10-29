@@ -1,10 +1,34 @@
 {
   "manifest_version": 3,
   "name": "GetACourt Personal Playtomic Reader",
-  "version": "0.2.5",
-  "description": "Search explicit offers in one personally approved Playtomic club. No booking or payment actions.",
-  "permissions": ["activeTab", "scripting", "storage"],
-  "background": {"service_worker": "background.js"},
-  "action": {"default_popup": "popup.html"},
-  "content_security_policy": {"extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"}
+  "version": "0.3.0",
+  "description": "Connect Playtomic once in your Chrome profile; search visible user offers from GetACourt on request. No bookings, passwords or payments.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"
+  },
+  "optional_host_permissions": [
+    "https://playtomic.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html"
+      ],
+      "js": [
+        "get-page-relay.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }

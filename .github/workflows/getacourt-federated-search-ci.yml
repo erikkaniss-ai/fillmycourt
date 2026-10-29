@@ -38,6 +38,8 @@ jobs:
           node --test getacourt/tests/private-reader-preview.test.mjs
           node --test getacourt/tests/private-search-preview.test.mjs
           node --check getacourt/assets/court-search-page.mjs
+          node --check getacourt/browser-companion/get-page-relay.js
+          node --test getacourt/tests/persistent-player-session.test.mjs
           node --experimental-strip-types --test getacourt/tests/club-availability.test.mjs
           node --experimental-strip-types --test getacourt/tests/federated-search.test.mjs getacourt/tests/personal-observation-bridge.test.mjs
       - name: Install pinned browser test dependencies

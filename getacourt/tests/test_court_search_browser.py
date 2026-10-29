@@ -29,11 +29,11 @@ def ready(page, context, base):
     context.request.get(base+'/__fixture?mode=direct')
     page.goto(base+'/find.html')
     # Manual paste is deliberately inside an opt-in details element.
-    page.get_by_text('Manual copy alternative',exact=True).click()
+    page.get_by_text('Manual Reader troubleshooting (not needed for normal searches)',exact=True).click()
     page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
     page.locator('[name="duration"]').select_option('90')
     page.get_by_role('button',name='Find courts',exact=True).click()
-    expect(page.locator('#searchStatus')).to_contain_text('Ready:')
+    expect(page.locator('#searchStatus')).to_contain_text('Searching')
     return sample(page)
 
 
@@ -128,5 +128,54 @@ def test_query_edit_clear_and_provider_failure_isolation(browser_page,fixture_ur
     expect(page.get_by_role('button',name='Receive prepared Reader offers')).to_be_disabled()
     expect(page.locator('#sourceStatus')).to_contain_text('TiePlayer / TieSports')
     expect(page.locator('#sourceStatus')).to_contain_text('Not connected')
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
+
+
+def test_one_click_receives_personal_result_without_manual_import(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    context.request.get(fixture_url+'/__fixture?mode=direct')
+    page.goto(fixture_url+'/find.html')
+    page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
+    page.locator('[name="duration"]').select_option('90')
+    record=sample(page)
+    page.evaluate("""record => {
+      window.fixtureRequests=0;
+      // Simulated extension reply — never a real Playtomic or Core request.
+      window.addEventListener('gac:auto-search-request',event=>{
+        window.fixtureRequests++;
+        window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',
+          {detail:{nonce:event.detail.nonce}}));
+        window.dispatchEvent(new CustomEvent('gac:auto-search-response',
+          {detail:{nonce:event.detail.nonce,result:{status:'observed',observation:record}}}));
+      });
+    }""",record)
+    page.get_by_role('button',name='Find courts',exact=True).click()
+    expect(page.locator('#offers .card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('€36.00')
+    assert page.evaluate('window.fixtureRequests')==1
+    assert page.locator('#personalPayload').input_value()==''
+    expect(page.get_by_role('link',name='Continue on Playtomic (recheck availability)')).to_have_attribute(
+        'href','https://playtomic.com/clubs/cascais-padel-club')
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
+
+def test_auto_search_provider_login_expiry_is_explicit(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    context.request.get(fixture_url+'/__fixture?mode=direct')
+    page.goto(fixture_url+'/find.html')
+    page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
+    page.evaluate("""() => {
+      window.addEventListener('gac:auto-search-request',event=>{
+        window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',
+          {detail:{nonce:event.detail.nonce}}));
+        window.dispatchEvent(new CustomEvent('gac:auto-search-response',
+          {detail:{nonce:event.detail.nonce,
+           result:{status:'unavailable',code:'CHALLENGE_REQUIRED'}}}));
+      });
+    }""")
+    page.get_by_role('button',name='Find courts',exact=True).click()
+    expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('#personalStatus')).to_contain_text('sign in')
     assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
     assert forbidden==[]

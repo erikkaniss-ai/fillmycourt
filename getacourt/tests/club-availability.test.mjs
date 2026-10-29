@@ -106,7 +106,9 @@ test('active Get consumer release is player-session only; legacy club feed remai
   const js=fs.readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
   assert.match(html,/Find courts/);
   assert.match(html,/personalPayload/);
-  assert.match(html,/Playtomic personal Reader/);
+  assert.match(html,/Connect Playtomic once/);
+  assert.match(js,/startAutomaticSearch/);
+  assert.match(js,/gac:auto-search-request/);
   assert.match(js,/normalizePersonalObservation/);
   assert.match(js,/gac:personal-observation-accepted/);
   assert.match(js,/Continue on Playtomic/);

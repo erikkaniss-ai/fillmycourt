@@ -187,9 +187,12 @@ test("collector accepts only rendered explicit offers, strips account queries an
   button.getClientRects=()=>[];assert.equal(collect().readerError,"NO_EXPANDED_OFFERS");
   button.getClientRects=()=>[{}];row.innerText="price unknown Book";assert.equal(collect().readerError,"OFFER_FORMAT_CHANGED");
 });
-test("package has unchanged narrow permissions, no external bridge, no credential input or provider transport",()=>{
+test("package retains only bounded, opt-in per-provider access without credential extraction",()=>{
   const manifest=JSON.parse(readFileSync(new URL("manifest.json",root),"utf8"));
   assert.deepEqual(manifest.permissions,["activeTab","scripting","storage"]);assert.equal(manifest.host_permissions,undefined);
+  assert.deepEqual(manifest.optional_host_permissions,["https://playtomic.com/*"]);
+  assert.deepEqual(manifest.content_scripts.map(s=>s.matches),
+    [["https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html"]]);
   assert.equal(manifest.externally_connectable,undefined);assert.equal(manifest.web_accessible_resources,undefined);
   assert.match(manifest.content_security_policy.extension_pages,/connect-src 'none'/);
   const page=readFileSync(new URL("reader.html",root),"utf8"),ui=readFileSync(new URL("reader.js",root),"utf8"),bridge=readFileSync(new URL("bridge-content.js",root),"utf8");

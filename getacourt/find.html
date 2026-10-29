@@ -10,13 +10,13 @@
 </head>
 <body>
 <a class="skip" href="#search">Skip to search</a>
-<header><a class="brand" href="index.html">GetACourt</a><span>Find a court. Book with its official provider.</span></header>
+<header><a class="brand" href="index.html">GetACourt</a><span>Search once after login. Book with the official provider.</span></header>
 <main>
   <section class="intro" aria-labelledby="introHeading">
     <p class="eyebrow">PERSONAL COURT SEARCH · PRIVATE BETA</p>
     <h1 id="introHeading">Your courts. One place to compare.</h1>
     <p>Search through a provider's normal player interface in your own browser profile. GetACourt shows only short-lived, explicitly observed offers and takes you to the official club to book.</p>
-    <p class="notice">Playtomic personal Reader is the first supported source. No automatic multi-club search, provider API access, account sharing, reservations or payments. An empty result never means clubs are sold out.</p>
+    <p class="notice">Connect Playtomic once in this Chrome/Edge profile. Thereafter, Find courts initiates a search using your existing official Playtomic login. Only explicitly observed offers appear; an empty result never means clubs are sold out. No server API, booking or payment.</p>
   </section>
   <form id="search" novalidate>
     <label>City, area or exact club name<input name="location" value="Cascais" required maxlength="80" autocomplete="off"></label>
@@ -27,20 +27,20 @@
     <label>Duration<select name="duration"><option value="any">60 or 90 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label>
     <button type="submit">Find courts</button>
   </form>
-  <p id="searchStatus" role="status" aria-live="polite">Set your filters. GetACourt never searches another player's account.</p>
+  <p id="searchStatus" role="status" aria-live="polite">Set your filters and click Find courts. Your Playtomic account stays signed in within your own Chrome profile.</p>
   <section aria-labelledby="connectionHeading">
-    <h2 id="connectionHeading">Search using your Playtomic browser session</h2>
+    <h2 id="connectionHeading">Connect Playtomic once</h2>
     <ol>
-      <li>In the same Chrome or Edge browser profile, sign in to the official Playtomic website if needed. Open a club page. <a href="https://playtomic.com/clubs/cascais-padel-club" target="_blank" rel="noopener noreferrer">Example: Cascais Padel &amp; Nature</a>.</li>
-      <li>Click the GetACourt Reader extension icon, select <strong>Connect and open GetACourt</strong> and search the same date, sport and time range. Do not click Book or Continue.</li>
-      <li>In the Reader, select <strong>Open GetACourt comparison</strong>. On this page, set your filters and choose <strong>Receive prepared Reader offers</strong>; then click the extension icon here and select <strong>Deliver prepared Reader offers here</strong>.</li>
+      <li>Install the GetACourt Reader extension v0.3.0 in Chrome/Edge once. In that same browser profile, <a href="https://playtomic.com/clubs/cascais-padel-club" target="_blank" rel="noopener noreferrer">open Playtomic</a> and sign in normally.</li>
+      <li>On an official Playtomic club page, click the GetACourt extension icon and choose <strong>Connect and open GetACourt</strong>. Approve Chrome's site-access request once. Your password and login cookies remain with Playtomic.</li>
+      <li>After that, search here using <strong>Find courts</strong>. No extension clicks, copy/paste or repeated club-tab approval are needed while your Playtomic session remains valid. If Playtomic requests a new login or security check, complete it on Playtomic itself.</li>
     </ol>
-    <div class="personal-actions">
-      <button id="requestPersonalBridge" type="button" disabled>Receive prepared Reader offers</button>
-      <button id="clearPersonal" type="button">Clear results</button>
-    </div>
-    <p id="personalStatus" role="status" aria-live="polite">No personal offers imported. Provider login remains in the provider tab.</p>
-    <details><summary>Manual copy alternative</summary>
+    <p class="notice">Search currently covers one approved Playtomic club at a time, not every club. Browser/extension must be running. Chrome may ask you to sign in again if Playtomic expires the session.</p>
+    <div class="personal-actions"><button id="clearPersonal" type="button">Clear results</button></div>
+    <p id="personalStatus" role="status" aria-live="polite">Enter search filters and click Find courts. GetACourt checks your existing provider session in this browser.</p>
+    <details><summary>Manual Reader troubleshooting (not needed for normal searches)</summary>
+      <p>If the automatic extension connection is unavailable, open Reader from its icon, search the club and choose Open GetACourt comparison. On this page choose Receive prepared Reader offers and deliver the prepared report from the extension icon.</p>
+      <div class="personal-actions"><button id="requestPersonalBridge" type="button" disabled>Receive prepared Reader offers</button></div>
       <p>In the Reader select Copy observed offers. Paste only the sanitized report below. Never paste a password, token, cookie, account export or customer information.</p>
       <label for="personalPayload">Sanitized Playtomic observed-offer report</label>
       <textarea id="personalPayload" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="Paste the recent sanitized Reader report"></textarea>

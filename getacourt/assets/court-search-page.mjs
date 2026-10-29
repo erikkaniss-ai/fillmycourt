@@ -8,7 +8,7 @@ const offersHost=byId('offers'),sourcesHost=byId('sourceStatus'),payload=byId('p
 const date=form.elements.namedItem('date');
 const today=localDay();date.value=date.min=today;
 date.max=new Date(Date.parse(today+'T00:00:00Z')+14*86400000).toISOString().slice(0,10);
-let query=null,revision=0,pendingBridge=null,timer=null;
+let query=null,revision=0,pendingBridge=null,pendingAuto=null,autoAckTimer=null,autoResultTimer=null,timer=null;
 const observations=new Map();
 const make=(tag,label,cls)=>{const el=document.createElement(tag);if(label!==undefined)el.textContent=String(label);if(cls)el.className=cls;return el;};
 const allowed=()=>Boolean(query);
@@ -16,8 +16,68 @@ function clearPending(){
   pendingBridge=null;
   delete document.documentElement.dataset.gacPersonalBridgeRequest;
 }
+function cancelAuto(){
+  clearTimeout(autoAckTimer);clearTimeout(autoResultTimer);
+  autoAckTimer=autoResultTimer=null;pendingAuto=null;
+}
+function autoError(result){
+  const code=result?.code;
+  return ({
+    CONNECT_REQUIRED:'Connect Playtomic once: open its official club page, sign in, then select Connect in the GetACourt extension.',
+    SITE_ACCESS_REQUIRED:'Allow Playtomic site access once from the GetACourt extension icon.',
+    RATE_LIMITED:'Playtomic was checked recently. Wait up to 60 seconds before searching again.',
+    CHALLENGE_REQUIRED:'Playtomic needs you to sign in or complete its own security check. No automatic bypass is attempted.',
+    TAB_ACCESS_REQUIRED:'The Playtomic page could not be loaded. Check your browser and connection.',
+    COMPACT_VIEW_REQUIRED:'The Playtomic club layout could not be prepared. Open it in a narrow Chrome window.',
+    NO_EXPANDED_OFFERS:'No explicit priced offers found in the inspected portion of this club. Other slots may exist.',
+    OFFER_SECTION_MISSING:'Playtomic has changed its visible booking layout; offers could not be verified.',
+    SCHEDULE_NOT_READY:'Playtomic did not confirm the requested date or sport. Search again later.',
+    READ_BUSY:'A Playtomic search is already running. Finish that search first.'
+  })[code]||'This provider search could not be verified. Check the Playtomic page or connection.';
+}
+function startAutomaticSearch(){
+  if(!query)return;
+  const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
+  const request={nonce,query,revision,acked:false};
+  cancelAuto();pendingAuto=request;
+  status.textContent='Searching via your remembered Playtomic browser connection…';
+  autoAckTimer=setTimeout(()=>{
+    if(pendingAuto!==request||request.acked)return;
+    cancelAuto();
+    personalStatus.textContent='GetACourt Reader v0.3.0 is not connected to this browser page. Install/reload it and connect Playtomic once; manual troubleshooting remains available.';
+  },1500);
+  window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query}}));
+}
+window.addEventListener('gac:auto-search-accepted',event=>{
+  const request=pendingAuto;
+  if(!request||event.detail?.nonce!==request.nonce||request.revision!==revision)return;
+  request.acked=true;clearTimeout(autoAckTimer);autoAckTimer=null;
+  personalStatus.textContent='Reading only the normal Playtomic court-search interface in your browser…';
+  autoResultTimer=setTimeout(()=>{
+    if(pendingAuto!==request)return;
+    cancelAuto();
+    personalStatus.textContent='Playtomic search did not finish in time. The site may need attention. No result is assumed.';
+  },45000);
+});
+window.addEventListener('gac:auto-search-response',event=>{
+  const request=pendingAuto,detail=event.detail;
+  if(!request||!detail||detail.nonce!==request.nonce||
+     request.revision!==revision||query!==request.query)return;
+  cancelAuto();
+  if(detail.result?.status==='observed'){
+    let raw;
+    try{raw=JSON.stringify(detail.result.observation);}catch{
+      personalStatus.textContent='The player observation could not be validated.';return;
+    }
+    if(importPersonal(raw,request.query,request.revision))
+      status.textContent='Verified personal observation received. Select a court to continue with Playtomic.';
+  }else{
+    personalStatus.textContent=autoError(detail.result);
+    status.textContent='No verified available offers received. Other courts may exist.';
+  }
+});
 function clearOffers(message){
-  revision++;clearPending();clearTimeout(timer);timer=null;
+  revision++;clearPending();cancelAuto();clearTimeout(timer);timer=null;
   observations.clear();payload.value='';
   offersHost.replaceChildren(make('p','No fresh personal offers yet.','empty'));
   personalStatus.textContent=message||'No personal offers imported.';
@@ -36,7 +96,7 @@ function minute(value){
 function renderSources(){
   sourcesHost.replaceChildren();
   const names=[
-    ['Playtomic', observations.size ? 'Personal observation loaded — partial and expires' : 'Requires your own Reader and club-tab approval'],
+    ['Playtomic', observations.size ? 'Personal observation loaded — partial and expires' : 'Connect once in Chrome; next searches run automatically while provider login remains valid'],
     ['TiePlayer / TieSports','Not connected: player UI verification pending'],
     ['Racket ID','Not connected: player UI verification pending'],
     ['Smashpro','Not connected: player UI verification pending']
@@ -114,8 +174,9 @@ form.addEventListener('submit',event=>{
   query=next;
   byId('requestPersonalBridge').disabled=false;
   byId('comparePersonal').disabled=false;
-  status.textContent='Ready: use your Playtomic Reader on a club page for '+next.date+'. Then transfer its short-lived observations here. No server inventory request was made.';
-  personalStatus.textContent='Waiting for your Reader observation.';
+  status.textContent='Searching this club through your own Playtomic browser session. No server inventory request was made.';
+  personalStatus.textContent='Waiting for the installed GetACourt Reader to respond.';
+  startAutomaticSearch();
 });
 byId('requestPersonalBridge').addEventListener('click',()=>{
   if(!allowed()){personalStatus.textContent='Prepare a search first.';return;}
@@ -139,6 +200,7 @@ window.addEventListener('gac:personal-observation',event=>{
 });
 byId('comparePersonal').addEventListener('click',()=>{
   if(!allowed()){personalStatus.textContent='Prepare a search first.';payload.value='';return;}
+  cancelAuto();
   importPersonal(payload.value,query,revision);
 });
 byId('clearPersonal').addEventListener('click',()=>clearOffers('Personal observations cleared. No provider account was signed out.'));

@@ -1,5 +1,5 @@
 importScripts("capture.js","observation.js");
-const VERSION="0.2.5";
+const VERSION="0.3.0";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
 const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
@@ -8,7 +8,8 @@ let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 // Fixed messages only: never return a browser/provider exception or credential.
 const errors=Object.freeze({
   REQUEST_REJECTED:"Open GetACourt from its extension icon.",
-  CONNECT_REQUIRED:"Open the intended Playtomic club, click the GetACourt icon, then Connect and open GetACourt.",
+  CONNECT_REQUIRED:"Connect Playtomic once from the GetACourt extension icon on a Playtomic club page.",
+  SITE_ACCESS_REQUIRED:"Allow Playtomic site access once in the GetACourt extension popup. No provider password is shared.",
   CLUB_PAGE_REQUIRED:"Open an official Playtomic /clubs/ page before connecting.",
   READ_BUSY:"A search is already running. Wait for it to finish.",
   RATE_LIMITED:"Wait 60 seconds after the previous attempt. No automatic retry runs.",
@@ -135,6 +136,67 @@ async function approve(){
     return {status:"connected",sourceUrl:source,version:VERSION};
   });
 }
+// Chrome stores the player's native Playtomic session. No cookies, passwords or
+// tokens are read or copied into GetACourt. The remembered club URL is not auth.
+async function waitForPage(tabId) {
+  const tab=await chrome.tabs.get(tabId);
+  if(tab.status==="complete")return;
+  await new Promise((resolve,reject)=>{
+    let done=false;
+    const finish=error=>{if(done)return;done=true;clearTimeout(deadline);
+      chrome.tabs.onUpdated.removeListener(onUpdate);error?reject(error):resolve();};
+    const onUpdate=(id,change)=>{if(id===tabId&&change.status==="complete")finish();};
+    const deadline=setTimeout(()=>finish(Error("TAB_LOAD_TIMEOUT")),15000);
+    chrome.tabs.onUpdated.addListener(onUpdate);
+    chrome.tabs.get(tabId).then(t=>{if(t.status==="complete")finish();}).catch(finish);
+  });
+}
+async function ensurePersonalProviderTab() {
+  const {approvedSource}=await chrome.storage.local.get("approvedSource");
+  if(!sourceAllowed(approvedSource))fail("CONNECT_REQUIRED");
+  let hasHostAccess=false;
+  try{hasHostAccess=await chrome.permissions.contains({origins:["https://playtomic.com/*"]});}catch{}
+  if(!hasHostAccess)fail("SITE_ACCESS_REQUIRED");
+  const {approvedTab}=await chrome.storage.session.get("approvedTab");
+  if(Number.isInteger(approvedTab)){
+    try{
+      const tab=await chrome.tabs.get(approvedTab);
+      if(new URL(tab.url).origin+new URL(tab.url).pathname===approvedSource){
+        await waitForPage(tab.id);return tab.id;
+      }
+    }catch{}
+  }
+  // Opens a fresh normal provider page in the player's EXISTING Chrome profile.
+  // Native first-party login cookies remain browser-owned and are never read.
+  let created;
+  try{
+    created=await chrome.tabs.create({url:approvedSource,active:false});
+    await chrome.windows.create({tabId:created.id,type:"normal",width:480,height:850,focused:false});
+    await chrome.storage.session.set({approvedTab:created.id});
+    await waitForPage(created.id);
+    return created.id;
+  }catch{fail("TAB_ACCESS_REQUIRED");}
+}
+let autoBusy=false;
+async function autoSearchFromGet(query) {
+  if(!queryValid(query))fail("QUERY_INVALID");
+  if(autoBusy)fail("READ_BUSY");
+  autoBusy=true;
+  const epoch=generation;
+  try{
+    await ensurePersonalProviderTab();
+    if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+    return await runSearch(query);
+  }finally{autoBusy=false;}
+}
+async function autoStatus() {
+  const {approvedSource}=await chrome.storage.local.get("approvedSource");
+  let hasHostAccess=false;
+  try{hasHostAccess=await chrome.permissions.contains({origins:["https://playtomic.com/*"]});}catch{}
+  return {status:sourceAllowed(approvedSource)&&hasHostAccess?"configured":"not_configured",
+    sourceUrl:sourceAllowed(approvedSource)?approvedSource:null,version:VERSION,
+    note:"Provider login status is checked only on normal provider UI search."};
+}
 async function openReader(){
   await chrome.tabs.create({url:chrome.runtime.getURL("reader.html")});
   return {status:"opened",version:VERSION};
@@ -199,11 +261,13 @@ async function runSearch(query){
 async function handle(message,sender){
   const role=caller(sender);
   const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],
-    search:["action","query"],showClub:["action"],prepareComparison:["action","observation"],
+    search:["action","query"],autoSearchFromGet:["action","query"],autoStatus:["action"],showClub:["action"],prepareComparison:["action","observation"],
     enableComparisonBridge:["action"],pageBridgeReady:["action","nonce"]});
   if(!message||typeof message!=="object"||Array.isArray(message)||!Object.hasOwn(actionKeys,message.action)||
     Object.keys(message).some(k=>!actionKeys[message.action].includes(k)))fail("REQUEST_REJECTED");
   if(message.action==="status")return status();
+  if(message.action==="autoStatus"&&role==="page")return autoStatus();
+  if(message.action==="autoSearchFromGet"&&role==="page")return autoSearchFromGet(message.query);
   if(message.action==="revoke")return disconnect();
   if(message.action==="approve"&&role==="popup"){
     const result=await approve();await openReader();return result;
