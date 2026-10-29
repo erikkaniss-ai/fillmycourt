@@ -28,6 +28,8 @@ def sample(page, *, patch=None):
 def ready(page, context, base):
     context.request.get(base+'/__fixture?mode=direct')
     page.goto(base+'/find.html')
+    # Manual paste is deliberately inside an opt-in details element.
+    page.get_by_text('Manual copy alternative',exact=True).click()
     page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
     page.locator('[name="duration"]').select_option('90')
     page.get_by_role('button',name='Find courts',exact=True).click()
