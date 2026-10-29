@@ -98,7 +98,10 @@ test('normal provider challenge is not bypassed; no retry, no booking or payment
 });
 
 test('site permission is optional and Get relay is limited to the exact protected site',()=>{
-  assert.deepEqual(manifest.optional_host_permissions,['https://playtomic.com/*']);
+  assert.deepEqual(manifest.optional_host_permissions,[
+    'https://playtomic.com/*','https://clubs.tiesports.com/*',
+    'https://racket.id/*','https://smashpro.pt/*','https://www.matchi.se/*'
+  ]);
   assert.equal(manifest.host_permissions,undefined);
   assert.equal(manifest.externally_connectable,undefined);
   assert.deepEqual(manifest.content_scripts.map(x=>x.matches),[[getPage]]);
