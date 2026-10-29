@@ -106,7 +106,7 @@ test('active Get consumer release is player-session only; legacy club feed remai
   const js=fs.readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
   assert.match(html,/Find courts/);
   assert.match(html,/personalPayload/);
-  assert.match(html,/Connect each supported provider once/);
+  assert.match(html,/Connect each booking provider once/);
   assert.match(js,/startAutomaticSearch/);
   assert.match(js,/gac:auto-search-request/);
   assert.match(js,/normalizePersonalObservation/);
