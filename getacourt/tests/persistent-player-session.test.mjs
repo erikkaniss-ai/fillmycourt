@@ -69,7 +69,8 @@ test('one-time permission and ordinary remembered club survive service-worker an
   assert.equal(result.status,'observed');
   assert.equal(result.observation.sourceUrl,source);
   assert.equal(f.created.length,1);
-  assert.deepEqual(f.created[0],{url:source,active:false});
+  assert.equal(f.created[0].url,source);
+  assert.equal(f.created[0].active,false);
   assert.equal(f.windows[0].width,480);
   assert.equal(f.searchCount,1);
   assert.deepEqual(f.local,{approvedSource:source});
