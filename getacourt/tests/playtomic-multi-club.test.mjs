@@ -85,7 +85,7 @@ function driver({grant=true,failSet=new Set(),forgedSource=null}={}){
  vm.runInContext(observations,ctx);
  vm.runInContext(background,ctx);
  const send=message=>new Promise(resolve=>handlers.message(message,page,resolve));
- return{send,local,session,created,removed,calls,captures,
+ return{send,local,session,created,removed,calls,get captures(){return captures;},
   catalog:ctx.GetACourtPlaytomicClubCatalog,setGranted:v=>approved=v};
 }
 test('four official club pages have a canonical matching map, never offer inventory',()=>{
