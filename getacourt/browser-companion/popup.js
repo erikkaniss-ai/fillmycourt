@@ -1,7 +1,19 @@
+// Discover current official club in advance. On the actual user click, request
+// Chrome's optional site permission immediately (retains user gesture).
+let isOfficialClubTab=false;
+chrome.tabs.query({active:true,currentWindow:true}).then(([tab])=>{
+  try{const url=new URL(tab?.url||'about:blank');
+    isOfficialClubTab=url.origin==='https://playtomic.com'&&/^\/clubs\/[a-z0-9-]+$/.test(url.pathname);
+  }catch{}
+}).catch(()=>{});
 for(const action of ["approve","open","enableComparisonBridge","revoke"])document.getElementById(action).addEventListener("click",async()=>{
   const button=document.getElementById(action);button.disabled=true;
   try{
     if(action==="approve"){
+      if(!isOfficialClubTab){
+        document.getElementById("status").textContent="Open an official Playtomic /clubs/ page before connecting.";
+        return;
+      }
       // The owner grants this named site ONCE via Chrome's own permission dialog.
       // No credentials/session are exported to GetACourt.
       const granted=await chrome.permissions.request({origins:["https://playtomic.com/*"]});
