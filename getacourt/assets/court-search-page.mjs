@@ -129,7 +129,9 @@ window.addEventListener('gac:personal-observation',event=>{
   const detail=event.detail,request=pendingBridge;
   if(!request||!detail||typeof detail!=='object'||Array.isArray(detail)||
     Object.keys(detail).sort().join(',')!=='nonce,observation'||detail.nonce!==request.nonce)return;
-  if(importPersonal(JSON.stringify(detail.observation),request.query,request.revision)){
+  let raw;
+  try{raw=JSON.stringify(detail.observation);}catch{personalStatus.textContent='Invalid browser observation.';return;}
+  if(importPersonal(raw,request.query,request.revision)){
     // Synchronous confirmation is consumed by the injected extension script.
     window.dispatchEvent(new CustomEvent('gac:personal-observation-accepted',{detail:{nonce:request.nonce}}));
     clearPending();

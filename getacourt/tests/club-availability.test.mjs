@@ -101,9 +101,21 @@ test('actual HTTP handler reads a configured club feed without a Core dependency
     assert.equal(r.status,200);const data=await r.json();assert.equal(data.offers.length,1);assert.equal(data.offers[0].sourceId,'club_internal');assert.equal(calls.length,1);assert.ok(!JSON.stringify(calls).includes('DO_NOT_FORWARD'));assert.equal(r.headers.get('cache-control'),'no-store');
   }finally{globalThis.fetch=oldFetch;globalThis.Netlify=oldNetlify;}
 });
-test('release entry has no extension, personal-payload, clipboard or directory requirement',()=>{
+test('active Get consumer release is player-session only; legacy club feed remains inactive',()=>{
   const html=fs.readFileSync(new URL('../find.html',import.meta.url),'utf8');
   const js=fs.readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
-  assert.match(html,/Find courts/);assert.match(js,/\/api\/gac\/search-all\?/);
-  for(const pattern of [/chrome\./,/clipboard/i,/personalPayload/,/Reader/,/localStorage/,/sessionStorage/,/innerHTML/,/setInterval/]){assert.doesNotMatch(html,pattern);assert.doesNotMatch(js,pattern);}
+  assert.match(html,/Find courts/);
+  assert.match(html,/personalPayload/);
+  assert.match(html,/Playtomic personal Reader/);
+  assert.match(js,/normalizePersonalObservation/);
+  assert.match(js,/gac:personal-observation-accepted/);
+  assert.match(js,/Continue on Playtomic/);
+  for(const pattern of [/\/api\/gac\/search-all/,/\bfetch\s*\(/,/\bXMLHttpRequest\b/,/\bWebSocket\b/,/\bchrome\./,
+    /\/api\/availability/,/GETACOURT_CLUB_FEEDS/,/localStorage/,/sessionStorage/,/innerHTML/,/setInterval/]){
+    assert.doesNotMatch(js,pattern,'Get player module must not contact a provider or server feed');
+  }
+  assert.doesNotMatch(html,/\/api\/gac\/search-all|FillMyCourt \/ Core/);
+  assert.match(html,/connect-src 'none'/);
+  // Prior club-feed unit contracts above remain in place for historical safety,
+  // but they are not the active Get source or a backdoor to enable them.
 });
