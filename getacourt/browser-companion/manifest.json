@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "GetACourt Personal Playtomic Reader",
-  "version": "0.4.0",
-  "description": "One-time player browser connection for named booking systems. On-demand read-only court search; no credentials or bookings.",
+  "version": "0.4.1",
+  "description": "One-time player login; on-demand four-club Playtomic and named other booking-site UI search. No provider API or checkout.",
   "permissions": [
     "activeTab",
     "scripting",

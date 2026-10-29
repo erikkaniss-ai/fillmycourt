@@ -57,7 +57,7 @@ function startAutomaticSearch(){
   autoAckTimer=setTimeout(()=>{
     if(pendingAuto!==request||request.acked)return;
     cancelAuto();
-    personalStatus.textContent='GetACourt Reader v0.3.0 is not connected to this browser page. Install/reload it and connect Playtomic once; manual troubleshooting remains available.';
+    personalStatus.textContent='GetACourt Reader v0.4.1 is not connected to this browser page. Install/reload it and connect Playtomic once; manual troubleshooting remains available.';
   },1500);
   window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query}}));
 }

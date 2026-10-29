@@ -1,3 +1,11 @@
+## 29 October 2026 — Playtomic multi-club bounded client search (v0.4.1 source)
+
+One normal Playtomic first-party Chrome login and one granted official site permission permits Get Find to inspect a finite registry of up to FOUR human-reviewed official club pages: Cascais Padel & Nature, Sports Club Cascais, Padel Set Club Parede, Quinta dos Lombos Padel. Exact area Cascais selects four; Parede/Carcavelos select one each, Alcabideche selects two; an unreviewed city selects none. These source URLs are NOT availability. The extension uses an isolated temporary compact Chrome window to read each first-party club's normal UI, cleans its own window, returns only genuine personally observed date/court/start/duration/total EUR with official clean provider club link. Per-club failures are independent; empty or inaccessible UI is not "sold out." Four club requests form ONE on-demand action, with a 60-second replay cooldown; no background polling, provider/club API, credentials, booking or payment.
+
+Old v0.4.0 one-club code is preserved in Git history but v0.4.1 is intended target. Browser unit/CI tests are FICTIONAL and do not establish real player login, prices or full-market coverage. Other platform client adapters still lack authenticated live acceptance, and protected staging is still on the prior approved v0.3.0 exact SHA until a new stage receipt explicitly verifies v0.4.1. No public deployment or external outreach.
+
+---
+
 # GetACourt once-per-provider login / persistent player-side search — 29 October 2026
 
 **OWNER ACCEPTANCE RULE:** After one normal provider login and one Chrome site-access permission, subsequent GetACourt Find searches must run automatically through that player's own ordinary provider browser session. No repeated extension button clicks, tab approvals, Reader searches, clipboard, copy/paste or user-driven transfers. This supersedes v0.2.5 as the target user experience.

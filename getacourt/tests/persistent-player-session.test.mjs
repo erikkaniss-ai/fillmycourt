@@ -103,6 +103,8 @@ test('site permission is optional and Get relay is limited to the exact protecte
     'https://racket.id/*','https://smashpro.pt/*','https://www.matchi.se/*'
   ]);
   assert.equal(manifest.host_permissions,undefined);
+  assert.equal(manifest.version,'0.4.1');
+  assert.match(script,/const VERSION="0\.4\.1"/);
   assert.equal(manifest.externally_connectable,undefined);
   assert.deepEqual(manifest.content_scripts.map(x=>x.matches),[[getPage]]);
   assert.match(readFileSync(new URL('popup.js',base),'utf8'),/chrome\.permissions\.request/);
