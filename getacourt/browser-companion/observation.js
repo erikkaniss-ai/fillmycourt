@@ -1,10 +1,17 @@
-// Strict local validation for the opt-in Playtomic companion response.
-// This is not a provider adapter: it accepts no credentials, makes no network
-// requests, and rejects every provider other than the companion's one narrow UI
-// observation format.
+// Strict local player-observation contract for named official booking sites.
+// This is NOT provider access: no credentials, network requests, hidden API,
+// booking writes or inferred availability; ordinary user-visible offers only.
 (function(root) {
   "use strict";
-  const SOURCE_URL = /^https:\/\/playtomic\.com\/clubs\/[a-z0-9-]+$/;
+  // Per-provider routes represent individual player-visible booking surfaces.
+  // Directory or club-admin pages do NOT become priced inventory by themselves.
+  const SOURCE_URLS = Object.freeze({
+    playtomic:/^https:\/\/playtomic\.com\/clubs\/[a-z0-9-]+$/,
+    tiesports:/^https:\/\/clubs\.tiesports\.com\/(?:en|pt)\/[A-Za-z0-9-]+\/[A-Za-z0-9-]+$/,
+    racket_id:/^https:\/\/racket\.id\/booking$/,
+    smashpro:/^https:\/\/smashpro\.pt\/pt\/c\/[a-z0-9-]+$/,
+    matchi:/^https:\/\/www\.matchi\.se\/facilities\/[a-z0-9_-]+$/
+  });
   const DATE = /^\d{4}-\d{2}-\d{2}$/;
   const TIME_LABEL = /^(?:[1-9]|1[0-2]):[0-5]\d [AP]M$/;
   const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -45,8 +52,8 @@
 
   function validateObservation(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw Error("Invalid source observation.");
-    if (value.source !== "user_ui_observation" || value.provider !== "playtomic" ||
-        typeof value.sourceUrl !== "string" || !SOURCE_URL.test(value.sourceUrl) ||
+    if (value.source !== "user_ui_observation" || !Object.hasOwn(SOURCE_URLS,value.provider) ||
+        typeof value.sourceUrl !== "string" || !SOURCE_URLS[value.provider].test(value.sourceUrl) ||
         value.timezone !== null || value.sourceFreshness !== "unknown" ||
         value.coverage !== "expanded_offers_only")
       throw Error("Unapproved source observation.");
@@ -56,7 +63,7 @@
     if (!Array.isArray(value.offers) || value.offers.length < 1 || value.offers.length > 20)
       throw Error("Invalid observed offer count.");
     return Object.freeze({
-      provider:"playtomic", source:"user_ui_observation", sourceUrl:value.sourceUrl,
+      provider:value.provider, source:"user_ui_observation", sourceUrl:value.sourceUrl,
       venue, date, sport:value.sport, capturedAt:instant(value.capturedAt),
       timezone:null, sourceFreshness:"unknown", coverage:"expanded_offers_only",
       offers:Object.freeze(value.offers.map(offer))

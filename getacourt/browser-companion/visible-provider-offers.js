@@ -40,7 +40,7 @@
     // Reject partial per-player prices and plural price candidates. Only an
     // explicit sole EUR total from a directly actionable court row is valid.
     if(/\bper\s+(?:player|person)|por\s+(?:jogador|pessoa)|\/pessoa\b/i.test(line))return null;
-    const prices=[...line.matchAll(/(?:€\s*(\d{1,4})(?:[,.](\d{2}))?|(\d{1,4})(?:[,.](\d{2}))?\s*€)/g)];
+    const prices=[...line.matchAll(/(?:€\s*(\d{1,4})(?:[,.](\d{2}))?|(?<![\d:])(\d{1,4})(?:[,.](\d{2}))?\s*€)/g)];
     if(prices.length!==1)return null;
     const m=prices[0],euros=Number(m[1]||m[3]),cents=Number(m[2]||m[4]||"0");
     const priceMinor=euros*100+cents;

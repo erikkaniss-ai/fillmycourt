@@ -1,7 +1,6 @@
-// Strict local validation for the opt-in Playtomic companion response.
-// This is not a provider adapter: it accepts no credentials, makes no network
-// requests, and rejects every provider other than the companion's one narrow UI
-// observation format.
+// Strict local player-observation contract for named official booking sites.
+// This is NOT provider access: no credentials, network requests, hidden API,
+// booking writes or inferred availability; ordinary user-visible offers only.
 (function(root) {
   "use strict";
   // Per-provider routes represent individual player-visible booking surfaces.
