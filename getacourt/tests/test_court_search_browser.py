@@ -97,6 +97,8 @@ def test_unified_demo_map_list_keyboard_and_display_filters_without_provider_rea
     expect(page.locator('#offers .card:focus')).to_have_count(1)
     page.locator('#searchOrigin').select_option('demo')
     expect(page.locator('#offers')).to_contain_text('km · DEMO')
+    page.locator('#offers .card').first.get_by_role('button',name='Show on map').click()
+    expect(page.locator('.leaflet-popup-content')).to_contain_text('km straight-line · DEMO')
     page.locator('#radiusFilter').select_option('2')
     expect(page.locator('#offers .card')).to_have_count(2)
     page.locator('#budgetFilter').select_option('30')

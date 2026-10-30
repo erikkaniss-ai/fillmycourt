@@ -131,11 +131,13 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
       pin.append(doc.createTextNode(money(lowest)));
       const marker=globalThis.L.marker([row.position.lat,row.position.lon],{
         icon:globalThis.L.divIcon({html:pin,className:'price-pin',iconSize:[84,row.demo?49:35],iconAnchor:[42,20]}),
-        keyboard:true,title:(row.demo?'DEMO · Fictional · ':'')+row.o.clubName+' · from '+money(lowest)
+        keyboard:true,title:(row.demo?'DEMO · Fictional · ':'')+row.o.clubName+' · from '+money(lowest)+
+          (row.distance===null?'':' · '+row.distance.toFixed(1)+' km straight-line')
       }).addTo(layer);
       const popup=make('div');
       if(row.demo)popup.append(make('span','DEMO · Fictional availability','popup-demo'));
       popup.append(make('strong',row.o.clubName));
+      if(row.distance!==null)popup.append(make('div',row.distance.toFixed(1)+' km straight-line'+(row.demo?' · DEMO':'')));
       for(const item of group.slice(0,3))popup.append(make('div',item.o.startLabel+' · '+item.o.duration+' min · '+money(item.o.priceMinor)));
       const action=make('button','View court details');action.type='button';action.addEventListener('click',()=>select(row,{fromMap:true}));popup.append(action);
       marker.bindPopup(popup);marker.on('click',()=>select(row,{fromMap:true}));
