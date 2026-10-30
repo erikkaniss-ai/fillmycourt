@@ -16,7 +16,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const artifactDir=process.env.GAC_INTEGRATION_ARTIFACT_DIR;
 if(artifactDir)await mkdir(artifactDir,{recursive:true});
 const MIME={".js":"text/javascript; charset=utf-8",".html":"text/html; charset=utf-8",
-  ".css":"text/css; charset=utf-8",".mjs":"text/javascript; charset=utf-8",".webmanifest":"application/manifest+json",".png":"image/png"};
+  ".css":"text/css; charset=utf-8",".mjs":"text/javascript; charset=utf-8",".txt":"text/plain; charset=utf-8",".webmanifest":"application/manifest+json",".png":"image/png"};
 
 function sendJson(res,status,obj){
   res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});
@@ -40,7 +40,7 @@ const server=createServer(async(req,res)=>{
   }
   const requested=url.pathname==="/"?"/index.html":url.pathname;
   const relative=requested.slice(1);
-  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|federated-search\.mjs|source-catalog\.mjs|personal-source-observation\.js|personal-observation-bridge\.mjs|federated-search\.css))$/.test(relative)){
+  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|federated-search\.mjs|source-catalog\.mjs|personal-source-observation\.js|personal-observation-bridge\.mjs|federated-search\.css|player-search-view\.mjs|player-search\.css|leaflet-1\.9\.4\.(?:js|css)|leaflet-1\.9\.4-LICENSE\.txt))$/.test(relative)){
     sendJson(res,404,{error:"NOT_FOUND"});return;
   }
   try{
@@ -65,6 +65,12 @@ try{
     page.on("pageerror",error=>errors.push(error.message));
     await page.route("**/*",async route=>{
       const url=new URL(route.request().url());
+      if(route.request().resourceType()==='image'&&url.origin==='https://tile.openstreetmap.org'&&
+        /^\/\d{1,2}\/\d{1,7}\/\d{1,7}\.png$/.test(url.pathname)&&!url.search&&!url.hash){
+        await route.fulfill({status:200,contentType:'image/png',headers:{'access-control-allow-origin':'*'},
+          body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII=','base64')});
+        return;
+      }
       if(url.origin!==origin){
         blocked.push(url.host);
         await route.abort("blockedbyclient");
