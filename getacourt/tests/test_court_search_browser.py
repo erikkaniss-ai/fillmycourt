@@ -114,6 +114,10 @@ def test_unified_demo_map_list_keyboard_and_display_filters_without_provider_rea
     assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
     assert forbidden==[]
     Path(ROOT/'test-artifacts').mkdir(exist_ok=True)
+    # Full-page capture must start at the entry scroll position; otherwise a
+    # fixed offscreen skip link can be composited into the middle of the image.
+    page.evaluate('() => { document.activeElement?.blur(); window.scrollTo(0,0); }')
+    page.evaluate('() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))')
     page.screenshot(path=str(ROOT/f'test-artifacts/unified-map-demo-{width}-FICTIONAL.png'),full_page=True)
     page.get_by_role('button',name='Your sessions',exact=True).click()
     expect(page.locator('#offers .card')).to_have_count(0)
