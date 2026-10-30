@@ -6,7 +6,9 @@ export const RECEIVER='https://get-pr5-reader-uat--getacourt-preview.netlify.app
 const REPO='erikkaniss-ai/fillmycourt';
 const SHA=/^[a-f0-9]{40}$/;
 export const FILES=['source-catalog.mjs','federated-search.mjs','court-search-page.mjs',
-  'personal-source-observation.js','personal-observation-bridge.mjs','federated-search.css'];
+  'personal-source-observation.js','personal-observation-bridge.mjs','federated-search.css',
+  'player-search-view.mjs','player-search.css','leaflet-1.9.4.js','leaflet-1.9.4.css','leaflet-1.9.4-LICENSE.txt'];
+export const CONTENT_SECURITY_POLICY="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
 export function approved(pr,sha){
   const marks=[...(pr?.body??'').matchAll(/<!-- GET_STAGING_UAT_APPROVED_SHA:([a-f0-9]{40}) -->/g)];
   return SHA.test(sha??'')&&pr?.number===5&&pr.state==='open'&&pr.draft===true&&
@@ -60,7 +62,7 @@ async function prepare(){
   await writeFile(join(output,'preview-build.json'),JSON.stringify({kind:'GET_READER_STATIC_UAT',source_sha:sha,site_id:SITE,functions:0,provider_requests:0}));
   await writeFile(join(output,'_redirects'),'/ /find.html 302\n/index.html /find.html 302\n');
   await writeFile(join(output,'netlify.toml'),'[build]\npublish = "."\n[functions]\ndirectory = "functions"\n');
-  await writeFile(join(output,'_headers'),"/*\n  X-Robots-Tag: noindex, nofollow, noarchive\n  Cache-Control: private, no-store\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  X-Frame-Options: DENY\n  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'\n");
+  await writeFile(join(output,'_headers'),"/*\n  X-Robots-Tag: noindex, nofollow, noarchive\n  Cache-Control: private, no-store\n  Referrer-Policy: no-referrer\n  X-Content-Type-Options: nosniff\n  X-Frame-Options: DENY\n  Content-Security-Policy: "+CONTENT_SECURITY_POLICY+"\n");
   console.log('Static Reader package prepared: no server functions, native booking UI or secrets.');
 }
 async function verify(){

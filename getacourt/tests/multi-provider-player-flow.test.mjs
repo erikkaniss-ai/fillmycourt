@@ -6,6 +6,7 @@ import vm from "node:vm";
 import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {normalizePersonalObservation} from "../assets/personal-observation-bridge.mjs";
+import {demoOffers,displayRows,distanceKm,originFor,TRUSTED_POSITION} from '../assets/player-search-view.mjs';
 const require=createRequire(import.meta.url);
 const validate=require("../assets/personal-source-observation.js").validateObservation;
 const base=new URL("../browser-companion/",import.meta.url);
@@ -207,35 +208,95 @@ test("no provider is searched without an explicit Get Find gesture, no repeated 
 function pageRig(){
   const pageQuery={...q,location:'Cascais'},handlers={},posted=[],nodes=new Map(),timers=new Map();
   let nextTimer=0,nonceByte=0;
-  const element=()=>({children:[],events:{},value:'',textContent:'',
+  const element=()=>({children:[],events:{},dataset:{},attributes:{},value:'',textContent:'',
+    classList:{toggle(){},add(){}},focus(){},scrollIntoView(){},
+    setAttribute(name,value){this.attributes[name]=value;},
     append(...items){this.children.push(...items);},
     replaceChildren(...items){this.children=items;},
     addEventListener(name,fn){this.events[name]=fn;}});
   const node=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
   node('search').elements={namedItem:()=>node('date')};
+  node('search').requestSubmit=()=>node('search').events.submit({preventDefault(){}});
+  node('budgetFilter').value=node('radiusFilter').value='any';node('offerSort').value='time';
   const context=vm.createContext({Date,URL,Intl,TextEncoder,Uint8Array,JSON,
     normalizePersonalObservation,validateQuery:value=>value,localDay:()=>date,
     FormData:class extends Map {constructor(){super(Object.entries(pageQuery));}},
     crypto:{getRandomValues:array=>array.fill(++nonceByte)},
     setTimeout:(fn,delay)=>{timers.set(++nextTimer,{fn,delay});return nextTimer;},
     clearTimeout:id=>timers.delete(id),
-    document:{getElementById:node,createElement:element,documentElement:{dataset:{}},addEventListener(){}},
+    document:{getElementById:node,createElement:element,createTextNode:text=>({...element(),textContent:text}),documentElement:{dataset:{}},addEventListener(){}},
+    Option:class{constructor(text,value){Object.assign(this,element(),{textContent:text,value});}},
     window:{addEventListener:(name,fn)=>handlers[name]=fn,dispatchEvent:event=>posted.push(event)},
     CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},
     GetACourtPersonalSourceObservation:{validateObservation:validate}
   });
   const page=readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
+  const view=readFileSync(new URL('../assets/player-search-view.mjs',import.meta.url),'utf8');
+  vm.runInContext(view.replace(/^export /gm,''),context);
   vm.runInContext(page.replace(/^import .*;\r?$/gm,''),context);
   const find=()=>{
     node('search').events.submit({preventDefault(){}});
-    return posted.findLast(e=>e.type==='gac:additional-sources-request').detail.nonce;
+    return posted.findLast(e=>e.type==='gac:additional-sources-request')?.detail.nonce;
   };
   const respond=(nonce,result,type='gac:additional-sources-response')=>handlers[type]({detail:{nonce,result}});
   const text=el=>[el.textContent,...el.children.map(text)].join(' ');
   const expire=()=>{for(const {fn,delay} of [...timers.values()])if(delay===45000)fn();};
   const ack=nonce=>handlers['gac:auto-search-accepted']({detail:{nonce}});
-  return {find,respond,node,text:id=>text(node(id)),timers,expire,ack};
+  return {find,respond,node,text:id=>text(node(id)),timers,expire,ack,posted};
 }
+
+test('demo mode cancels real nonces, dispatches no provider search and cannot accept late real offers',()=>{
+  const p=pageRig(),nonce=p.find(),before=p.posted.length;
+  p.node('demoMode').events.click();
+  assert.equal(p.posted.length,before);
+  assert.match(p.text('offers'),/DEMO.*FICTIONAL AVAILABILITY/);
+  assert.doesNotMatch(p.text('offers'),/Continue on Playtomic/);
+  p.respond(nonce,{status:'observed',version:'0.4.2',observation:pageObservation('playtomic')},'gac:auto-search-response');
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  assert.match(p.text('sourceStatus'),/DEMO.*No provider search/);
+  p.node('realMode').events.click();
+  assert.doesNotMatch(p.text('offers'),/Solis|Dune|Azul/);
+  assert.equal(p.posted.length,before);
+  p.respond(nonce,{status:'observed',version:'0.4.2',observation:pageObservation('playtomic')},'gac:auto-search-response');
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  assert.equal(p.node('requestPersonalBridge').disabled,true);
+});
+
+test('display model isolates fictional data, expires real rows, deduplicates and maps only reviewed venue/source pairs',()=>{
+  const query={...q,location:'Cascais',duration:'any'},examples=demoOffers(query);
+  assert.equal(examples.length,6);
+  assert.ok(examples.every(r=>r.demo&&r.position.fictional&&r.o.sourceUrl===null));
+  assert.equal(displayRows(examples,{mode:'real'}).length,0);
+  const o={...examples[0].o,sourceId:'playtomic',sourceUrl:TRUSTED_POSITION.sourceUrl,clubName:TRUSTED_POSITION.venue};
+  const record={o,captured:new Date().toISOString(),expires:new Date(Date.now()+30000).toISOString()};
+  const rows=displayRows([record,record]);
+  assert.equal(rows.length,1);assert.equal(rows[0].position,TRUSTED_POSITION);
+  assert.equal(displayRows([record],{mode:'demo'}).length,0);
+  assert.equal(displayRows([{...record,expires:new Date(Date.now()-1).toISOString()}]).length,0);
+  assert.equal(displayRows([{...record,o:{...o,sourceUrl:'https://racket.id/booking'}}])[0].position,null);
+  assert.equal(displayRows([{...record,o:{...o,clubName:'Unreviewed club',lat:1,lon:1}}])[0].position,null);
+});
+
+test('distance needs an explicit matching-mode origin; budget and radius do not invent unknown positions',()=>{
+  assert.equal(distanceKm(null,TRUSTED_POSITION),null);
+  assert.equal(distanceKm({lat:0,lon:0},{lat:0,lon:1}).toFixed(3),'111.195');
+  assert.equal(originFor('real','demo'),null);assert.equal(originFor('demo','nature'),null);
+  const rows=demoOffers({...q,location:'Cascais',duration:'any'}),origin=originFor('demo','demo');
+  assert.ok(displayRows(rows,{mode:'demo',origin,budget:'30'}).every(r=>r.o.priceMinor<=3000));
+  const near=displayRows(rows,{mode:'demo',origin,radius:'2'});
+  assert.ok(near.length>0&&near.length<rows.length);assert.ok(near.every(r=>r.distance<=2));
+  const nearest=displayRows(rows,{mode:'demo',origin,sort:'distance'});
+  assert.ok(nearest.every((r,i)=>i===0||r.distance>=nearest[i-1].distance));
+  const unknown={o:{...rows[0].o,sourceId:'racket_id',sourceUrl:source2},expires:new Date(Date.now()+30000).toISOString()};
+  assert.equal(displayRows([unknown],{origin:originFor('real','nature'),radius:'25'}).length,0);
+});
+
+test('fictional examples obey sport, duration, place and time filters with no invented coverage',()=>{
+  assert.equal(demoOffers({...q,location:'Unknown city'}).length,0);
+  const tennis=demoOffers({...q,location:'Cascais',sport:'tennis',duration:'60'});
+  assert.equal(tennis.length,1);assert.equal(tennis[0].o.duration,60);
+  assert.equal(demoOffers({...q,location:'Cascais',from:'22:00',to:'23:00'}).length,0);
+});
 
 test('page exposes top-level additional failure and genuinely returned version without raw exception data',()=>{
   for(const result of [
@@ -272,7 +333,7 @@ test('additional top-level failure preserves an independent valid Playtomic offe
   p.respond(nonce,{status:'observed',observation,version:'0.4.2'},'gac:auto-search-response');
   assert.match(p.text('offers'),/FICTIONAL Court 1/);
   const card=p.node('offers').children[0];
-  assert.equal(card.children.at(-1).href,observation.sourceUrl);
+  assert.equal(card.children.find(c=>c.href)?.href,observation.sourceUrl);
   p.respond(nonce,{status:'unavailable',code:'READ_FAILED',version:'0.4.2'});
   assert.match(p.text('offers'),/FICTIONAL Court 1/);
   assert.equal(p.node('offers').children[0],card);
@@ -321,7 +382,7 @@ test('an earlier legacy error cannot discard a later compatible successful reply
       {status:'partial',sources:[{provider,status:'observed',observation}]};
     p.respond(nonce,{...success,version:'0.4.2'},event);
     assert.match(p.text('offers'),/FICTIONAL compatible court/);
-    assert.equal(p.node('offers').children[0].children.at(-1).href,observation.sourceUrl);
+    assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,observation.sourceUrl);
     const settled=p.text('sourceStatus');
     p.respond(nonce,{status:'unavailable',code:'REQUEST_REJECTED',version:'0.2.3'},event);
     assert.equal(p.text('sourceStatus'),settled);
@@ -396,5 +457,5 @@ test('the first compatible failure settles its group while another compatible so
   assert.equal(p.text('personalStatus'),primary);
   p.respond(nonce,{status:'partial',sources:[{provider:'racket_id',status:'observed',observation}],version:'0.4.2'});
   assert.match(p.text('offers'),/FICTIONAL compatible court/);
-  assert.equal(p.node('offers').children[0].children.at(-1).href,source2);
+  assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,source2);
 });

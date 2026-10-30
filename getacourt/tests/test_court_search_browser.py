@@ -37,7 +37,7 @@ def ready(page, context, base):
     return sample(page)
 
 
-@pytest.mark.parametrize('width', [320,390,1440])
+@pytest.mark.parametrize('width', [320,390,768,1440])
 def test_player_observation_produces_a_real_client_only_result_and_official_handoff(browser_page,fixture_url,width):
     page,context,forbidden,_=browser_page
     page.set_viewport_size({'width':width,'height':900})
@@ -60,6 +60,118 @@ def test_player_observation_produces_a_real_client_only_result_and_official_hand
     assert forbidden==[]
     Path(ROOT/'test-artifacts').mkdir(exist_ok=True)
     page.screenshot(path=str(ROOT/f'test-artifacts/player-search-{width}-FICTIONAL.png'),full_page=True)
+
+
+@pytest.mark.parametrize('width',[320,390,768,1440])
+def test_unified_demo_map_list_keyboard_and_display_filters_without_provider_reads(browser_page,fixture_url,width):
+    page,context,forbidden,_=browser_page
+    context.request.get(fixture_url+'/__fixture?mode=direct')
+    page.set_viewport_size({'width':width,'height':900})
+    page.goto(fixture_url+'/find.html')
+    expect(page.locator('#realMode')).to_have_attribute('aria-pressed','true')
+    expect(page.locator('#demoBanner')).to_be_hidden()
+    expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    page.evaluate("""() => {
+      window.qaProviderDispatches=[];
+      for(const name of ['gac:auto-search-request','gac:additional-sources-request'])
+        window.addEventListener(name,e=>window.qaProviderDispatches.push(e.detail.query));
+    }""")
+    page.get_by_role('button',name='Explore demo',exact=True).click()
+    expect(page.locator('#demoBanner')).to_be_visible()
+    expect(page.locator('#offers .card')).to_have_count(6)
+    expect(page.locator('[data-result-pin]')).to_have_count(3)
+    assert page.locator('#offers a').count()==0
+    assert page.locator('[data-offer-kind="real"]').count()==0
+    for badge in page.locator('#offers .badge').all():
+        expect(badge).to_contain_text('DEMO')
+    for pin in page.locator('[data-result-pin]').all():
+        expect(pin).to_contain_text('DEMO')
+    assert page.evaluate('window.qaProviderDispatches')==[]
+    page.locator('#offers .card').first.get_by_role('button',name='Show on map').click()
+    expect(page.locator('#offers .card.selected')).to_have_count(1)
+    expect(page.locator('[data-result-pin].selected')).to_have_count(1)
+    # Leaflet keyboard activation must lead to an accessible corresponding card.
+    page.locator('[data-result-pin]').last.focus()
+    page.keyboard.press('Enter')
+    expect(page.locator('#offers .card:focus')).to_have_count(1)
+    page.locator('#searchOrigin').select_option('demo')
+    expect(page.locator('#offers')).to_contain_text('km · DEMO')
+    page.locator('#radiusFilter').select_option('2')
+    expect(page.locator('#offers .card')).to_have_count(2)
+    page.locator('#budgetFilter').select_option('30')
+    expect(page.locator('#offers .card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('€28.00')
+    assert page.evaluate('window.qaProviderDispatches')==[]
+    page.locator('#radiusFilter').select_option('any')
+    page.locator('#budgetFilter').select_option('any')
+    page.locator('#offerSort').select_option('price')
+    expect(page.locator('#offers .card').first).to_contain_text('€24.00')
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+    assert page.evaluate('localStorage.length + sessionStorage.length')==0
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
+    Path(ROOT/'test-artifacts').mkdir(exist_ok=True)
+    page.screenshot(path=str(ROOT/f'test-artifacts/unified-map-demo-{width}-FICTIONAL.png'),full_page=True)
+    page.get_by_role('button',name='Your sessions',exact=True).click()
+    expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#demoBanner')).to_be_hidden()
+    assert page.evaluate('window.qaProviderDispatches')==[]
+
+
+def test_real_ttl_clears_map_cards_and_late_reply_cannot_cross_demo_boundary(browser_page,fixture_url):
+    page,context,_,_=browser_page
+    record=ready(page,context,fixture_url)
+    record['capturedAt']=(datetime.now(timezone.utc)-timedelta(seconds=57)).isoformat(timespec='milliseconds').replace('+00:00','Z')
+    page.locator('#personalPayload').fill(json.dumps(record))
+    page.get_by_role('button',name='Compare pasted offers').click()
+    expect(page.locator('#offers .card')).to_have_count(1)
+    expect(page.locator('[data-result-pin]')).to_have_count(1)
+    expect(page.locator('#offers .card')).to_have_count(0,timeout=6000)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    page.evaluate("""() => {
+      window.addEventListener('gac:auto-search-request',e=>window.qaOldNonce=e.detail.nonce);
+    }""")
+    page.get_by_role('button',name='Find courts',exact=True).click()
+    record=sample(page)
+    page.get_by_role('button',name='Explore demo',exact=True).click()
+    page.evaluate("""record => window.dispatchEvent(new CustomEvent('gac:auto-search-response',{
+      detail:{nonce:window.qaOldNonce,result:{status:'observed',version:'0.4.2',observation:record}}
+    }))""",record)
+    assert page.locator('[data-offer-kind="real"]').count()==0
+    expect(page.locator('#offers')).not_to_contain_text('FICTIONAL COURT 1')
+    page.get_by_role('button',name='Your sessions',exact=True).click()
+    expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+
+
+def test_osm_image_fixture_receives_origin_only_and_no_credentials_or_location_request(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    seen=[]
+    context.add_cookies([{'name':'qa_osm_cookie','value':'NEVER_SEND','url':'https://tile.openstreetmap.org'}])
+    page.on('request',lambda request:seen.append(request) if request.url.startswith('https://tile.openstreetmap.org/') else None)
+    page.add_init_script("""window.qaLocationCalls=0;
+      Object.defineProperty(navigator,'geolocation',{configurable:true,value:{
+        getCurrentPosition:(success,error)=>{window.qaLocationCalls++;error({code:1,message:'denied in fixture'});}
+      }});""")
+    page.goto(fixture_url+'/find.html?qa_private_query=NEVER_SEND')
+    expect(page.locator('.leaflet-tile-loaded').first).to_be_visible()
+    assert seen
+    for request in seen:
+        headers=request.all_headers()
+        assert headers.get('referer')==fixture_url+'/'
+        assert 'cookie' not in headers and 'authorization' not in headers
+        assert 'NEVER_SEND' not in str(headers)
+    assert page.evaluate('window.qaLocationCalls')==0
+    expect(page.locator('#radiusFilter')).to_be_disabled()
+    assert page.locator('.site-header a[href="index.html"]').count()==0
+    assert page.locator('script[src="assets/app.js"]').count()==0
+    assert page.evaluate("Array.from(new FormData(document.getElementById('search')).keys()).sort()")==['date','duration','from','location','sport','to']
+    page.get_by_role('link',name='GetACourt home',exact=True).click()
+    assert page.url==fixture_url+'/find.html'
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
 
 
 def test_exact_nonce_and_page_ack_are_required_before_direct_extension_handoff(browser_page,fixture_url):

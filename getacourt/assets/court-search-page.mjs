@@ -2,6 +2,7 @@
 import {validateQuery,localDay} from './federated-search.mjs';
 import './personal-source-observation.js';
 import {normalizePersonalObservation} from './personal-observation-bridge.mjs';
+import {createPlayerSearchView,demoOffers} from './player-search-view.mjs';
 const byId=id=>document.getElementById(id);
 const form=byId('search'),status=byId('searchStatus'),personalStatus=byId('personalStatus');
 const offersHost=byId('offers'),sourcesHost=byId('sourceStatus'),payload=byId('personalPayload');
@@ -11,8 +12,10 @@ date.max=new Date(Date.parse(today+'T00:00:00Z')+14*86400000).toISOString().slic
 let query=null,revision=0,pendingBridge=null,pendingAuto=null,autoAckTimer=null,autoResultTimer=null,timer=null,additionalPending=null,additionalTimer=null;
 const additionalStates=new Map();
 const observations=new Map();
+let mode='real',demoRows=[];
 const make=(tag,label,cls)=>{const el=document.createElement(tag);if(label!==undefined)el.textContent=String(label);if(cls)el.className=cls;return el;};
-const allowed=()=>Boolean(query);
+const allowed=()=>mode==='real'&&Boolean(query);
+const view=createPlayerSearchView({onFilterChange:()=>paint()});
 function clearPending(){
   pendingBridge=null;
   delete document.documentElement.dataset.gacPersonalBridgeRequest;
@@ -80,7 +83,7 @@ function autoError(result){
   })[code]||'This provider search could not be verified ('+readerCode(result)+'). Check the Playtomic page or connection.';
 }
 function startAutomaticSearch(){
-  if(!query)return;
+  if(!query||mode!=='real')return;
   const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
   const incompatible=new Map(); // At most three versions across BOTH groups.
   const request={nonce,query,revision,acked:false,incompatible,group:'playtomic',unsupported:false};
@@ -228,8 +231,8 @@ window.addEventListener('gac:additional-sources-response',event=>{
 
 function clearOffers(message){
   revision++;clearPending();cancelAuto();cancelAdditional();additionalStates.clear();clearTimeout(timer);timer=null;
-  observations.clear();payload.value='';
-  offersHost.replaceChildren(make('p','No fresh personal offers yet.','empty'));
+  observations.clear();demoRows=[];payload.value='';
+  view.render([],{mode});
   personalStatus.textContent=message||'No personal offers imported.';
   renderSources();
 }
@@ -246,7 +249,7 @@ function minute(value){
 function renderSources(){
   sourcesHost.replaceChildren();
   const has=id=>[...observations.values()].some(record=>record.sourceId===id);
-  const text=(id,initial)=>has(id)?'Player-visible offer loaded · partial · expires shortly':
+  const text=(id,initial)=>mode==='demo'?'DEMO · No provider search; fictional examples only':has(id)?'Player-visible offer loaded · partial · expires shortly':
     additionalStates.get(id)||(id!=='playtomic'&&additionalStates.get('additional'))||initial;
   const names=[
     ['Playtomic',text('playtomic','One login for up to four reviewed Cascais-area clubs per Find; additional areas are not verified')],
@@ -265,25 +268,11 @@ function paint(){
   clearTimeout(timer);
   const now=Date.now();
   for(const [key,v] of observations)if(Date.parse(v.expiresAt)<=now)observations.delete(key);
-  const rows=[...observations.values()].flatMap(v=>v.offers.map(o=>({o,captured:v.capturedAt,expires:v.expiresAt})))
+  const rows=mode==='demo'?demoRows:[...observations.values()].flatMap(v=>v.offers.map(o=>({o,captured:v.capturedAt,expires:v.expiresAt})))
     .sort((a,b)=>minute(a.o.startLabel)-minute(b.o.startLabel)||
       a.o.priceMinor-b.o.priceMinor||a.o.clubName.localeCompare(b.o.clubName));
-  offersHost.replaceChildren();
-  for(const {o,captured} of rows){
-    const card=make('article',undefined,'card');
-    const names={playtomic:'Playtomic',tiesports:'TiePlayer / TieSports',racket_id:'Racket ID',
-      smashpro:'Smashpro',matchi:'MATCHi'};
-    card.append(make('span',(names[o.sourceId]||'Unknown source')+' · personally observed · partial','badge'),
-      make('h3',o.clubName),make('p','Court: '+o.courtName),
-      make('p',o.date+' · '+o.startLabel+'–'+o.endLabel+' · '+o.duration+' min'),
-      make('p',new Intl.NumberFormat('en-IE',{style:'currency',currency:'EUR'}).format(o.priceMinor/100),'price'),
-      make('small','Observed '+captured+' UTC · provider freshness/timezone unknown · not reserved'));
-    const a=make('a','Continue on '+(names[o.sourceId]||'official provider')+' (recheck availability)');
-    a.href=o.sourceUrl;a.target='_blank';a.rel='noopener noreferrer';
-    card.append(a);offersHost.append(card);
-  }
-  if(!rows.length)offersHost.append(make('p','No fresh personally observed offers. Other courts may be available.','empty'));
-  personalStatus.textContent=rows.length
+  view.render(rows,{mode});
+  personalStatus.textContent=mode==='demo'?'DEMO · Fictional availability only. No provider session was read.':rows.length
     ? rows.length+' personally observed offer(s) · incomplete coverage · original provider must recheck the booking.'
     : 'No fresh personal offers. Search the club again if the earlier report has expired.';
   renderSources();
@@ -316,6 +305,18 @@ function importPersonal(raw,expectedQuery,expectedRevision){
   }
 }
 renderSources();
+view.render([],{mode});
+function changeMode(next){
+  if(next===mode)return;
+  mode=next;
+  // A mode boundary is also a privacy/query boundary. Late real replies lose
+  // their pending nonce/revision before any fictional example is rendered.
+  reset(mode==='demo'?'Preparing fictional demo examples…':'Your sessions selected. Press Find courts for a new personal search.');
+  view.setMode(mode);
+  if(mode==='demo')form.requestSubmit();
+}
+byId('realMode').addEventListener('click',()=>changeMode('real'));
+byId('demoMode').addEventListener('click',()=>changeMode('demo'));
 form.addEventListener('input',()=>reset('Filters changed. Press Find courts to prepare a new personal search.'));
 form.addEventListener('change',()=>reset('Filters changed. Press Find courts to prepare a new personal search.'));
 form.addEventListener('submit',event=>{
@@ -328,6 +329,11 @@ form.addEventListener('submit',event=>{
     status.textContent='Select a location, day within 14 days, sport, and valid start-time range.';return;
   }
   query=next;
+  if(mode==='demo'){
+    demoRows=demoOffers(next);paint();
+    status.textContent='DEMO · '+demoRows.length+' fictional offer(s). No provider search or booking is available.';
+    return;
+  }
   byId('requestPersonalBridge').disabled=false;
   byId('comparePersonal').disabled=false;
   status.textContent='Searching reviewed clubs through your own first-party Playtomic browser session. No server inventory request was made.';

@@ -1,5 +1,7 @@
 """Actual browser + actual search handler, with fictional Core and no provider egress."""
 import os
+import re
+import base64
 import shutil
 import subprocess
 from pathlib import Path
@@ -33,6 +35,12 @@ def browser_page(fixture_url):
         def route_request(route):
             if route.request.url.startswith(fixture_url + "/"):
                 route.continue_()
+            elif (route.request.resource_type == 'image' and
+                  re.fullmatch(r'https://tile\.openstreetmap\.org/\d{1,2}/\d{1,7}/\d{1,7}\.png', route.request.url)):
+                # Deterministic blank image; NEVER contact OSM for automated QA.
+                # All provider/Core/other external traffic remains forbidden.
+                route.fulfill(status=200,content_type='image/png',headers={'access-control-allow-origin':'*'},body=base64.b64decode(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS1cAAAAASUVORK5CYII='))
             else:
                 forbidden.append(route.request.url)
                 route.abort()

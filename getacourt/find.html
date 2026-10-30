@@ -3,58 +3,61 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'">
-  <title>GetACourt — Personal court search</title>
-  <link rel="stylesheet" href="assets/federated-search.css">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://tile.openstreetmap.org; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'">
+  <title>GetACourt — Find your next court</title>
+  <link rel="stylesheet" href="assets/leaflet-1.9.4.css">
+  <link rel="stylesheet" href="assets/player-search.css">
+  <script src="assets/leaflet-1.9.4.js" defer></script>
   <script type="module" src="assets/court-search-page.mjs"></script>
 </head>
 <body>
 <a class="skip" href="#search">Skip to search</a>
-<header><a class="brand" href="index.html">GetACourt</a><span>Search once after login. Book with the official provider.</span></header>
+<header class="site-header">
+  <a class="brand" href="find.html" aria-label="GetACourt home"><span class="brand-mark" aria-hidden="true"><span></span></span><span>GetA<span>Court</span></span></a>
+  <nav aria-label="Main navigation"><a href="#results">Find a court</a><a href="#coverageHeading">Your sources</a></nav>
+  <span class="private-pill"><span aria-hidden="true">●</span> Private beta</span>
+</header>
 <main>
   <section class="intro" aria-labelledby="introHeading">
-    <p class="eyebrow">PERSONAL COURT SEARCH · PRIVATE BETA</p>
-    <h1 id="introHeading">Your courts. One place to compare.</h1>
-    <p>Search through a provider's normal player interface in your own browser profile. GetACourt shows only short-lived, explicitly observed offers and takes you to the official club to book.</p>
-    <p class="notice">Connect each booking provider once in this Chrome/Edge profile. Thereafter, Find courts initiates a search using your existing official Playtomic login. Only explicitly observed offers appear; an empty result never means clubs are sold out. No server API, booking or payment.</p>
+    <div><p class="eyebrow">YOUR NEXT GAME STARTS HERE</p><h1 id="introHeading">Less searching.<br> <span>More playing.</span></h1><p class="intro-copy">Your favourite booking platforms. One place to find your next court.</p></div>
+    <div class="intro-note"><span class="note-symbol" aria-hidden="true">↗</span><strong>Find here. Play out there.</strong><p>Compare fresh offers from your own player sessions. Finish on the official provider.</p></div>
   </section>
-  <form id="search" novalidate>
-    <label>City, area or exact club name<input name="location" value="Cascais" required maxlength="80" autocomplete="off"></label>
+  <div class="mode-bar">
+    <div class="mode-switch" role="group" aria-label="Search mode"><button id="realMode" type="button" aria-pressed="true">Your sessions</button><button id="demoMode" type="button" aria-pressed="false">Explore demo <span aria-hidden="true">↗</span></button></div>
+    <p id="modeNotice">REAL · Only fresh, personally observed offers. Availability is unverified until a source responds.</p>
+  </div>
+  <div id="demoBanner" class="demo-banner" hidden><strong>DEMO · Fictional clubs, map positions, times and prices.</strong><span>Explore the experience. Nothing here can be booked.</span></div>
+  <form id="search" class="search-panel" novalidate>
+    <label class="location-field">City, area or exact club name<input name="location" value="Cascais" required maxlength="80" autocomplete="off" placeholder="Where do you want to play?"></label>
     <label>Sport<select name="sport"><option value="padel">Padel</option><option value="tennis">Tennis</option></select></label>
     <label>Date<input name="date" type="date" required></label>
     <label>Starts from<input name="from" type="time" value="08:00" required></label>
     <label>Starts before<input name="to" type="time" value="23:00" required></label>
     <label>Duration<select name="duration"><option value="any">60 or 90 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label>
-    <button type="submit">Find courts</button>
+    <button type="submit" class="find-button">Find courts <span aria-hidden="true">↗</span></button>
   </form>
-  <p id="searchStatus" role="status" aria-live="polite">Set your filters and click Find courts. Your Playtomic account stays signed in within your own Chrome profile.</p>
-  <section aria-labelledby="connectionHeading">
-    <h2 id="connectionHeading">Connect Playtomic once</h2>
-    <ol>
-      <li>Install the GetACourt Reader extension v0.4.1 in Chrome/Edge once. In that same browser profile, <a href="https://playtomic.com/clubs/cascais-padel-club" target="_blank" rel="noopener noreferrer">open Playtomic</a> and sign in normally.</li>
-      <li>On an official Playtomic club page, click the GetACourt extension icon and choose <strong>Connect and open GetACourt</strong>. Approve Chrome's site-access request once. Your password and login cookies remain with Playtomic.</li>
-      <li>After that, use <strong>Find courts</strong>. Repeat this one-time connection for any additional supported player booking site you use. A provider may require its own login again if the session expires. If Playtomic requests a new login or security check, complete it on Playtomic itself.</li>
-    </ol>
-    <p class="notice">One Playtomic login can search up to four reviewed Cascais-area clubs per Find. Other providers only show a court when their ordinary client UI confirms a real date, duration and full price. Browser/extension must be running. Chrome may ask you to sign in again if Playtomic expires the session.</p>
-    <div class="personal-actions"><button id="clearPersonal" type="button">Clear results</button></div>
-    <p id="personalStatus" role="status" aria-live="polite">Enter search filters and click Find courts. GetACourt checks your existing provider session in this browser.</p>
-    <details><summary>Manual Reader troubleshooting (not needed for normal searches)</summary>
-      <p>If the automatic extension connection is unavailable, open Reader from its icon, search the club and choose Open GetACourt comparison. On this page choose Receive prepared Reader offers and deliver the prepared report from the extension icon.</p>
-      <div class="personal-actions"><button id="requestPersonalBridge" type="button" disabled>Receive prepared Reader offers</button></div>
-      <p>In the Reader select Copy observed offers. Paste only the sanitized report below. Never paste a password, token, cookie, account export or customer information.</p>
-      <label for="personalPayload">Sanitized Playtomic observed-offer report</label>
-      <textarea id="personalPayload" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="Paste the recent sanitized Reader report"></textarea>
-      <div class="personal-actions"><button id="comparePersonal" type="button" disabled>Compare pasted offers</button></div>
+  <div class="search-feedback"><div><p id="searchStatus" role="status" aria-live="polite">Choose your day. Find courts checks your connected player sessions.</p><p id="personalStatus" role="status" aria-live="polite">No fresh personal offers yet. Availability remains unverified.</p></div><button id="clearPersonal" type="button" class="quiet-button">Clear results</button></div>
+  <section id="results" class="results-section" aria-labelledby="offersHeading">
+    <div class="results-heading"><div><p class="eyebrow">A LITTLE CLOSER TO THE COURT</p><h2 id="offersHeading">Find your next court.</h2><p id="resultCount">No verified offers yet</p></div><div class="view-switch" role="group" aria-label="Results view"><button id="listView" type="button" aria-pressed="false">List</button><button id="mapView" type="button" aria-pressed="false">Map</button><button id="splitView" type="button" aria-pressed="true">Both</button></div></div>
+    <div class="result-filters" aria-label="Filter displayed results">
+      <label>Starting place<select id="searchOrigin"><option value="">Choose a starting place</option><option value="nature">Cascais Padel &amp; Nature</option></select></label>
+      <label>Within<select id="radiusFilter" disabled><option value="any">Any distance</option><option value="2">2 km</option><option value="5">5 km</option><option value="10">10 km</option><option value="25">25 km</option></select></label>
+      <label>Court budget<select id="budgetFilter"><option value="any">Any price</option><option value="30">Up to €30</option><option value="40">Up to €40</option><option value="60">Up to €60</option></select></label>
+      <label>Sort by<select id="offerSort"><option value="time">Earliest first</option><option value="price">Lowest price</option><option value="distance">Nearest first</option></select></label>
+    </div>
+    <p id="originNote" class="filter-note">Choose a starting place to calculate straight-line distances. Your device location is not requested.</p>
+    <div id="resultsWorkspace" class="results-workspace" data-view="both">
+      <div class="list-panel"><div id="offers" class="cards" aria-live="polite"><div class="empty"><span aria-hidden="true">↗</span><h3>Your next game is out there.</h3><p>Find courts checks your connected sources. Only verified, fresh offers will appear here.</p></div></div></div>
+      <div class="map-panel"><div class="map-topline"><span id="mapModeLabel">REAL · Verified offers only</span><span id="mappedCount">0 mapped clubs</span></div><div id="courtMap" class="court-map" role="region" aria-label="Court results map"></div><p id="mapNote" class="map-note">No available pins until fresh offers arrive. Clubs with unknown positions stay in the list.</p><p id="mapSelection" class="sr-only" role="status" aria-live="polite"></p></div>
+    </div>
+    <p class="results-footnote">Prices are displayed court totals. Provider freshness and time zone may be unknown. Always recheck on the official platform.</p>
+  </section>
+  <section class="sources-section" aria-labelledby="coverageHeading"><div class="sources-heading"><div><p class="eyebrow">YOUR CONNECTIONS, YOUR CONTROL</p><h2 id="coverageHeading">Your booking sources</h2></div><p>One source may respond while another needs attention. An empty result never means sold out.</p></div><div id="sourceStatus" class="source-grid" aria-live="polite"></div></section>
+  <section class="diagnostics" aria-labelledby="connectionHeading"><h2 id="connectionHeading">Connection help</h2><p>Use your own account on each official platform. If a provider asks you to sign in again, complete that step there.</p>
+    <details><summary>Manual Reader troubleshooting (not needed for normal searches)</summary><p>Technical diagnostics for the private beta. The reviewed companion contract is Reader 0.4.2. A missing or incompatible companion leaves real availability unverified.</p><p>For an already prepared, sanitized Reader report, request delivery below. These diagnostics do not establish automatic-search acceptance.</p>
+      <div class="personal-actions"><button id="requestPersonalBridge" type="button" disabled>Receive prepared Reader offers</button></div><label for="personalPayload">Sanitized Playtomic observed-offer report</label><textarea id="personalPayload" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="Paste the recent sanitized Reader report"></textarea><p>Never enter passwords, tokens, cookies, account exports or customer information.</p><div class="personal-actions"><button id="comparePersonal" type="button" disabled>Compare pasted offers</button></div>
     </details>
   </section>
-  <section aria-labelledby="offersHeading">
-    <h2 id="offersHeading">Personally observed court offers</h2>
-    <p>Club, court, local displayed time, duration and total EUR price come from the player's visible provider interface. No offer is reserved, and the provider may change availability.</p>
-    <div id="offers" class="cards" aria-live="polite"><p class="empty">No fresh personal offers yet.</p></div>
-  </section>
-  <section aria-labelledby="coverageHeading"><h2 id="coverageHeading">Provider coverage</h2>
-    <div id="sourceStatus" class="source-grid" aria-live="polite"></div>
-  </section>
 </main>
-<footer>GetACourt · Player-side observations only · Official booking handoff · No payments</footer>
+<footer><a class="brand" href="#search">GetA<span>Court</span></a><p>Find your court. Keep your game.</p><span>Private beta · Official booking handoff · No payments</span></footer>
 </body></html>
