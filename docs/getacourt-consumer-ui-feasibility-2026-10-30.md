@@ -162,3 +162,57 @@ Reader manifest, background and visible popup identify 0.4.2 so a loaded browser
 In the same Chrome profile, manually reload the existing unpacked GetACourt Reader from this checkout's `getacourt/browser-companion` folder and verify its popup says 0.4.2. If this is not the existing loaded folder, use the existing reader's Details/source location to reconcile it; do not install a duplicate. On https://racket.id/booking sign in normally if required, then use the Reader's existing Connect action to grant Racket site access once. Return to https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html and reload that page so its relay is current. Then the executor can repeat the same single Find and inspect only real returned quote cards. No public/private redeploy is needed for this source/extension setup step.
 
 Status: automatic path implemented and fixture-verified; real installed-extension one-Find acceptance NOT RUN on the new build, no successful live claim. The prior real diagnostic quote receipt is preserved above but does not substitute for this test. `PUBLIC_GO=false`.
+
+## Late checkpoint: exact protected 93, real provider UI, automatic relay still blocked
+
+Observed 30 October 2026, 22:52-22:59 UTC / Europe-Lisbon. Baseline and protected static provenance: `93d6d8e1490e4e288638b8264e28ca6896a9ade5`. CTO granted this document only for the checkpoint append. No runtime, Reader, permissions, workflow or deployment changes accompany it. The source branch remains the existing Draft PR #5; the protected runtime remains exact 93.
+
+### One Find after a legitimate external browser-context change
+
+CTO released one exclusive ordinary HTTPS Get-only check after the browser's tab IDs changed externally. The existing protected `find.html` and its normal `/preview-build.json` visibly identified exact 93, site `5dbcc4a3-5c87-4c75-959f-9a4f9fbc9570` and zero functions. The page displayed Private. These observations do not independently re-audit every protection setting; the earlier anonymous-401 receipt remains separate.
+
+With the clock read immediately before the click at 22:52:13 UTC, performed ONE Find for Carcavelos Tenis & Padel / 2026-10-31 / Padel / 08:00-23:00 / 60 minutes. No diagnostic import, event fabrication or observation injection. After the original 45-second deadline, the primary and independent additional groups reported only actual Reader **0.2.3**, `REQUEST_REJECTED`; expected Reader **0.4.2** did not respond. The initial acknowledgement was not compatible-version proof. Search exited its waiting state with zero verified offers and unknown availability, rather than claiming sold out. Changed tab IDs did not establish an updated Reader, its installation identity or its grants. No personal-login challenge was reached in this Get attempt.
+
+Exact-head CI was rechecked: [Platform](https://github.com/erikkaniss-ai/fillmycourt/actions/runs/41126818609), [federated search](https://github.com/erikkaniss-ai/fillmycourt/actions/runs/41126818705), [accessibility](https://github.com/erikkaniss-ai/fillmycourt/actions/runs/41126818622) and [offline privacy](https://github.com/erikkaniss-ai/fillmycourt/actions/runs/41126818672) all succeeded. CI and fixture-browser results are not live player-supply acceptance.
+
+Canonical same-channel-readback receipts: [Issue #11](https://github.com/erikkaniss-ai/fillmycourt/issues/11#issuecomment-6535216513) and [PR #5](https://github.com/erikkaniss-ai/fillmycourt/pull/5#issuecomment-6535217544). Local evidence: `get-93-new-context-one-find-visible-ax.txt`, `get-93-new-context-one-find-unsupported.png` and `get-93-new-context-reader-result.png`; the last image's SHA-256 is `81a39dd5c6a4274c559e07872f5761db69cafc3efb9e913d1debc4a2831f3dd9`. Files are in the existing external artifact directory `01a18303-1453-7991-8435-ef506c0670d7`, not served as inventory.
+
+### Playtomic: actual ordinary player-browser quote, not a Get relay result
+
+Opened the reviewed official [Cascais Padel & Nature club page](https://playtomic.com/clubs/cascais-padel-club) in ordinary Chrome; its normal account-header indicator appeared. No account identity, credentials, cookies or session state were inspected. The known ordinary date-filter URL `?date=2026-10-31` visibly selected Sat, Oct 31. The same previously inspected anchored price preview opened before a separate Continue button; Continue was untouched and Close dismissed the preview.
+
+| Required field | Visible evidence |
+|---|---|
+| Provider / club / court | Playtomic / Cascais Padel & Nature / NATUREZA |
+| Date / sport | 2026-10-31 / Padel |
+| Local start / duration | 8:00 AM / 1 hr, 30 min |
+| End | 09:30 derived from start plus duration; not separately printed |
+| Displayed court total | EUR 36.00; separate `Continue - EUR 36.00` button not activated |
+| Capture clock | 2026-10-30 22:56:58 UTC |
+| Official handoff | https://playtomic.com/clubs/cascais-padel-club |
+| Evidence class / coverage | Actual ordinary player-browser UI; one expanded court preview |
+| Unknown | Provider freshness/timezone, player identity validation and any later checkout fees |
+
+This is the displayed court quote, not an all-fees final-checkout attestation or a continuing fresh offer. No booking, hold or payment action was initiated; provider-internal traffic was not inspected. Evidence: `playtomic-real-20261031-0800-90min-36eur.png` and the matching sanitized `-visible.txt`. Nothing was entered into Get's diagnostic importer and no automatic transfer was accepted.
+
+### TieSports: Padel Factory has a public dated schedule; price preview unproved
+
+In the ordinary public [Padel Factory page](https://clubs.tiesports.com/en/lisboa/PadelFactory), selected Sat 31 Oct / Tomorrow through the normal calendar. The schedule displayed named rows including 1 Axians, 2 Logicalis, 3 Samucar, 4 Consulai, 5 Competição 1, 6 Competição 2 and further roofed courts. No explicit priced duration or full EUR court total was visible. The legend instructs the player to click a free slot to select it; no specific slot/court was clicked because a non-reserving price-preview boundary was not established. The schedule is not a complete available offer.
+
+Evidence: `tiesports-padel-factory-20261031.png` and `tiesports-padel-factory-20261031-visible-dom.txt`. This is PUBLIC_UI evidence, not the owner's authenticated session or automatic Get acceptance. The earlier OPA app-only notice applies to that inspected club. It is not a whole-TieSports blocker: the indexed [official TieSports guide](https://www.tiesports.com/company/blog/book-padel-tennis-court-portugal) describes browser booking at clubs offering online payments. That general guide does not prove that selecting a Padel Factory slot is hold-free or exposes a complete price. Direct retrieval returned 403; no alternate retrieval route was attempted.
+
+### Racket ID login boundary at the initial late checkpoint
+
+The current ordinary Chrome `https://racket.id/booking` initially displayed `Log in to book`, rather than the earlier publicly visible timetable. Opened only the normal Authentication modal with blank email/password fields and preserved the tab for the owner's personal login. No credentials were entered or inspected. The user was asked only to perform that personal login, not extension management or technical repair. Earlier EUR 30.60 quotes remain historical observations, not current availability.
+
+The owner then explicitly reported that the personal login was complete. A fresh ordinary page read showed the club search in place of the login gate. Chose SAT 31 OCT, Carcavelos Tenis & Padel, Padel, with the existing Only roofed filter. The club-level 08:00 control now produced a visible **08:00-09:30 / 90 minutes** default, rather than the earlier 60-minute observation. The same separate Select courts preview displayed **Padel Heineken Zero (4)**, Roofed / No description / **46 eur**, with Carcavelos Tenis & Padel, Sat 31 Oct, 08:00-09:30 and 90 min in its header. The year 2026 is bound to the requested calendar context, not printed in that preview. Official handoff remains https://racket.id/booking. The quote was captured before the 23:00:05 UTC clock read; no exact capture-second claim is made.
+
+The provider itself displayed the lone court already checked upon opening this preview. The executor did not toggle any court checkbox or activate Continue. Captured the visible quote and then Cancel; both the modal and time-selection bar disappeared. No booking/hold/payment action was initiated, and no provider-internal transport audit was performed. Therefore this does not prove that the changed provider preview has no undocumented server-side hold semantics. Do not broaden automatic navigation on the strength of this checked default. Evidence: `racket-id-real-20261031-0800-90min-46eur.png`, matching `-visible.txt`, and `racket-id-preview-cancelled.png`. This is an ordinary player-browser quote after explicit owner login readiness, not Get automatic acceptance, a final all-fees price or continuously fresh inventory.
+
+Source-to-visible-UI comparison found two additional gaps in exact 93: `search()` admits query duration 0/60 but waits for a literal 60-minute summary, while this path defaults to 90; the header/card parser only accepts numeric `Padel N` labels, while the current court has a sponsored name. An offline replay of the sanitized current header/card returns `OFFER_FORMAT_CHANGED`. This is a parser diagnostic, not an imported offer or live extension test. A separate narrow source proposal was sent to CTO; no parser, duration support or court-label acceptance changed in this document-only checkpoint. Canonical after-login receipts: [Issue #11](https://github.com/erikkaniss-ai/fillmycourt/issues/11#issuecomment-6535330249) and [PR #5](https://github.com/erikkaniss-ai/fillmycourt/pull/5#issuecomment-6535331013), both read back in their original channels.
+
+### Recovery boundary and acceptance
+
+The earlier extension-management denial explicitly prohibits alternate routes to the same blocked outcome. Official documentation and available plugin/capability research did not establish a permitted custom-Reader maintenance mechanism. No native-app, clipboard, CDP, profile-file, restart, installation or grant workaround was attempted. The historical owner-side technical completion request above is superseded by the owner's newer direction: involve the owner only for personal provider login; CTO owns the technical capability blocker. Do not ask the owner to repeat Reader checks.
+
+The main automatic-search blocker is the actual unsupported Reader response. Repeat Find requires a meaningful external compatibility state change; no search loop or API fallback follows from these receipts. TieSports/Smashpro price-preview safety and MATCHi eligible EUR-venue/session evidence remain unresolved. Two real independent platforms delivered automatically into Get, and all-platform coverage, remain NOT ACCEPTED. `PUBLIC_GO=false`.
