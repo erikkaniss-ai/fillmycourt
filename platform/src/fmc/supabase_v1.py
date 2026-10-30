@@ -33,6 +33,9 @@ def one(result):
 class Actor:
     id: str
     email: str | None = None
+    # Canonical Auth app_metadata only. This classifies fixtures, grants no role.
+    fill_f1_run: str | None = None
+    fill_f1_fictional: bool = False
 
 
 class SupabaseAuth:
@@ -79,7 +82,14 @@ class SupabaseAuth:
                 raise ValueError("Invalid identity")
         except (ValueError, KeyError, TypeError, AttributeError):
             raise DomainError("AUTH_UNAVAILABLE", "Authentication response could not be verified.", 503) from None
-        return Actor(id=user_id, email=email)
+        metadata = data.get("app_metadata")
+        marker = metadata.get("fill_f1_run") if isinstance(metadata, dict) else None
+        # Preserve malformed trusted markers as a denied fixture, never normalise
+        # them into an ordinary user. user_metadata is deliberately ignored.
+        if isinstance(metadata, dict) and "fill_f1_run" in metadata:
+            marker = marker if isinstance(marker, str) and marker else "INVALID"
+        return Actor(id=user_id, email=email, fill_f1_run=marker,
+                     fill_f1_fictional=isinstance(metadata, dict) and metadata.get("fictional") is True)
 
 
 class V1Store:

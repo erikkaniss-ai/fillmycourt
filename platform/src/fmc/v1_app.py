@@ -23,6 +23,7 @@ from .common import DomainError, SPORTS, require_key
 from .supabase_v1 import Actor, SupabaseAuth, V1Store, one, rows
 from .provider_provenance_review import review_provider_provenance
 from .provider_provenance_preflight import operations_provenance_preflight
+from .fill_uat_guard import DeliveryGuard, from_environment as fill_guard_from_environment
 
 
 ROLE_ADMIN = {"owner", "admin"}
@@ -767,8 +768,10 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
         raise RuntimeError("Unknown service mode")
     db = V1Store(settings.database)
     auth = auth_override or SupabaseAuth(settings.supabase_url, settings.supabase_publishable_key)
+    fill_guard = fill_guard_from_environment(settings, service, db.engine)
     app = FastAPI(title="FillMyCourt shared platform", version="0.5.0",
-                  docs_url=None, redoc_url=None, openapi_url=None)
+                  docs_url=None, redoc_url=None, openapi_url=None, lifespan=fill_guard.lifespan)
+    app.state.fill_uat_guard = fill_guard
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
@@ -796,8 +799,16 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
             response.headers["X-Robots-Tag"] = "noindex,nofollow"
         return response
 
+    # Outermost: check the complete response after all other middleware too.
+    if service == "operations":
+        app.add_middleware(DeliveryGuard, guard=fill_guard, auth=auth)
+
     def who(request: Request) -> Actor:
-        return auth.verify(request.headers.get("authorization"))
+        actor = auth.verify(request.headers.get("authorization"))
+        if service == "operations":
+            request.state.fill_f1_actor = actor
+            fill_guard.check(actor, request.method)
+        return actor
 
     def role(c, org: str, actor: Actor, allowed=None):
         return db.require_role(c, org, actor.id, set(allowed) if allowed else None)
