@@ -146,6 +146,30 @@ def test_real_ttl_clears_map_cards_and_late_reply_cannot_cross_demo_boundary(bro
     expect(page.locator('[data-result-pin]')).to_have_count(0)
 
 
+@pytest.mark.parametrize('clear_kind',['ttl','clear','query','demo'])
+def test_private_selected_map_announcement_clears_with_cards_and_pins(browser_page,fixture_url,clear_kind):
+    page,context,_,_=browser_page
+    record=ready(page,context,fixture_url)
+    record['offers'][0]['court']='FICTIONAL PRIVATE COURT'
+    if clear_kind=='ttl':
+        record['capturedAt']=(datetime.now(timezone.utc)-timedelta(seconds=55)).isoformat(timespec='milliseconds').replace('+00:00','Z')
+    page.locator('#personalPayload').fill(json.dumps(record))
+    page.get_by_role('button',name='Compare pasted offers').click()
+    page.locator('#offers .card').get_by_role('button',name='Show on map').click()
+    expect(page.locator('#mapSelection')).to_contain_text('FICTIONAL PRIVATE COURT')
+    if clear_kind=='ttl':
+        expect(page.locator('#offers .card')).to_have_count(0,timeout=8000)
+    elif clear_kind=='clear':
+        page.get_by_role('button',name='Clear results',exact=True).click()
+    elif clear_kind=='query':
+        page.locator('[name="location"]').fill('Oeiras')
+    else:
+        page.get_by_role('button',name='Explore demo',exact=True).click()
+    expect(page.locator('#mapSelection')).to_have_text('')
+    expect(page.locator('body')).not_to_contain_text('FICTIONAL PRIVATE COURT')
+    assert page.locator('[data-offer-kind="real"]').count()==0
+
+
 def test_osm_image_fixture_receives_origin_only_and_no_credentials_or_location_request(browser_page,fixture_url):
     page,context,forbidden,_=browser_page
     seen=[]

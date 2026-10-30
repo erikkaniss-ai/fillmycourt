@@ -104,6 +104,7 @@ test('actual HTTP handler reads a configured club feed without a Core dependency
 test('active Get consumer release is player-session only; legacy club feed remains inactive',()=>{
   const html=fs.readFileSync(new URL('../find.html',import.meta.url),'utf8');
   const js=fs.readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
+  const view=fs.readFileSync(new URL('../assets/player-search-view.mjs',import.meta.url),'utf8');
   assert.match(html,/Find courts/);
   assert.match(html,/personalPayload/);
   assert.match(html,/Connect each booking provider once/);
@@ -111,10 +112,11 @@ test('active Get consumer release is player-session only; legacy club feed remai
   assert.match(js,/gac:auto-search-request/);
   assert.match(js,/normalizePersonalObservation/);
   assert.match(js,/gac:personal-observation-accepted/);
-  assert.match(js,/Continue on /);assert.match(js,/names\[o.sourceId\]/);
+  assert.match(js,/import \{createPlayerSearchView,demoOffers\} from '\.\/player-search-view\.mjs'/);
+  assert.match(view,/Continue on /);assert.match(view,/PROVIDER_NAMES\[o.sourceId\]/);
   for(const pattern of [/\/api\/gac\/search-all/,/\bfetch\s*\(/,/\bXMLHttpRequest\b/,/\bWebSocket\b/,/\bchrome\./,
     /\/api\/availability/,/GETACOURT_CLUB_FEEDS/,/localStorage/,/sessionStorage/,/innerHTML/,/setInterval/]){
-    assert.doesNotMatch(js,pattern,'Get player module must not contact a provider or server feed');
+    for(const module of [js,view])assert.doesNotMatch(module,pattern,'Both active Get modules must remain player-side without provider/server feed access');
   }
   assert.doesNotMatch(html,/\/api\/gac\/search-all|FillMyCourt \/ Core/);
   assert.match(html,/connect-src 'none'/);

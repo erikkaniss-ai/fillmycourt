@@ -277,6 +277,21 @@ test('display model isolates fictional data, expires real rows, deduplicates and
   assert.equal(displayRows([{...record,o:{...o,clubName:'Unreviewed club',lat:1,lon:1}}])[0].position,null);
 });
 
+test('clearing or changing modes removes selected personal data from the screen-reader map announcement',()=>{
+  for(const action of ['clear','query','demo']){
+    const p=pageRig(),nonce=p.find();
+    p.respond(nonce,{status:'observed',version:'0.4.2',observation:pageObservation('playtomic')},'gac:auto-search-response');
+    const price=p.node('offers').children[0].children.find(child=>child.className==='price-row');
+    price.children.find(child=>child.className==='map-card-button').events.click();
+    assert.match(p.text('mapSelection'),/FICTIONAL compatible court/);
+    if(action==='clear')p.node('clearPersonal').events.click();
+    else if(action==='query')p.node('search').events.input();
+    else p.node('demoMode').events.click();
+    assert.equal(p.text('mapSelection').trim(),'');
+    assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  }
+});
+
 test('distance needs an explicit matching-mode origin; budget and radius do not invent unknown positions',()=>{
   assert.equal(distanceKm(null,TRUSTED_POSITION),null);
   assert.equal(distanceKm({lat:0,lon:0},{lat:0,lon:1}).toFixed(3),'111.195');

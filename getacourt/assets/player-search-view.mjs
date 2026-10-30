@@ -77,6 +77,7 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
   const filterState=()=>({mode,origin:originFor(mode,by('searchOrigin').value),
     budget:by('budgetFilter').value,radius:by('radiusFilter').value,sort:by('offerSort').value});
   const selectedMapLabel=()=>mode==='demo'?'DEMO · Fictional availability':'REAL · Verified offers only';
+  const selectionText=row=>row?(row.demo?'DEMO · ':'')+row.o.clubName+', '+row.o.courtName+', '+row.o.startLabel+', '+money(row.o.priceMinor):'';
   function changeView(view){
     by('resultsWorkspace').dataset.view=view;
     for(const [id,value] of [['listView','list'],['mapView','map'],['splitView','both']])
@@ -88,7 +89,7 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
     for(const [id,card] of cards)card.classList.toggle('selected',id===selected);
     for(const [id,marker] of markers)marker.getElement()?.classList.toggle('selected',id===JSON.stringify([row.o.sourceUrl,row.o.clubName]));
     const target=cards.get(row.key);
-    by('mapSelection').textContent=(row.demo?'DEMO · ':'')+row.o.clubName+', '+row.o.courtName+', '+row.o.startLabel+', '+money(row.o.priceMinor);
+    by('mapSelection').textContent=selectionText(row);
     if(fromMap){
       if(by('resultsWorkspace').dataset.view==='map')changeView('both');
       target?.focus({preventScroll:true});target?.scrollIntoView({behavior:'auto',block:'nearest'});
@@ -144,10 +145,14 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
     }
     if(groups.size){const points=[...groups.values()].map(v=>[v[0].position.lat,v[0].position.lon]);
       map.fitBounds(points,{padding:[45,45],maxZoom:14,animate:false});}
-    if(selected&&!rows.some(r=>r.key===selected))selected=null;
   }
   function render(nextRows,{mode:nextMode=mode}={}){
     mode=nextMode;rows=displayRows(nextRows,filterState());cards.clear();host.replaceChildren();
+    const selectedRow=rows.find(row=>row.key===selected);
+    if(!selectedRow)selected=null;
+    // Screen-reader live regions are private result state too. TTL, filtering,
+    // query clear and mode changes must remove the old announcement with pins.
+    by('mapSelection').textContent=selectionText(selectedRow);
     const hasOrigin=Boolean(filterState().origin);
     by('radiusFilter').disabled=!hasOrigin;
     by('originNote').textContent=hasOrigin
@@ -185,6 +190,7 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
   }
   function setMode(next){
     mode=next==='demo'?'demo':'real';selected=null;
+    by('mapSelection').textContent='';
     by('realMode').setAttribute('aria-pressed',String(mode==='real'));by('demoMode').setAttribute('aria-pressed',String(mode==='demo'));
     by('demoBanner').hidden=mode!=='demo';
     by('modeNotice').textContent=mode==='demo'?'DEMO · Fictional availability. No provider search or booking links.':'REAL · Only fresh, personally observed offers. Availability is unverified until a source responds.';
