@@ -24,6 +24,14 @@ function cancelAuto(){
 function cancelAdditional(){
   clearTimeout(additionalTimer);additionalTimer=null;additionalPending=null;
 }
+// Only bounded protocol fields may reach the UI; never render raw exceptions.
+const readerCodes=new Set(['REQUEST_REJECTED','CONNECT_REQUIRED','SITE_ACCESS_REQUIRED',
+  'READ_BUSY','RATE_LIMITED','CONSENT_WITHDRAWN','QUERY_INVALID','READ_FAILED',
+  'READER_UNAVAILABLE','CHALLENGE_REQUIRED','TAB_ACCESS_REQUIRED',
+  'COMPACT_VIEW_REQUIRED','NO_EXPANDED_OFFERS','OFFER_SECTION_MISSING','SCHEDULE_NOT_READY']);
+const readerCode=result=>readerCodes.has(result?.code)?result.code:'UNKNOWN';
+const readerVersion=result=>typeof result?.version==='string'&&/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(result.version)
+  ?' · Reader '+result.version:' · Reader version not reported';
 function autoError(result){
   const code=result?.code;
   return ({
@@ -37,7 +45,7 @@ function autoError(result){
     OFFER_SECTION_MISSING:'Playtomic has changed its visible booking layout; offers could not be verified.',
     SCHEDULE_NOT_READY:'Playtomic did not confirm the requested date or sport. Search again later.',
     READ_BUSY:'A Playtomic search is already running. Finish that search first.'
-  })[code]||'This provider search could not be verified. Check the Playtomic page or connection.';
+  })[code]||'This provider search could not be verified ('+readerCode(result)+'). Check the Playtomic page or connection.';
 }
 function startAutomaticSearch(){
   if(!query)return;
@@ -48,7 +56,7 @@ function startAutomaticSearch(){
   additionalTimer=setTimeout(()=>{
     if(additionalPending?.nonce===nonce){
       additionalPending=null;
-      additionalStates.set('additional','Search incomplete — no conclusion about availability');
+      additionalStates.set('additional','Additional provider search timed out; connection and availability unverified');
       renderSources();
     }
   },45000);
@@ -57,7 +65,7 @@ function startAutomaticSearch(){
   autoAckTimer=setTimeout(()=>{
     if(pendingAuto!==request||request.acked)return;
     cancelAuto();
-    personalStatus.textContent='GetACourt Reader v0.4.1 is not connected to this browser page. Install/reload it and connect Playtomic once; manual troubleshooting remains available.';
+    personalStatus.textContent='GetACourt Reader did not acknowledge this search. Browser connection and availability are unverified.';
   },1500);
   window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query}}));
 }
@@ -113,7 +121,7 @@ window.addEventListener('gac:auto-search-response',event=>{
       personalStatus.textContent='One or more clubs require a valid login, compatible booking layout or a different date. Other slots may exist.';
     }
   }else{
-    personalStatus.textContent=autoError(detail.result);
+    personalStatus.textContent=autoError(detail.result)+readerVersion(detail.result);
     status.textContent='No verified available offers received. Other courts may exist.';
   }
 });
@@ -123,18 +131,30 @@ window.addEventListener('gac:additional-sources-response',event=>{
   if(!pending||!detail||detail.nonce!==pending.nonce||
     pending.revision!==revision||pending.query!==query)return;
   cancelAdditional();
-  const entries=detail.result?.sources;
-  if(!Array.isArray(entries)||entries.length>4)return;
+  const result=detail.result,entries=result?.sources;
+  const version=readerVersion(result);
+  let failure;
+  if(result?.status==='unavailable')
+    failure='Additional provider search failed ('+readerCode(result)+'); connection and availability unverified';
+  else if(result?.status!=='partial'||!Array.isArray(entries)||entries.length>4)
+    failure='Additional provider response unsupported; connection and availability unverified';
+  else if(!entries.length)
+    failure='No additional booking sources reported by Reader; connection and availability unverified';
+  if(failure){
+    additionalStates.set('additional',failure+version);
+    renderSources();return;
+  }
   const supported=new Set(['tiesports','racket_id','smashpro','matchi']);
-  let accepted=0;
+  let accepted=0,checked=0;
   for(const row of entries){
     if(!row||!supported.has(row.provider))continue;
+    checked++;
     if(row.status==='observed'){
       let raw;
       try{raw=JSON.stringify(row.observation);}catch{raw='';}
       if(raw&&importPersonal(raw,pending.query,pending.revision)){
-        accepted++;additionalStates.set(row.provider,'Fresh player-visible priced observation · partial');
-      }else additionalStates.set(row.provider,'Client observation rejected; availability unverified');
+        accepted++;additionalStates.set(row.provider,'Fresh player-visible priced observation · partial'+version);
+      }else additionalStates.set(row.provider,'Client observation rejected; availability unverified'+version);
     }else{
       const reasons={
         SITE_ACCESS_REQUIRED:'Chrome site permission not granted',
@@ -147,9 +167,11 @@ window.addEventListener('gac:additional-sources-response',event=>{
         SOURCE_UNCLAIMED:'Club listing unclaimed; not a booking source',
         RATE_LIMITED:'Wait before rechecking this provider'
       };
-      additionalStates.set(row.provider,reasons[row.code]||'Provider unavailable or not verified');
+      additionalStates.set(row.provider,(reasons[row.code]||'Provider unavailable or not verified')+version);
     }
   }
+  if(!checked)additionalStates.set('additional',
+    'Additional provider response unsupported; connection and availability unverified'+version);
   if(accepted>0)status.textContent='Retrieved '+accepted+' additional player-visible source(s). Recheck on the official booking site.';
   renderSources();
 });
@@ -175,7 +197,7 @@ function renderSources(){
   sourcesHost.replaceChildren();
   const has=id=>[...observations.values()].some(record=>record.sourceId===id);
   const text=(id,initial)=>has(id)?'Player-visible offer loaded · partial · expires shortly':
-    additionalStates.get(id)||initial;
+    additionalStates.get(id)||(id!=='playtomic'&&additionalStates.get('additional'))||initial;
   const names=[
     ['Playtomic',text('playtomic','One login for up to four reviewed Cascais-area clubs per Find; additional areas are not verified')],
     ['TiePlayer / TieSports',text('tiesports','Not connected: open an official player booking page and grant access once')],
