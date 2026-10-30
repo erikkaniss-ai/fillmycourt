@@ -26,6 +26,8 @@ async function readVisibleProviderPage(query) {
     'input[type="password"],input[autocomplete="one-time-code"],[id*="captcha"],iframe[src*="captcha"]'
   )].some(visible);
   if(challenge())return fail("CHALLENGE_REQUIRED");
+  if(provider==="racket_id"&&globalThis.GetACourtRacketPreview)
+    return globalThis.GetACourtRacketPreview.readPreview(query);
   const headers=[...document.querySelectorAll("h2,h3,[role='heading']")].filter(visible);
   const title=/^(?:available\s+(?:courts|time slots)|court\s+booking|reservas?(?:\s+de\s+campos)?|hor[aá]rios?\s+dispon[ií]veis|lediga\s+tider)$/i;
   const heading=headers.find(h=>title.test(h.innerText.trim()));

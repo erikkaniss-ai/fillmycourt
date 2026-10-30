@@ -4,6 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
+// Keep the provider-specific preview regressions in the existing required CI
+// entrypoint without changing shared workflow ownership.
+import './racket-preview.test.mjs';
 const reader=readFileSync(new URL('../browser-companion/visible-provider-page.js',import.meta.url),'utf8');
 const pure=readFileSync(new URL('../browser-companion/visible-provider-offers.js',import.meta.url),'utf8');
 const day=new Date(Date.now()+86400000).toISOString().slice(0,10);

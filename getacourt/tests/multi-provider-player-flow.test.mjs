@@ -22,7 +22,7 @@ const official={
   tiesports:{url:source1,venue:"OPA OEIRAS"},
   racket_id:{url:source2,venue:"Rackets Pro Academy — Quinta da Marinha"}
 };
-function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRacket=false}={}){
+function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRacket=false,existingRacket=false}={}){
   const local={approvedExtraSources:{tiesports:source1,racket_id:source2}};
   const session={},created=[],removed=[],calls=[],listeners={};
   const get=(data,keys)=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,data[key]]));
@@ -37,7 +37,9 @@ function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRac
     storage:{local:storage(local),session:storage(session)},
     permissions:{contains:async o=>!denyRacket||!o.origins.includes("https://racket.id/*")},
     tabs:{
-      query:async()=>[{id:1,url:source1,windowId:1,status:"complete"}],
+      query:async filter=>filter?.url===source2&&existingRacket
+        ?[{id:2,url:source2,windowId:1,status:"complete"}]
+        :[{id:1,url:source1,windowId:1,status:"complete"}],
       create:async o=>{const tab={...o,id:nextId++};created.push(tab);return tab;},
       get:async id=>{
         const tab=created.find(t=>t.id===id);
@@ -57,7 +59,7 @@ function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRac
           listeners.msg({action:"revoke"},sender,()=>{});
         return [];
       }
-      const url=created.at(-1)?.url;
+      const url=data.target.tabId===2?source2:created.find(t=>t.id===data.target.tabId)?.url;
       const provider=url===source1?"tiesports":"racket_id";
       const reference=official[provider];
       const offer={
@@ -161,6 +163,14 @@ test("a later explicit Find cleans only its own newly created provider tabs",asy
   assert.equal(r.created.length,4);
   assert.deepEqual(r.removed,r.created.map(x=>x.id));
   assert.ok(!r.removed.includes(1));
+});
+test("Get Find reads the one existing approved Racket preview and never closes the player's tab",async()=>{
+  const r=rig({existingRacket:true});find(r);
+  const result=await response(r);
+  assert.equal(result.sources[1].status,'observed');
+  assert.deepEqual(r.created.map(t=>t.url),[source1]);
+  assert.deepEqual(r.removed,r.created.map(t=>t.id));
+  assert.ok(!r.removed.includes(2));
 });
 test("no provider is searched without an explicit Get Find gesture, no repeated bulk polling",async()=>{
   const r=rig();

@@ -102,12 +102,17 @@ async function autoSearchAdditionalFromGet(query) {
         await chrome.storage.session.set({[key]:Date.now()});
         // The source page runs in this player's own ordinary Chrome profile.
         // No provider API, cross-account session, cookie read or remote agent.
-        const tab=await chrome.tabs.create({url:sourceUrl,active:false});
-        createdTabId=tab.id;
+        // An open Racket ID preview belongs to the player. Read only an exact,
+        // uniquely matching existing tab; never close it or click Continue.
+        const existing=provider==="racket_id"
+          ?(await chrome.tabs.query({url:sourceUrl})).filter(t=>t.url===sourceUrl):[];
+        if(existing.length>1)fail("TAB_CHANGED");
+        const tab=existing[0]||await chrome.tabs.create({url:sourceUrl,active:false});
+        if(!existing.length)createdTabId=tab.id;
         await waitForPage(tab.id);
         if(epoch!==generation)fail("CONSENT_WITHDRAWN");
         await chrome.scripting.executeScript({target:{tabId:tab.id},
-          files:["visible-provider-offers.js","visible-provider-page.js"]});
+          files:["visible-provider-offers.js","racket-preview.js","visible-provider-page.js"]});
         const captured=await chrome.scripting.executeScript({target:{tabId:tab.id},
           func:async q=>readVisibleProviderPage(q),args:[query]});
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");

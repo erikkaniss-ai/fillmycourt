@@ -104,3 +104,37 @@ Two additional providers were inspected; zero complete available offers were imp
 Main blocker: no proven read-only transition from Racket ID time search to a complete court/duration/EUR offer. The focused first-party help search returned product descriptions rather than an operational no-hold preview contract (https://racket.id/). Next: verify that specific ordinary UI transition through visible provider instructions, or use the owner's normal initial login when the provider requires it; stop before an action that creates a hold/booking. Implement no speculative adapter from colour/time tiles. TiePlayer requires an ordinary supported app session; no API or club feed substitutes for it.
 
 Executor actions were page navigation, club-card expansion, date/sport filters, scrolling and visible UI inspection only. No provider booking/time cell, authentication, hold, checkout, payment, outreach, deployment or merge. Provider-internal traffic was not inspected. `PUBLIC_GO=false`.
+
+## Racket ID priced preview and real local Get handoff — superseding the earlier missing-detail result
+
+On the owner's explicit follow-up, the ordinary club/time search was continued. Baseline `fa79888d608c73c9bc3cecbd3036d81fc2008928`. Source lease for this implementation: `getacourt/browser-companion/{background.js,visible-provider-page.js,racket-preview.js}`, `getacourt/tests/{multi-provider-player-flow.test.mjs,visible-provider-page.test.mjs,racket-preview.test.mjs}`, and this document. No Platform/Core, workflow, hosting, permission or origin changes.
+
+### Observed ordinary UI transition
+
+1. Open `https://racket.id/booking`, choose SAT 31 OCT, expand Carcavelos Tenis & Padel.
+2. Choose the club-level 08:00 search tile. Before any specific court is chosen, the interface displays `08:00–09:00 · 60 minutes`, club and Sat 31 Oct, with a separate Select courts action.
+3. Open Select courts. This opens the court-choice preview and leaves a separate Cancel / Continue footer. The two rendered court quote cards were Padel 3 and Padel 6, each Roofed / No description / `30.6 eur`. The header binds Sat 31 Oct, 08:00-09:00, 60 min and Carcavelos Tenis & Padel. Continue was NEVER clicked. No confirmation, checkout, payment or reservation receipt was entered; the preview was closed using Cancel after capture. No provider transport or hidden state was inspected, so this is not a backend write audit or proof about undocumented provider internals.
+
+### Real data receipt
+
+| Field | Observed value |
+|---|---|
+| Provider / club | Racket ID / Carcavelos Tenis & Padel |
+| Date | 2026-10-31, bounded requested date matched to visible Sat 31 Oct; year is not printed in the provider preview |
+| Court / start / end | Padel 3 and Padel 6; 08:00–09:00 displayed local labels |
+| Duration | 60 minutes, explicitly printed |
+| Displayed court quote | 30.6 eur per court option, normalized to EUR 30.60; this is the full displayed court quote, not an attestation of possible later checkout fees |
+| Capture used for Get | 2026-10-30T04:43:02.186Z |
+| Source / coverage | Ordinary visible UI in the in-app browser; roofed-only, expanded-preview subset; provider freshness/timezone unknown |
+| Official handoff | https://racket.id/booking (provider portal, not a court-specific deeplink) |
+
+The sanitized observation was entered through the existing manual troubleshooting import into the local Get `find.html` served solely on 127.0.0.1. Matching exact-club/date/sport/60min filters accepted both offers and rendered the real names, time, EUR 30.60, source/partial label and official link. Its normal 60-second expiry subsequently cleared both cards. No fixture was used for this browser receipt. This is a real local browser handoff via diagnostic import, not a claim that the installed MV3 extension, protected hosted app, player identity or automatic multi-provider acceptance passed.
+
+### Implementation and limits
+
+- `racket-preview.js` reads only the already-open Select courts preview; it does not click, select, navigate or access sessions. It binds the visible header to the requested date/time/duration and exact visible Roofed / No description court cards, including explicit one- or two-decimal EUR prices. Changed/ambiguous layouts, extra fees/price labels, per-player prices, duplicate courts and mismatches fail closed. Native calendar/sport controls are not assumed.
+- Get Find may read one uniquely matching, explicitly approved existing Racket tab in that browser profile. Existing tabs are never closed; no matching open preview yields unavailable. Temporary newly created tabs retain the prior cleanup. Revocation, strict schema, official URL and short-lived browser-only result handling remain enforced.
+- This slice does NOT automate provider search-to-preview preparation. A complete one-Find integration across changing dates/clubs still needs the normal UI navigation adapter and installed-extension UAT; no repeated manual Reader steps are introduced as the accepted product UX. No new host grant, deployed version or automatic login is implied.
+- Unit/DOM-shaped tests bind the inspected structure to strict Get normalization and exercise bad date/duration/price and existing-tab ownership. The new preview tests are included through the existing required visible-provider test entrypoint; no workflow edits.
+
+Real Racket quote delivery is now evidenced locally. The full two-platform player-session MVP remains NOT ACCEPTED; the next bounded step is installed-extension verification of this existing-preview reader, followed by safe ordinary query-to-preview navigation. `PUBLIC_GO=false`.
