@@ -139,6 +139,11 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
       for(const item of group.slice(0,3))popup.append(make('div',item.o.startLabel+' · '+item.o.duration+' min · '+money(item.o.priceMinor)));
       const action=make('button','View court details');action.type='button';action.addEventListener('click',()=>select(row,{fromMap:true}));popup.append(action);
       marker.bindPopup(popup);marker.on('click',()=>select(row,{fromMap:true}));
+      // Leaflet opens bound popups on keypress, independently of marker click.
+      // Register after bindPopup so Enter then moves focus to the same card.
+      marker.on('keypress',event=>{
+        if(event.originalEvent?.key==='Enter')select(row,{fromMap:true});
+      });
       marker.getElement().dataset.resultPin=String([...groups.keys()].indexOf(id));
       marker.getElement().classList.toggle('selected',group.some(item=>item.key===selected));
       markers.set(id,marker);
