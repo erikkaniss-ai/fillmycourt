@@ -70,3 +70,37 @@ The official date filter adds `?date=2026-10-31`. Both `additionalProviderRoute(
 ### Stop condition and safe next step
 
 GET-CTO-04 stops before an action whose booking/hold effect is unknown. No demonstrably non-reserving preview was exposed by the inspected controls. A future adapter needs first-party visible evidence that a specific details control is read-only and yields explicit date, court, start/end, duration and full EUR total; it must still stop at authentication/hold/checkout. Otherwise keep this source UNAVAILABLE for priced offers and assess another independently accessible consumer UI within the existing Get lane. No speculative parser implementation or API fallback follows from this receipt. `PUBLIC_GO=false`.
+
+## Next-provider continuation — TieSports and Racket ID
+
+Observed 30 October 2026, approximately 04:18–04:23 UTC / Europe-Lisbon.
+Baseline verified: `3c1cd959ead5d7feaf6b6c76340fba1d3be58084`, existing Draft PR #5, clean checkout. Only this document changes.
+
+Chrome's prior extension browser was unavailable and absent from current browser inventory. Opening installed Chrome did not restore its extension connection. These observations therefore used the ordinary public consumer UI in the in-app browser; they do not attest the owner's personal provider session or an installed Reader handoff. This was connection recovery, not a security-denial bypass. No cookies, credentials, hidden state, provider API or account creation.
+
+### TieSports / TiePlayer — OPA OEIRAS
+
+Official page: https://clubs.tiesports.com/en/lisboa/OeirasPadelAcademy
+
+- The booking section explicitly states that online booking for this club is available only in TiePlayer app, with official App Store and Google Play links, and offers a public availability view below it.
+- Opened Filter by sport and selected Padel. Opened the normal calendar and selected Saturday 31 October 2026; reopening it confirmed 31 as selected. No timetable cell was selected.
+- Named courts are rendered, including SAVILLS (Court nº1) OUTDOOR, BEEFEATER LIGHT (Court nº2) OUTDOOR and CONSILCAR (Court Central). The page exposes a timetable and Available/Unavailable legend, but no complete court/time/duration/total-EUR offer in the inspected view.
+- Result: public timetable SUPPORTED; complete web-bookable EUR offer UNAVAILABLE on this inspected surface; TiePlayer app session and prices UNKNOWN. No app installation or alternate API attempted. The app-only notice must not be transformed into a generic successful connector or a sold-out result.
+
+### Racket ID — Carcavelos Tenis & Padel
+
+Official portal: https://racket.id/booking
+
+- Initial accessibility state was empty although the screenshot showed the normal player booking UI. After a normal club-card interaction the page exposed an accessibility tree and title Booking. No empty first snapshot is sufficient to conclude that this provider is inaccessible.
+- Opened the named Carcavelos Tenis & Padel club card and selected SAT 31 OCT in the ordinary date strip. The screenshot shows 31 highlighted. The default Only roofed filter remained set; this is partial coverage. No claim of all-court availability.
+- The expanded card shows time tiles (including 08:00, 08:30, 10:00 and later times) with coloured dots. No individual court identity, duration or full EUR total is shown on those tiles. Colours are not accepted as priced offers, and no time tile was activated because its booking/hold semantics were not established.
+- Result: public player portal and named-club/time search SUPPORTED; complete priced offer and personal login UNKNOWN. This provider is a more concrete next web candidate than the OPA app-only booking page, but it is not yet connected live supply.
+- Source compatibility remains unproven: the current generic reader expects a matching booking heading, native date input and native sport select; this portal renders custom date/time/club controls. Its recognition as `racket_id` in a fictional test is not actual UI adaptation or real Get receipt.
+
+### Outcome and next bounded action
+
+Two additional providers were inspected; zero complete available offers were imported into Get. The target of two real player-session platforms remains NOT MET. No selection, filter, colour or directory entry is counted as acceptance.
+
+Main blocker: no proven read-only transition from Racket ID time search to a complete court/duration/EUR offer. The focused first-party help search returned product descriptions rather than an operational no-hold preview contract (https://racket.id/). Next: verify that specific ordinary UI transition through visible provider instructions, or use the owner's normal initial login when the provider requires it; stop before an action that creates a hold/booking. Implement no speculative adapter from colour/time tiles. TiePlayer requires an ordinary supported app session; no API or club feed substitutes for it.
+
+Executor actions were page navigation, club-card expansion, date/sport filters, scrolling and visible UI inspection only. No provider booking/time cell, authentication, hold, checkout, payment, outreach, deployment or merge. Provider-internal traffic was not inspected. `PUBLIC_GO=false`.
