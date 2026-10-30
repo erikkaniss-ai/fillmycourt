@@ -374,6 +374,18 @@ test('no acknowledgement does not consume the result window and no-response expi
   assert.match(p.text('personalStatus'),/READ_FAILED.*Reader 0\.4\.2/);
   const empty=pageRig();empty.find();empty.expire();
   assert.match(empty.text('sourceStatus'),/timed out without a compatible Reader 0\.4\.2 response/);
+  assert.match(empty.text('searchStatus'),/Search finished without verified offers/);
+});
+
+test('the three-version metadata budget is shared across both groups without hiding that an unsupported reply arrived',()=>{
+  const p=pageRig(),nonce=p.find();
+  for(const version of ['0.2.3','0.2.4','0.3.0'])
+    p.respond(nonce,{version,code:'REQUEST_REJECTED'},'gac:auto-search-response');
+  p.respond(nonce,{version:'0.3.1',code:'READ_FAILED'});
+  p.expire();
+  assert.match(p.text('personalStatus'),/Reader 0\.2\.3.*Reader 0\.2\.4.*Reader 0\.3\.0/);
+  assert.match(p.text('sourceStatus'),/only unsupported replies received.*metadata limit reached/);
+  assert.doesNotMatch(p.text('sourceStatus'),/0\.3\.1/);
 });
 
 test('the first compatible failure settles its group while another compatible source remains usable',()=>{

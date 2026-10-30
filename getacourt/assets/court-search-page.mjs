@@ -36,22 +36,33 @@ const compatibleReader='0.4.2';
 const returnedVersion=result=>typeof result?.version==='string'&&/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(result.version)
   ?result.version:null;
 const readerVersion=result=>returnedVersion(result)?' · Reader '+returnedVersion(result):' · Reader version not reported';
-const incompatibleText=request=>request.incompatible.map(r=>(r.version?'Reader '+r.version:'Reader version not reported')+
-  ' ('+r.code+')').join('; ');
+const incompatibleText=request=>[...request.incompatible.values()]
+  .filter(r=>Object.hasOwn(r.codes,request.group))
+  .map(r=>(r.version?'Reader '+r.version:'Reader version not reported')+
+    ' ('+r.codes[request.group]+')').join('; ');
 function incompatibleReply(request,result){
   const version=returnedVersion(result);
   // Store no old observations, exceptions, identifiers or URLs. Duplicate ACKs
   // and responses cannot restart the deadline or grow an unbounded history.
-  if(request.incompatible.length<3&&!request.incompatible.some(r=>r.version===version))
-    request.incompatible.push({version,code:readerCode(result)});
-  return incompatibleText(request);
+  request.unsupported=true;
+  let entry=request.incompatible.get(version);
+  if(!entry&&request.incompatible.size<3){
+    entry={version,codes:{}};request.incompatible.set(version,entry);
+  }
+  if(entry&&!Object.hasOwn(entry.codes,request.group))entry.codes[request.group]=readerCode(result);
+  return incompatibleText(request)||'unsupported reply (metadata limit reached)';
 }
 function readerDeadline(request,label){
-  return request.incompatible.length
-    ?label+': only unsupported replies received — '+incompatibleText(request)+
+  return request.unsupported
+    ?label+': only unsupported replies received — '+
+      (incompatibleText(request)||'unsupported reply (metadata limit reached)')+
       '. Expected Reader '+compatibleReader+' did not respond; connection and availability unverified.'
     :label+' timed out without a compatible Reader '+compatibleReader+
       ' response; connection and availability unverified.';
+}
+function finishWaitingStatus(){
+  if(!pendingAuto&&!additionalPending&&!observations.size)
+    status.textContent='Search finished without verified offers. Reader compatibility or connection remains unverified; other courts may exist.';
 }
 function autoError(result){
   const code=readerCode(result);
@@ -71,15 +82,17 @@ function autoError(result){
 function startAutomaticSearch(){
   if(!query)return;
   const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
-  const request={nonce,query,revision,acked:false,incompatible:[]};
+  const incompatible=new Map(); // At most three versions across BOTH groups.
+  const request={nonce,query,revision,acked:false,incompatible,group:'playtomic',unsupported:false};
   cancelAuto();cancelAdditional();pendingAuto=request;
-  const extraRequest={nonce,query,revision,incompatible:[]};
+  const extraRequest={nonce,query,revision,incompatible,group:'additional',unsupported:false};
   additionalPending=extraRequest;
   additionalTimer=setTimeout(()=>{
     if(additionalPending===extraRequest){
       additionalPending=null;
       additionalStates.set('additional',readerDeadline(extraRequest,'Additional provider search'));
       renderSources();
+      finishWaitingStatus();
     }
   },45000);
   status.textContent='Searching your connected personal booking systems…';
@@ -95,6 +108,7 @@ function startAutomaticSearch(){
     if(pendingAuto!==request)return;
     cancelAuto();
     personalStatus.textContent=readerDeadline(request,'Playtomic search');
+    finishWaitingStatus();
   },45000);
   window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query}}));
 }
