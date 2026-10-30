@@ -10,9 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-import hashlib
 import json
-import time
 import uuid
 
 import httpx
@@ -41,16 +39,17 @@ class SupabaseAuth:
     """Validate bearer tokens using Supabase Auth's canonical /user endpoint.
 
     This avoids embedding the project's signing secret in Railway and works
-    before/after Supabase signing-key rotation. A short token-hash cache limits
-    auth round-trips without storing raw access tokens.
+    before/after Supabase signing-key rotation. Every request revalidates with
+    Auth: a previous success must not mask revocation, expiry or an outage.
+    This cannot revoke a token that Auth itself still accepts (for example,
+    some sign-out flows leave access JWTs valid until their expiry).
     """
 
-    def __init__(self, url: str, publishable_key: str, http=None, ttl: int = 30):
+    def __init__(self, url: str, publishable_key: str, http=None, ttl: int = 0):
         self.url = url.rstrip("/")
         self.key = publishable_key
         self.http = http or httpx.Client(timeout=5, follow_redirects=False)
-        self.ttl = ttl
-        self.cache: dict[str, tuple[float, Actor]] = {}
+        # Legacy callers may pass ttl; it no longer enables successful-auth reuse.
 
     def verify(self, authorization: str | None) -> Actor:
         if not authorization or not authorization.startswith("Bearer "):
@@ -60,11 +59,6 @@ class SupabaseAuth:
             raise DomainError("AUTH_REQUIRED", "Sign in is required.", 401)
         if not self.url or not self.key:
             raise DomainError("AUTH_UNAVAILABLE", "Authentication is not configured.", 503)
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        hit = self.cache.get(digest)
-        now = time.time()
-        if hit and hit[0] > now:
-            return hit[1]
         try:
             r = self.http.get(
                 f"{self.url}/auth/v1/user",
@@ -72,14 +66,20 @@ class SupabaseAuth:
             )
         except httpx.HTTPError as exc:
             raise DomainError("AUTH_UNAVAILABLE", "Authentication service unavailable.", 503) from exc
+        # No retries or cached fallback on rate limits or authority outages.
+        if r.status_code == 429 or r.status_code >= 500:
+            raise DomainError("AUTH_UNAVAILABLE", "Authentication service unavailable.", 503)
         if r.status_code != 200:
             raise DomainError("AUTH_INVALID", "Session is invalid or expired.", 401)
-        data = r.json()
-        actor = Actor(id=str(data["id"]), email=data.get("email"))
-        self.cache[digest] = (now + self.ttl, actor)
-        if len(self.cache) > 5000:
-            self.cache = {k: v for k, v in self.cache.items() if v[0] > now}
-        return actor
+        try:
+            data = r.json()
+            user_id = str(uuid.UUID(data["id"]))
+            email = data.get("email")
+            if email is not None and not isinstance(email, str):
+                raise ValueError("Invalid identity")
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise DomainError("AUTH_UNAVAILABLE", "Authentication response could not be verified.", 503) from None
+        return Actor(id=user_id, email=email)
 
 
 class V1Store:

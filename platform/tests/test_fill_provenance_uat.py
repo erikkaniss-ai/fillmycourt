@@ -130,11 +130,14 @@ def two_org_uat(monkeypatch):
                      "ext": "booking-fixture" if n == 0 else f"uat-{n}",
                      "metadata": json.dumps(metadata[n])})
 
+    auth_calls = []
+
     def auth_response(request):
         assert str(request.url) == "https://auth.uat.invalid/auth/v1/user"
         assert request.method == "GET"
         name = next((name for name, token in tokens.items()
                      if request.headers.get("authorization") == "Bearer " + token), None)
+        auth_calls.append(name)
         if name is None:
             return httpx.Response(401, json={"error": "synthetic invalid session"})
         # Forged user-editable role and org claims MUST NOT grant DB access.
@@ -155,7 +158,8 @@ def two_org_uat(monkeypatch):
             data_contract="supabase-v1")
         with TestClient(create_v1_app(settings, "operations", auth_override=auth)) as client:
             yield SimpleNamespace(db=db, client=client, orgs=orgs, connections=connections,
-                                  users=users, tokens=tokens, booking_ids=ids, auth=auth)
+                                  users=users, tokens=tokens, booking_ids=ids, auth=auth,
+                                  auth_calls=auth_calls)
     db.engine.dispose()
 
 
@@ -236,10 +240,10 @@ def test_two_org_auth_denials_do_not_return_private_data(two_org_uat, authorizat
             assert response.headers["cache-control"] == "no-store"
 
 
-def test_membership_changes_are_rechecked_even_with_a_cached_actor(two_org_uat):
+def test_membership_changes_and_identity_are_rechecked_on_each_request(two_org_uat):
     uat = two_org_uat
     assert report(uat, 0, "dual_admin").status_code == 200
-    assert uat.auth.cache, "Exercise the normal short-lived identity cache"
+    assert uat.auth_calls == ["dual_admin"]
     with uat.db.trusted() as c:
         c.execute(text("""update public.organization_members set role='manager'
             where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)"""),
@@ -251,6 +255,7 @@ def test_membership_changes_are_rechecked_even_with_a_cached_actor(two_org_uat):
             where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)"""),
             {"org": uat.orgs[1], "uid": uat.users["dual_admin"]})
     assert report(uat, 1, "dual_admin").status_code == 403
+    assert uat.auth_calls == ["dual_admin"] * 4, "Every membership read also revalidates Auth"
 
 
 def scoped_snapshot(uat):
