@@ -22,9 +22,9 @@ const official={
   tiesports:{url:source1,venue:"OPA OEIRAS"},
   racket_id:{url:source2,venue:"Rackets Pro Academy — Quinta da Marinha"}
 };
-function rig({denyRacket=false,wrongProvider=false}={}){
+function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRacket=false}={}){
   const local={approvedExtraSources:{tiesports:source1,racket_id:source2}};
-  const session={},created=[],calls=[],listeners={};
+  const session={},created=[],removed=[],calls=[],listeners={};
   const get=(data,keys)=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,data[key]]));
   let nextId=3;
   const storage=data=>({
@@ -39,14 +39,24 @@ function rig({denyRacket=false,wrongProvider=false}={}){
     tabs:{
       query:async()=>[{id:1,url:source1,windowId:1,status:"complete"}],
       create:async o=>{const tab={...o,id:nextId++};created.push(tab);return tab;},
-      get:async id=>({id,windowId:1,url:created.find(t=>t.id===id)?.url||source1,status:"complete"}),
+      get:async id=>{
+        const tab=created.find(t=>t.id===id);
+        if(timeoutRacket&&tab?.url===source2)throw Error("TAB_LOAD_TIMEOUT");
+        return {id,windowId:1,url:tab?.url||source1,status:"complete"};
+      },
+      remove:async id=>{removed.push(id);},
       onUpdated:{addListener(){},removeListener(){}},
       sendMessage:async()=>({status:"delivered"}),
       update:async()=>{}
     },
     windows:{get:async()=>({width:480}),create:async()=>({id:1}),update:async()=>{}},
     scripting:{executeScript:async data=>{
-      if(data.files){calls.push({files:data.files});return [];}
+      if(data.files){
+        calls.push({files:data.files});
+        if(revokeRacket&&created.at(-1)?.url===source2)
+          listeners.msg({action:"revoke"},sender,()=>{});
+        return [];
+      }
       const url=created.at(-1)?.url;
       const provider=url===source1?"tiesports":"racket_id";
       const reference=official[provider];
@@ -76,7 +86,7 @@ function rig({denyRacket=false,wrongProvider=false}={}){
     chrome:{runtime:{sendMessage:send}},
     CustomEvent:class {constructor(type,options){this.type=type;this.detail=options.detail;}}});
   vm.runInContext(relay,target);
-  return {chrome,local,session,calls,posted,events,created,send};
+  return {chrome,local,session,calls,posted,events,created,removed,send};
 }
 function find(rig){
   rig.events["gac:additional-sources-request"]({
@@ -95,6 +105,8 @@ test("one Find fans out to independently consented TieSports and Racket ID sessi
   assert.equal(result.sources.filter(s=>s.status==="observed").length,2);
   assert.equal(r.created.length,2);
   assert.deepEqual(r.created.map(x=>x.url),[source1,source2]);
+  assert.deepEqual(r.removed,r.created.map(x=>x.id));
+  assert.ok(!r.removed.includes(1));
   assert.equal(r.calls.filter(x=>x.func).length,2);
   for(const item of result.sources){
     const clean=validate(item.observation);
@@ -121,7 +133,34 @@ test("failure of one platform permission or forged provider payload leaves indep
     assert.equal(result.sources[1].status,"unavailable");
     assert.equal(result.sources[1].code,
       options.denyRacket?"SITE_ACCESS_REQUIRED":"OFFER_FORMAT_CHANGED");
+    assert.deepEqual(r.removed,r.created.map(x=>x.id));
+    assert.ok(!r.removed.includes(1));
   }
+});
+test("each owned temporary tab closes after timeout, access revoke, or a partial provider result",async()=>{
+  for(const [options,code] of [
+    [{timeoutRacket:true},"READ_FAILED"],
+    [{revokeRacket:true},"CONSENT_WITHDRAWN"]
+  ]){
+    const r=rig(options);find(r);
+    const result=await response(r);
+    assert.equal(result.status,"partial");
+    assert.equal(result.sources[0].status,"observed");
+    assert.equal(result.sources[1].status,"unavailable");
+    assert.equal(result.sources[1].code,code);
+    assert.deepEqual(r.removed,r.created.map(x=>x.id));
+    assert.ok(!r.removed.includes(1));
+  }
+});
+test("a later explicit Find cleans only its own newly created provider tabs",async()=>{
+  const r=rig();
+  find(r);await response(r);
+  delete r.session["lastAttemptExtra:tiesports"];
+  delete r.session["lastAttemptExtra:racket_id"];
+  find(r);await response(r);
+  assert.equal(r.created.length,4);
+  assert.deepEqual(r.removed,r.created.map(x=>x.id));
+  assert.ok(!r.removed.includes(1));
 });
 test("no provider is searched without an explicit Get Find gesture, no repeated bulk polling",async()=>{
   const r=rig();

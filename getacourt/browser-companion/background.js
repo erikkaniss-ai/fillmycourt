@@ -91,6 +91,7 @@ async function autoSearchAdditionalFromGet(query) {
     const results=[];
     for(const [provider,sourceUrl] of verified.slice(0,4)){
       const result={provider,status:"unavailable",code:"READ_FAILED"};
+      let createdTabId=null;
       try{
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         if(!await chrome.permissions.contains({origins:[EXTRA_PROVIDERS[provider].origin]}))
@@ -102,12 +103,14 @@ async function autoSearchAdditionalFromGet(query) {
         // The source page runs in this player's own ordinary Chrome profile.
         // No provider API, cross-account session, cookie read or remote agent.
         const tab=await chrome.tabs.create({url:sourceUrl,active:false});
+        createdTabId=tab.id;
         await waitForPage(tab.id);
         if(epoch!==generation)fail("CONSENT_WITHDRAWN");
         await chrome.scripting.executeScript({target:{tabId:tab.id},
           files:["visible-provider-offers.js","visible-provider-page.js"]});
         const captured=await chrome.scripting.executeScript({target:{tabId:tab.id},
           func:async q=>readVisibleProviderPage(q),args:[query]});
+        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         const observation=captured?.find(x=>x.frameId===0)?.result;
         if(observation?.readerError)fail(observation.readerError);
         if(observation?.provider!==provider||observation?.sourceUrl!==sourceUrl)
@@ -117,6 +120,12 @@ async function autoSearchAdditionalFromGet(query) {
         result.status="observed";result.observation=sanitized;delete result.code;
       }catch(error){
         result.code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
+      }finally{
+        // This search owns only the tab it just created. Never close an existing
+        // player tab; cleanup cannot replace the provider-read result or error.
+        if(Number.isInteger(createdTabId)&&typeof chrome.tabs.remove==="function"){
+          try{await chrome.tabs.remove(createdTabId);}catch{}
+        }
       }
       results.push(result);
     }
