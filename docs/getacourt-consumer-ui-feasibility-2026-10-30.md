@@ -138,3 +138,27 @@ The sanitized observation was entered through the existing manual troubleshootin
 - Unit/DOM-shaped tests bind the inspected structure to strict Get normalization and exercise bad date/duration/price and existing-tab ownership. The new preview tests are included through the existing required visible-provider test entrypoint; no workflow edits.
 
 Real Racket quote delivery is now evidenced locally. The full two-platform player-session MVP remains NOT ACCEPTED; the next bounded step is installed-extension verification of this existing-preview reader, followed by safe ordinary query-to-preview navigation. `PUBLIC_GO=false`.
+
+## Reader 0.4.2 — automatic Racket search preparation; installed one-Find UAT pending
+
+30 October 2026, continuation from verified `c06d27a0584b0c9a4ea8238c9dbb0ad22c73cb44`.
+Lease: Get browser companion, its Get tests, and this document only. No shared workflows, Core, provider API, host-permission expansion or deploy.
+
+Implemented the ordinary inspected search path behind Get Find: the page relay forwards the exact club name, the existing approved Racket source opens a task-owned temporary tab, and the provider-specific adapter operates only the visible date / exact club / start-time / Select courts controls. It validates the visible 60-minute summary before opening the priced preview, reads the strict quote, and returns it through the existing automatic extension relay. It never clicks Continue, a specific court checkbox, checkout or confirmation. Existing player tabs are preserved and task tabs retain per-source cleanup. Budget is 20 seconds; only one requested start time is inspected, with partial coverage. Only Padel and 60-minute preparation are supported; unproven 90-minute preparation fails closed. Exact club name is required (for example Carcavelos Tenis & Padel); area-wide discovery is not implied.
+
+Consent checks are performed by the extension background, bound to the active task tab, epoch, exact first-party URL and approved Racket origin. The injected script uses runtime messaging rather than unsupported content-script permissions APIs. Revoke, missing grant, lost route or ambiguous controls stop navigation and suppress offers. DOM-shaped tests cover the complete no-import message/navigation path, task-tab ownership and revoke before further clicks. These are fixture tests, not live installed-extension evidence.
+
+Reader manifest, background and visible popup identify 0.4.2 so a loaded browser copy can be distinguished from the prior build. No provider permission is silently granted; the initial player login and provider-specific grant remain owner-controlled and revocable.
+
+### Actual protected browser attempt, approximately 08:50–08:56 Lisbon
+
+- Chrome extension control was available. Opening the protected Get receiver initially showed Netlify Team protection; after normal loading it reached find.html without any authentication action by the executor. Team Login is therefore NOT a current blocker.
+- Set exact club Carcavelos Tenis & Padel, date 2026-10-31, 08:00 start, 60 minutes; clicked Find courts once. No diagnostic import, DOM event fabrication, provider payload injection or manual observation transfer was used.
+- The currently configured browser returned no verified offers; Racket ID remained not connected/unverified. This is not a live test of the new source build, because the browser's loaded Reader version/grant could not be verified or updated by the agent.
+- Opening chrome://extensions/ was rejected by the browser URL security policy (only HTTP/HTTPS permitted). No native-app, CDP, browser command, profile-file or other workaround was attempted. The user must perform any existing extension reload/initial grant themselves.
+
+### Concrete owner-side completion step
+
+In the same Chrome profile, manually reload the existing unpacked GetACourt Reader from this checkout's `getacourt/browser-companion` folder and verify its popup says 0.4.2. If this is not the existing loaded folder, use the existing reader's Details/source location to reconcile it; do not install a duplicate. On https://racket.id/booking sign in normally if required, then use the Reader's existing Connect action to grant Racket site access once. Return to https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html and reload that page so its relay is current. Then the executor can repeat the same single Find and inspect only real returned quote cards. No public/private redeploy is needed for this source/extension setup step.
+
+Status: automatic path implemented and fixture-verified; real installed-extension one-Find acceptance NOT RUN on the new build, no successful live claim. The prior real diagnostic quote receipt is preserved above but does not substitute for this test. `PUBLIC_GO=false`.

@@ -43,7 +43,7 @@
       !["padel","tennis"].includes(q.sport)||!["any","60","90"].includes(q.duration))return;
     const nonce=detail.nonce;
     const providerQuery={date:q.date,sport:q.sport==="padel"?"Padel":"Tennis",
-      from:q.from,to:q.to,durationMinutes:q.duration==="any"?0:Number(q.duration)};
+      location:q.location,from:q.from,to:q.to,durationMinutes:q.duration==="any"?0:Number(q.duration)};
     chrome.runtime.sendMessage({action:"autoSearchAdditionalFromGet",query:providerQuery})
       .then(result=>publish("gac:additional-sources-response",{nonce,result}))
       .catch(()=>publish("gac:additional-sources-response",{nonce,

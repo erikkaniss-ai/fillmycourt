@@ -1,5 +1,5 @@
 importScripts("capture.js","observation.js","playtomic-club-catalog.js");
-const VERSION="0.4.1";
+const VERSION="0.4.2";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
 const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
@@ -78,9 +78,11 @@ async function approveAdditional() {
   await chrome.storage.local.set({approvedExtraSources:next});
   return {status:"connected",provider:parsed.provider,sourceUrl:parsed.sourceUrl,version:VERSION};
 }
-let extraBusy=false;
+let extraBusy=false,racketNavigation=null;
 async function autoSearchAdditionalFromGet(query) {
-  if(!queryValid(query))fail("QUERY_INVALID");
+  const {location:area,...filters}=query||{};
+  if(!queryValid(filters)||(area!==undefined&&
+    (typeof area!=="string"||!area.trim()||area.length>80)))fail("QUERY_INVALID");
   if(extraBusy)fail("READ_BUSY");
   extraBusy=true;
   const epoch=generation;
@@ -104,7 +106,7 @@ async function autoSearchAdditionalFromGet(query) {
         // No provider API, cross-account session, cookie read or remote agent.
         // An open Racket ID preview belongs to the player. Read only an exact,
         // uniquely matching existing tab; never close it or click Continue.
-        const existing=provider==="racket_id"
+        const existing=provider==="racket_id"&&!area
           ?(await chrome.tabs.query({url:sourceUrl})).filter(t=>t.url===sourceUrl):[];
         if(existing.length>1)fail("TAB_CHANGED");
         const tab=existing[0]||await chrome.tabs.create({url:sourceUrl,active:false});
@@ -113,8 +115,10 @@ async function autoSearchAdditionalFromGet(query) {
         if(epoch!==generation)fail("CONSENT_WITHDRAWN");
         await chrome.scripting.executeScript({target:{tabId:tab.id},
           files:["visible-provider-offers.js","racket-preview.js","visible-provider-page.js"]});
+        if(provider==="racket_id"&&area)racketNavigation={tabId:tab.id,epoch};
         const captured=await chrome.scripting.executeScript({target:{tabId:tab.id},
-          func:async q=>readVisibleProviderPage(q),args:[query]});
+          func:async(q,epoch)=>q.location&&location.href==="https://racket.id/booking"
+            ?GetACourtRacketPreview.search(q,epoch):readVisibleProviderPage(q),args:[query,epoch]});
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         const observation=captured?.find(x=>x.frameId===0)?.result;
         if(observation?.readerError)fail(observation.readerError);
@@ -126,6 +130,7 @@ async function autoSearchAdditionalFromGet(query) {
       }catch(error){
         result.code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
       }finally{
+        if(provider==="racket_id")racketNavigation=null;
         // This search owns only the tab it just created. Never close an existing
         // player tab; cleanup cannot replace the provider-read result or error.
         if(Number.isInteger(createdTabId)&&typeof chrome.tabs.remove==="function"){
@@ -444,6 +449,20 @@ async function runSearch(query){
   }finally{busy=false;}
 }
 async function handle(message,sender){
+  // Only this active task's exact Racket tab can ask whether its existing
+  // grant is still valid. Content scripts do not have chrome.permissions.
+  if(message?.action==="racketNavigationConsent"){
+    const active=racketNavigation;
+    if(!active||Object.keys(message).sort().join(",")!=="action,epoch"||
+      sender?.id!==chrome.runtime.id||sender.frameId!==0||
+      sender.url!=="https://racket.id/booking"||sender.tab?.id!==active.tabId||
+      message.epoch!==active.epoch||generation!==active.epoch||consentPending)
+      return {allowed:false};
+    const {approvedExtraSources={}}=await chrome.storage.local.get("approvedExtraSources");
+    const permitted=await chrome.permissions.contains({origins:["https://racket.id/*"]});
+    return {allowed:permitted&&approvedExtraSources.racket_id==="https://racket.id/booking"&&
+      racketNavigation===active&&generation===active.epoch&&!consentPending};
+  }
   const role=caller(sender);
   const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],
     search:["action","query"],autoSearchFromGet:["action","query"],autoSearchPlaytomicClubsFromGet:["action","query"],autoStatus:["action"],

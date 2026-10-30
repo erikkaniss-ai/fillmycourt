@@ -24,7 +24,7 @@ const official={
 };
 function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRacket=false,existingRacket=false}={}){
   const local={approvedExtraSources:{tiesports:source1,racket_id:source2}};
-  const session={},created=[],removed=[],calls=[],listeners={};
+  const session={},created=[],removed=[],calls=[],listeners={},consentReplies=[];
   const get=(data,keys)=>Object.fromEntries((Array.isArray(keys)?keys:[keys]).map(key=>[key,data[key]]));
   let nextId=3;
   const storage=data=>({
@@ -62,6 +62,11 @@ function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRac
       const url=data.target.tabId===2?source2:created.find(t=>t.id===data.target.tabId)?.url;
       const provider=url===source1?"tiesports":"racket_id";
       const reference=official[provider];
+      if(provider==='racket_id'&&data.args?.[0]?.location){
+        const ask=(sender)=>new Promise(resolve=>listeners.msg({action:'racketNavigationConsent',epoch:data.args[1]},sender,resolve));
+        consentReplies.push(await ask({id:'reader',url:source2,frameId:0,tab:{id:data.target.tabId}}));
+        consentReplies.push(await ask({id:'reader',url:source2,frameId:0,tab:{id:999}}));
+      }
       const offer={
         provider:wrongProvider&&provider==="racket_id"?"tiesports":provider,
         source:"user_ui_observation",sourceUrl:reference.url,venue:reference.venue,
@@ -88,7 +93,7 @@ function rig({denyRacket=false,wrongProvider=false,timeoutRacket=false,revokeRac
     chrome:{runtime:{sendMessage:send}},
     CustomEvent:class {constructor(type,options){this.type=type;this.detail=options.detail;}}});
   vm.runInContext(relay,target);
-  return {chrome,local,session,calls,posted,events,created,removed,send};
+  return {chrome,local,session,calls,posted,events,created,removed,send,consentReplies};
 }
 function find(rig){
   rig.events["gac:additional-sources-request"]({
@@ -165,10 +170,25 @@ test("a later explicit Find cleans only its own newly created provider tabs",asy
   assert.ok(!r.removed.includes(1));
 });
 test("Get Find reads the one existing approved Racket preview and never closes the player's tab",async()=>{
+  const r=rig({existingRacket:true});
+  const result=await r.send({action:'autoSearchAdditionalFromGet',query:providerQuery});
+  assert.equal(result.sources[1].status,'observed');
+  assert.deepEqual(r.created.map(t=>t.url),[source1]);
+  assert.deepEqual(r.removed,r.created.map(t=>t.id));
+  assert.ok(!r.removed.includes(2));
+});
+test("Racket navigation consent is bound to the active owned tab and cannot be borrowed by the Get page",async()=>{
+  const r=rig();
+  assert.equal((await r.send({action:'racketNavigationConsent',epoch:0})).allowed,false);
+  find(r);await response(r);
+  assert.deepEqual(r.consentReplies.map(v=>v.allowed),[true,false]);
+  assert.equal((await r.send({action:'racketNavigationConsent',epoch:0})).allowed,false);
+});
+test("normal Find carries location and owns its navigation tab, leaving an existing player tab untouched",async()=>{
   const r=rig({existingRacket:true});find(r);
   const result=await response(r);
   assert.equal(result.sources[1].status,'observed');
-  assert.deepEqual(r.created.map(t=>t.url),[source1]);
+  assert.deepEqual(r.created.map(t=>t.url),[source1,source2]);
   assert.deepEqual(r.removed,r.created.map(t=>t.id));
   assert.ok(!r.removed.includes(2));
 });

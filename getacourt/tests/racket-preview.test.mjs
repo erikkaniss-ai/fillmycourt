@@ -55,3 +55,54 @@ test('actual nested preview DOM shape is read without interacting with controls 
   context.location.href='https://racket.id/booking?token=forbidden';
   assert.equal(source.readPreview(q).readerError,'CLUB_PAGE_REQUIRED');
 });
+
+function navigationRig({revokeAfterClub=false}={}){
+  let phase=0,consented=true;
+  const clicks=[];
+  const visible=(innerText,parentElement)=>({innerText,children:[],parentElement,getClientRects:()=>[{}]});
+  const control=(text,next)=>Object.assign(visible(text),{click(){
+    clicks.push(text);phase=next;
+    if(revokeAfterClub&&next===2)consented=false;
+  }});
+  const dialog=visible('Select courts\n'+header+'\n'+rows.join('\n')+'\nCancel\nContinue');
+  const title=visible('Select courts',visible('Select courts',visible('Select courts',dialog)));
+  const date=visible('Sat 31 Oct',visible('Sat 31 Oct\n08:00-09:00',
+    visible('Sat 31 Oct\n08:00-09:00\n60 min',visible(header,dialog))));
+  const prices=rows.map(row=>visible('30.6 eur',visible('30.6 eur',visible(row,dialog))));
+  const preview=[title,date,...prices];dialog.contains=e=>preview.includes(e);
+  const states=[
+    [control('SAT\n31\nOCT',1)],
+    [control('Carcavelos Tenis & Padel',2)],
+    [control('08:00',3)],
+    [visible('08:00–09:00 · 60 minutes'),visible('Carcavelos Tenis & Padel · Sat 31 Oct'),control('Select courts',4)],
+    preview
+  ];
+  class FixtureDate extends Date {static now(){return now;} constructor(value){super(value===undefined?now:value);}}
+  const context=vm.createContext({document:{querySelectorAll:s=>s==='div'?states[phase]:[]},
+    location:{href:'https://racket.id/booking'},getComputedStyle:()=>({visibility:'visible'}),
+    Date:FixtureDate,Intl,setTimeout,
+    chrome:{runtime:{sendMessage:async message=>({allowed:consented&&
+      message.action==='racketNavigationConsent'&&message.epoch===7})}}});
+  vm.runInContext(readFileSync(new URL('../browser-companion/racket-preview.js',import.meta.url),'utf8'),context);
+  return {search:query=>context.GetACourtRacketPreview.search(query,7),clicks};
+}
+test('one requested Find navigates only inspected date/club/time/preview controls and reads actual-shaped quotes',async()=>{
+  const r=navigationRig();
+  const observation=await r.search({...q,location:'Carcavelos Tenis & Padel'});
+  assert.equal(observation.offers.length,2);
+  assert.deepEqual(r.clicks,['SAT\n31\nOCT','Carcavelos Tenis & Padel','08:00','Select courts']);
+  assert.ok(!r.clicks.includes('Continue'));
+});
+test('revoke during normal navigation stops before further clicks and returns no offer',async()=>{
+  const r=navigationRig({revokeAfterClub:true});
+  const result=await r.search({...q,location:'Carcavelos Tenis & Padel'});
+  assert.equal(result.readerError,'CONSENT_WITHDRAWN');
+  assert.equal(r.clicks.length,2);
+});
+test('unproven 90-minute preparation and malformed query cannot operate the provider',async()=>{
+  for(const query of [{...q,durationMinutes:90,location:'Carcavelos Tenis & Padel'},
+    {...q,date:'bad',location:'Carcavelos Tenis & Padel'}]){
+    const r=navigationRig();assert.equal((await r.search(query)).readerError,'QUERY_INVALID');
+    assert.equal(r.clicks.length,0);
+  }
+});
