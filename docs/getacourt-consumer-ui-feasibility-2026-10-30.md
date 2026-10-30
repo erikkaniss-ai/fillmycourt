@@ -33,3 +33,40 @@ The rendered MATCHi headings were Sotra Padel, Applications, Activities, About S
 ## Next bounded task
 
 Implement no speculative broad parser changes from this research alone. First inspect Fly Padel's normal date/sport controls without touching a reserving action, determine whether a non-reserving offer preview exposes the required total, then implement a provider-specific adapter only for that proven UI. If the explicit price requires authentication or a booking/hold boundary, record that boundary and stop. Retain the existing route, consent, freshness and session-isolation guards. P0 acceptance still requires two real independently sourced player-session court offers. `PUBLIC_GO=false`.
+
+## GET-CTO-04 — ordinary date/sport controls and preview boundary
+
+Observed 2026-10-30 approximately 03:53–03:55 UTC / Europe-Lisbon.
+Baseline verified on GitHub and clean local branch: `6b35ac7eed09a02b396fb51c991ee8b0a303072f`.
+Only this document is changed; no parser, permission, origin or frame change.
+
+### Reproduction through normal UI
+
+1. Open the canonical Fly Padel page and allow its ordinary schedule to finish loading.
+2. Open the schedule sport combobox, which offers Todos desportos and Padel (5); choose Padel (5). The five named court rows remain visible.
+3. Open the schedule Hoje date popover. Its calendar shows outubro 2026, selected 30 and enabled 31; older dates are disabled.
+4. Select 31 and dismiss the date popover. The schedule briefly displays A procurar disponibilidade..., then renders the next day's court grid. The date control reads Amanhã; the browser URL becomes `https://smashpro.pt/pt/c/fly-padel?date=2026-10-31`. Grid hour labels change to 09–18. These labels describe the schedule, not a complete offer.
+5. Inspect visible button text and accessibility labels without activating any grid cell. The court-cell buttons have empty text and no aria-label/title that identifies a non-reserving preview. No explicit EUR/€ price appears in the visible main-document text. Screenshot inspection confirms the date/sport selections and court rows, without a priced offer panel.
+
+### Required-field receipt
+
+| Field | Evidence / state |
+|---|---|
+| Provider / club | Smashpro / Fly Padel, official canonical club route |
+| Selected date | VERIFIED 2026-10-31 via normal calendar and resulting URL |
+| Selected sport | VERIFIED Padel (5), schedule combobox |
+| Court names | VERIFIED five labelled rows; no individual row is promoted to an available offer |
+| Offer start/end and duration | UNKNOWN: axis hours are not bound to an explicit priced offer; header search default 1h 30m is not a court-offer duration |
+| Full EUR total | MISSING in inspected visible schedule; no currency or price invented |
+| Freshness / provenance | Live ordinary consumer UI observation at the time above; provider source freshness unknown; no offer accepted |
+| Official handoff | Canonical club page identified; no individual offer handoff proven |
+| Safe non-reserving preview | NOT PROVEN: unnamed grid buttons do not establish their side effect; no grid button clicked |
+| Authentication / writes | No login, account/session inspection, booking cell, hold, checkout, payment or contact action; ordinary filters only. Internal provider traffic was not audited |
+
+### Additional concrete compatibility finding
+
+The official date filter adds `?date=2026-10-31`. Both `additionalProviderRoute()` in `background.js` and the initial URL guard in `visible-provider-page.js` reject every Smashpro query parameter. Thus the observed filtered URL cannot be approved as an additional source, and a page whose own date control changes this URL fails a fresh reader invocation with `CLUB_PAGE_REQUIRED`. Together with the earlier heading/native-control gaps, this is a reproducible source compatibility issue. It is not permission to broadly allow query strings or alter canonical observation provenance.
+
+### Stop condition and safe next step
+
+GET-CTO-04 stops before an action whose booking/hold effect is unknown. No demonstrably non-reserving preview was exposed by the inspected controls. A future adapter needs first-party visible evidence that a specific details control is read-only and yields explicit date, court, start/end, duration and full EUR total; it must still stop at authentication/hold/checkout. Otherwise keep this source UNAVAILABLE for priced offers and assess another independently accessible consumer UI within the existing Get lane. No speculative parser implementation or API fallback follows from this receipt. `PUBLIC_GO=false`.
