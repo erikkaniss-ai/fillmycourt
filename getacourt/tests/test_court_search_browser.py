@@ -146,8 +146,12 @@ def test_one_click_receives_personal_result_without_manual_import(browser_page,f
         window.fixtureRequests++;
         window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',
           {detail:{nonce:event.detail.nonce}}));
+        // A legacy responder must not consume the compatible result window.
         window.dispatchEvent(new CustomEvent('gac:auto-search-response',
-          {detail:{nonce:event.detail.nonce,result:{status:'observed',observation:record}}}));
+          {detail:{nonce:event.detail.nonce,result:{status:'unavailable',
+            code:'REQUEST_REJECTED',version:'0.2.3'}}}));
+        window.dispatchEvent(new CustomEvent('gac:auto-search-response',
+          {detail:{nonce:event.detail.nonce,result:{status:'observed',observation:record,version:'0.4.2'}}}));
       });
     }""",record)
     page.get_by_role('button',name='Find courts',exact=True).click()
@@ -171,7 +175,7 @@ def test_auto_search_provider_login_expiry_is_explicit(browser_page,fixture_url)
           {detail:{nonce:event.detail.nonce}}));
         window.dispatchEvent(new CustomEvent('gac:auto-search-response',
           {detail:{nonce:event.detail.nonce,
-           result:{status:'unavailable',code:'CHALLENGE_REQUIRED'}}}));
+           result:{status:'unavailable',code:'CHALLENGE_REQUIRED',version:'0.4.2'}}}));
       });
     }""")
     page.get_by_role('button',name='Find courts',exact=True).click()
@@ -202,7 +206,7 @@ def test_one_find_combines_multiple_personal_playtomic_clubs_without_fabricating
         const nonce=ev.detail.nonce;
         window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',{detail:{nonce}}));
         window.dispatchEvent(new CustomEvent('gac:auto-search-response',{detail:{
-          nonce,result:{status:'partial',coverage:'bounded_reviewed_club_pages_only',sources:[
+          nonce,result:{status:'partial',version:'0.4.2',coverage:'bounded_reviewed_club_pages_only',sources:[
             {provider:'playtomic',sourceUrl:data.good.sourceUrl,
              status:'observed',observation:data.good},
             {provider:'playtomic',sourceUrl:data.other.sourceUrl,

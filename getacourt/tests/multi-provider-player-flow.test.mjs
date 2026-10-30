@@ -217,7 +217,7 @@ function pageRig(){
     normalizePersonalObservation,validateQuery:value=>value,localDay:()=>date,
     FormData:class extends Map {constructor(){super(Object.entries(pageQuery));}},
     crypto:{getRandomValues:array=>array.fill(++nonceByte)},
-    setTimeout:fn=>{timers.set(++nextTimer,fn);return nextTimer;},
+    setTimeout:(fn,delay)=>{timers.set(++nextTimer,{fn,delay});return nextTimer;},
     clearTimeout:id=>timers.delete(id),
     document:{getElementById:node,createElement:element,documentElement:{dataset:{}},addEventListener(){}},
     window:{addEventListener:(name,fn)=>handlers[name]=fn,dispatchEvent:event=>posted.push(event)},
@@ -232,28 +232,30 @@ function pageRig(){
   };
   const respond=(nonce,result,type='gac:additional-sources-response')=>handlers[type]({detail:{nonce,result}});
   const text=el=>[el.textContent,...el.children.map(text)].join(' ');
-  return {find,respond,node,text:id=>text(node(id)),timers};
+  const expire=()=>{for(const {fn,delay} of [...timers.values()])if(delay===45000)fn();};
+  const ack=nonce=>handlers['gac:auto-search-accepted']({detail:{nonce}});
+  return {find,respond,node,text:id=>text(node(id)),timers,expire,ack};
 }
 
 test('page exposes top-level additional failure and genuinely returned version without raw exception data',()=>{
   for(const result of [
     {status:'unavailable',code:'REQUEST_REJECTED',version:'0.4.2',error:'PRIVATE EXCEPTION'},
-    {status:'unavailable',code:'PRIVATE CODE',version:'PRIVATE VERSION',error:'PRIVATE EXCEPTION'}
+    {status:'unavailable',code:'PRIVATE CODE',version:'0.4.2',error:'PRIVATE EXCEPTION'}
   ]){
     const p=pageRig();p.respond(p.find(),result);
     const coverage=p.text('sourceStatus');
     assert.match(coverage,/Racket ID Additional provider search failed/);
     assert.match(coverage,/connection and availability unverified/);
-    assert.match(coverage,result.code==='REQUEST_REJECTED'?/REQUEST_REJECTED.*Reader 0\.4\.2/:/UNKNOWN.*Reader version not reported/);
+    assert.match(coverage,result.code==='REQUEST_REJECTED'?/REQUEST_REJECTED.*Reader 0\.4\.2/:/UNKNOWN.*Reader 0\.4\.2/);
     assert.doesNotMatch(coverage,/PRIVATE|Not connected/);
   }
 });
 
 test('empty, missing or oversized source lists never leave a misleading initial connection label',()=>{
-  for(const result of [undefined,{status:'partial',sources:[]},
+  for(const result of [{},{status:'partial',sources:[]},
     {status:'partial',sources:[{provider:'unknown'}]},
     {status:'partial',sources:Array(5).fill({})}]){
-    const p=pageRig();p.respond(p.find(),result);
+    const p=pageRig();p.respond(p.find(),{...result,version:'0.4.2'});
     assert.match(p.text('sourceStatus'),/Racket ID (?:No additional booking sources reported|Additional provider response unsupported)/);
     assert.doesNotMatch(p.text('sourceStatus'),/Not connected/);
     assert.equal(p.node('offers').children.length,1);
@@ -267,7 +269,7 @@ test('additional top-level failure preserves an independent valid Playtomic offe
     date,sport:'Padel',capturedAt:new Date().toISOString(),timezone:null,
     sourceFreshness:'unknown',coverage:'expanded_offers_only',
     offers:[{court:'FICTIONAL Court 1',startLabel:'6:00 PM',endLabel:'7:30 PM',durationMinutes:90,priceEur:36}]};
-  p.respond(nonce,{status:'observed',observation},'gac:auto-search-response');
+  p.respond(nonce,{status:'observed',observation,version:'0.4.2'},'gac:auto-search-response');
   assert.match(p.text('offers'),/FICTIONAL Court 1/);
   const card=p.node('offers').children[0];
   assert.equal(card.children.at(-1).href,observation.sourceUrl);
@@ -283,6 +285,8 @@ test('wrong nonce, stale search and duplicate error cannot replace current sourc
   const failure={status:'unavailable',code:'READ_FAILED',version:'0.4.2'};
   const initial=p.text('sourceStatus');
   p.respond('f'.repeat(48),failure);p.respond(stale,failure);
+  p.respond('f'.repeat(48),{...failure,version:'0.2.3'});
+  p.respond(stale,{...failure,version:'0.2.3'});
   assert.equal(p.text('sourceStatus'),initial);
   p.respond(current,{status:'partial',sources:[{provider:'racket_id',status:'unavailable',code:'SITE_ACCESS_REQUIRED'}],version:'0.4.2'});
   const settled=p.text('sourceStatus');
@@ -293,8 +297,92 @@ test('wrong nonce, stale search and duplicate error cannot replace current sourc
 
 test('additional timeout is visible per source and never hides the independent Playtomic state',()=>{
   const p=pageRig();p.find();
-  // First scheduled timer is the independent additional-source deadline.
-  p.timers.values().next().value();
+  p.expire();
   assert.match(p.text('sourceStatus'),/Racket ID Additional provider search timed out/);
   assert.match(p.text('sourceStatus'),/Playtomic One login/);
+});
+
+function pageObservation(provider){
+  return {provider,source:'user_ui_observation',
+    sourceUrl:provider==='playtomic'?'https://playtomic.com/clubs/cascais-padel-club':source2,
+    venue:provider==='playtomic'?'Cascais Padel Club':official.racket_id.venue,
+    date,sport:'Padel',capturedAt:new Date().toISOString(),timezone:null,
+    sourceFreshness:'unknown',coverage:'expanded_offers_only',
+    offers:[{court:'FICTIONAL compatible court',startLabel:'6:00 PM',endLabel:'7:30 PM',durationMinutes:90,priceEur:36}]};
+}
+
+test('an earlier legacy error cannot discard a later compatible successful reply in either independent group',()=>{
+  for(const provider of ['playtomic','racket_id']){
+    const p=pageRig(),nonce=p.find(),observation=pageObservation(provider);
+    const event=provider==='playtomic'?'gac:auto-search-response':'gac:additional-sources-response';
+    p.respond(nonce,{status:'unavailable',code:'REQUEST_REJECTED',version:'0.2.3'},event);
+    assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+    const success=provider==='playtomic'?{status:'observed',observation}:
+      {status:'partial',sources:[{provider,status:'observed',observation}]};
+    p.respond(nonce,{...success,version:'0.4.2'},event);
+    assert.match(p.text('offers'),/FICTIONAL compatible court/);
+    assert.equal(p.node('offers').children[0].children.at(-1).href,observation.sourceUrl);
+    const settled=p.text('sourceStatus');
+    p.respond(nonce,{status:'unavailable',code:'REQUEST_REJECTED',version:'0.2.3'},event);
+    assert.equal(p.text('sourceStatus'),settled);
+  }
+});
+
+test('old-only replies expire explicitly at the original deadline and late current replies cannot create offers',()=>{
+  const p=pageRig(),nonce=p.find();
+  for(const event of ['gac:auto-search-response','gac:additional-sources-response'])
+    p.respond(nonce,{status:'unavailable',code:'REQUEST_REJECTED',version:'0.2.3'},event);
+  assert.match(p.text('sourceStatus'),/Waiting for compatible Reader 0\.4\.2/);
+  p.expire();
+  assert.match(p.text('sourceStatus'),/only unsupported replies received.*Reader 0\.2\.3.*Expected Reader 0\.4\.2 did not respond/);
+  assert.match(p.text('personalStatus'),/only unsupported replies received/);
+  p.respond(nonce,{status:'observed',observation:pageObservation('playtomic'),version:'0.4.2'},'gac:auto-search-response');
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+});
+
+test('missing or malformed versions and old observations never settle or create cards; metadata stays bounded and sanitized',()=>{
+  const p=pageRig(),nonce=p.find();
+  for(const version of [undefined,'PRIVATE VERSION','0.2.3','0.2.4','0.3.0'])
+    p.respond(nonce,{status:'observed',observation:pageObservation('racket_id'),version,
+      code:'PRIVATE CODE',error:'PRIVATE ERROR',sourceUrl:'PRIVATE URL'});
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  p.expire();
+  const text=p.text('sourceStatus');
+  assert.match(text,/Reader version not reported \(UNKNOWN\).*Reader 0\.2\.3.*Reader 0\.2\.4/);
+  assert.doesNotMatch(text,/PRIVATE|Reader 0\.3\.0/);
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+});
+
+test('legacy responses and repeated acknowledgements never reset either 45-second deadline',()=>{
+  const p=pageRig(),nonce=p.find();
+  const deadlines=()=>[...p.timers].filter(([,t])=>t.delay===45000).map(([id])=>id);
+  const initial=deadlines();assert.equal(initial.length,2);
+  for(let i=0;i<5;i++){
+    p.ack(nonce);
+    p.respond(nonce,{status:'unavailable',code:'REQUEST_REJECTED',version:'0.2.3'});
+    p.respond(nonce,{status:'unavailable',code:'REQUEST_REJECTED',version:'0.2.3'},'gac:auto-search-response');
+  }
+  assert.deepEqual(deadlines(),initial);
+  p.expire();
+  assert.match(p.text('personalStatus'),/Expected Reader 0\.4\.2 did not respond/);
+});
+
+test('no acknowledgement does not consume the result window and no-response expiry stays explicit',()=>{
+  const p=pageRig(),nonce=p.find();
+  [...p.timers.values()].find(t=>t.delay===1500).fn();
+  p.respond(nonce,{status:'unavailable',code:'READ_FAILED',version:'0.4.2'},'gac:auto-search-response');
+  assert.match(p.text('personalStatus'),/READ_FAILED.*Reader 0\.4\.2/);
+  const empty=pageRig();empty.find();empty.expire();
+  assert.match(empty.text('sourceStatus'),/timed out without a compatible Reader 0\.4\.2 response/);
+});
+
+test('the first compatible failure settles its group while another compatible source remains usable',()=>{
+  const p=pageRig(),nonce=p.find(),observation=pageObservation('racket_id');
+  p.respond(nonce,{status:'unavailable',code:'READ_FAILED',version:'0.4.2'},'gac:auto-search-response');
+  const primary=p.text('personalStatus');
+  p.respond(nonce,{status:'observed',observation:pageObservation('playtomic'),version:'0.4.2'},'gac:auto-search-response');
+  assert.equal(p.text('personalStatus'),primary);
+  p.respond(nonce,{status:'partial',sources:[{provider:'racket_id',status:'observed',observation}],version:'0.4.2'});
+  assert.match(p.text('offers'),/FICTIONAL compatible court/);
+  assert.equal(p.node('offers').children[0].children.at(-1).href,source2);
 });

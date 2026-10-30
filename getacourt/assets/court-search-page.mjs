@@ -30,10 +30,31 @@ const readerCodes=new Set(['REQUEST_REJECTED','CONNECT_REQUIRED','SITE_ACCESS_RE
   'READER_UNAVAILABLE','CHALLENGE_REQUIRED','TAB_ACCESS_REQUIRED',
   'COMPACT_VIEW_REQUIRED','NO_EXPANDED_OFFERS','OFFER_SECTION_MISSING','SCHEDULE_NOT_READY']);
 const readerCode=result=>readerCodes.has(result?.code)?result.code:'UNKNOWN';
-const readerVersion=result=>typeof result?.version==='string'&&/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(result.version)
-  ?' · Reader '+result.version:' · Reader version not reported';
+// Pin the reviewed automatic Racket navigation contract; an unknown future or
+// legacy runtime is not evidence that it can perform this query safely.
+const compatibleReader='0.4.2';
+const returnedVersion=result=>typeof result?.version==='string'&&/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(result.version)
+  ?result.version:null;
+const readerVersion=result=>returnedVersion(result)?' · Reader '+returnedVersion(result):' · Reader version not reported';
+const incompatibleText=request=>request.incompatible.map(r=>(r.version?'Reader '+r.version:'Reader version not reported')+
+  ' ('+r.code+')').join('; ');
+function incompatibleReply(request,result){
+  const version=returnedVersion(result);
+  // Store no old observations, exceptions, identifiers or URLs. Duplicate ACKs
+  // and responses cannot restart the deadline or grow an unbounded history.
+  if(request.incompatible.length<3&&!request.incompatible.some(r=>r.version===version))
+    request.incompatible.push({version,code:readerCode(result)});
+  return incompatibleText(request);
+}
+function readerDeadline(request,label){
+  return request.incompatible.length
+    ?label+': only unsupported replies received — '+incompatibleText(request)+
+      '. Expected Reader '+compatibleReader+' did not respond; connection and availability unverified.'
+    :label+' timed out without a compatible Reader '+compatibleReader+
+      ' response; connection and availability unverified.';
+}
 function autoError(result){
-  const code=result?.code;
+  const code=readerCode(result);
   return ({
     CONNECT_REQUIRED:'Connect Playtomic once: open its official club page, sign in, then select Connect in the GetACourt extension.',
     SITE_ACCESS_REQUIRED:'Allow Playtomic site access once from the GetACourt extension icon.',
@@ -50,13 +71,14 @@ function autoError(result){
 function startAutomaticSearch(){
   if(!query)return;
   const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
-  const request={nonce,query,revision,acked:false};
+  const request={nonce,query,revision,acked:false,incompatible:[]};
   cancelAuto();cancelAdditional();pendingAuto=request;
-  additionalPending={nonce,query,revision};
+  const extraRequest={nonce,query,revision,incompatible:[]};
+  additionalPending=extraRequest;
   additionalTimer=setTimeout(()=>{
-    if(additionalPending?.nonce===nonce){
+    if(additionalPending===extraRequest){
       additionalPending=null;
-      additionalStates.set('additional','Additional provider search timed out; connection and availability unverified');
+      additionalStates.set('additional',readerDeadline(extraRequest,'Additional provider search'));
       renderSources();
     }
   },45000);
@@ -64,26 +86,34 @@ function startAutomaticSearch(){
   window.dispatchEvent(new CustomEvent('gac:additional-sources-request',{detail:{nonce,query}}));
   autoAckTimer=setTimeout(()=>{
     if(pendingAuto!==request||request.acked)return;
-    cancelAuto();
-    personalStatus.textContent='GetACourt Reader did not acknowledge this search. Browser connection and availability are unverified.';
+    personalStatus.textContent='Waiting for compatible Reader '+compatibleReader+
+      '; no search acknowledgement yet. Connection and availability unverified.';
   },1500);
+  // One deadline from Find, including the no-ACK case. Neither an old response
+  // nor repeated acknowledgements may consume or extend this request window.
+  autoResultTimer=setTimeout(()=>{
+    if(pendingAuto!==request)return;
+    cancelAuto();
+    personalStatus.textContent=readerDeadline(request,'Playtomic search');
+  },45000);
   window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query}}));
 }
 window.addEventListener('gac:auto-search-accepted',event=>{
   const request=pendingAuto;
-  if(!request||event.detail?.nonce!==request.nonce||request.revision!==revision)return;
+  if(!request||request.acked||event.detail?.nonce!==request.nonce||request.revision!==revision)return;
   request.acked=true;clearTimeout(autoAckTimer);autoAckTimer=null;
-  personalStatus.textContent='Reading only the normal Playtomic court-search interface in your browser…';
-  autoResultTimer=setTimeout(()=>{
-    if(pendingAuto!==request)return;
-    cancelAuto();
-    personalStatus.textContent='Playtomic search did not finish in time. The site may need attention. No result is assumed.';
-  },45000);
+  personalStatus.textContent='Search acknowledged; waiting for compatible Reader '+compatibleReader+
+    ' response. Availability unverified.';
 });
 window.addEventListener('gac:auto-search-response',event=>{
   const request=pendingAuto,detail=event.detail;
   if(!request||!detail||detail.nonce!==request.nonce||
      request.revision!==revision||query!==request.query)return;
+  if(returnedVersion(detail.result)!==compatibleReader){
+    personalStatus.textContent='Waiting for compatible Reader '+compatibleReader+
+      '; unsupported replies: '+incompatibleReply(request,detail.result)+'. Availability unverified.';
+    return;
+  }
   cancelAuto();
   if(detail.result?.status==='observed'){
     // Compatibility with existing single-club reader in the protected beta.
@@ -130,7 +160,13 @@ window.addEventListener('gac:additional-sources-response',event=>{
   const pending=additionalPending,detail=event?.detail;
   if(!pending||!detail||detail.nonce!==pending.nonce||
     pending.revision!==revision||pending.query!==query)return;
+  if(returnedVersion(detail.result)!==compatibleReader){
+    additionalStates.set('additional','Waiting for compatible Reader '+compatibleReader+
+      '; unsupported replies: '+incompatibleReply(pending,detail.result)+'. Availability unverified.');
+    renderSources();return;
+  }
   cancelAdditional();
+  additionalStates.delete('additional');
   const result=detail.result,entries=result?.sources;
   const version=readerVersion(result);
   let failure;
