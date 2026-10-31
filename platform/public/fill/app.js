@@ -1479,7 +1479,15 @@
       if (state.org) await load();
       else if (!state.demo) fail(Error("No operator club role assigned. Ask the administrator."));
     } catch (error) {
-      if (authEpoch === state.authEpoch) fail(error);
+      if (authEpoch === state.authEpoch) {
+        if (state.demo) return fail(error);
+        // Initialization may have received an identity but no usable club access.
+        // Remove that partial session and display the failure in the visible gate.
+        invalidateSession();
+        el.loginPassword.value = "";
+        el.loginError.textContent = "Unable to load operator access. Try again or contact the administrator.";
+        el.loginError.hidden = false;
+      }
     }
   }
 

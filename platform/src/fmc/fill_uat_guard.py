@@ -269,7 +269,8 @@ class Guard:
         A whole-service or Auth outage may delay an actual ban; API expiry is
         independent of this worker, as long as Operations can serve a request.
         """
-        self.cleanup_error = True
+        # Keep the last completed result during normal inspection. check() still
+        # expires old health; any observed failure latches closed immediately.
         try:
             healthy_all = True
             for row in self.ledger.pending():
@@ -282,6 +283,7 @@ class Guard:
                     except Exception:
                         receipts[principal.id] = False
                         healthy = False
+                        self.cleanup_error = True
                 self.ledger.record(lease, receipts, healthy)
                 healthy_all = healthy_all and healthy
             self.cleanup_error = not healthy_all

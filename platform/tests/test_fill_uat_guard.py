@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 import os
+import threading
 from types import SimpleNamespace
 import uuid
 
@@ -143,6 +144,89 @@ def test_fixture_fails_closed(mutation, e):
     with pytest.raises(DomainError) as err:
         e.guard.check(e.actor)
     assert err.value.code == "FILL_UAT_CLOSED"
+
+
+@contextmanager
+def paused_sweep(e, monkeypatch, *, fail_first=False):
+    """Hold a real sweep inside Admin inspection while requests check access."""
+    entered, release = threading.Event(), threading.Event()
+    inspect = e.admin.inspect
+    calls = 0
+
+    def paused(lease, principal, *, ban):
+        nonlocal calls
+        calls += 1
+        if fail_first and calls == 1:
+            raise RuntimeError("fictional observed Admin failure")
+        if calls == (2 if fail_first else 1):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError("test inspection barrier timed out")
+        return inspect(lease, principal, ban=ban)
+
+    monkeypatch.setattr(e.admin, "inspect", paused)
+    worker = threading.Thread(target=e.guard.sweep)
+    worker.start()
+    try:
+        assert entered.wait(5), "Sweep never reached the inspection barrier"
+        yield
+    finally:
+        release.set()
+        worker.join(5)
+        assert not worker.is_alive(), "Sweep did not finish"
+
+
+@pytest.mark.parametrize("elapsed", [0, 46])
+def test_inflight_healthy_sweep_uses_previous_health_without_renewing_it(e, monkeypatch, elapsed):
+    e.guard.sweep()
+    e.guard.check(e.actor)
+    previous_health = e.ledger.row["healthy_at"]
+    with paused_sweep(e, monkeypatch):
+        e.guard.check(e.actor)  # Routine work must not close a healthy session.
+        e.clock.advance(elapsed)
+        assert e.ledger.row["healthy_at"] == previous_health
+        if elapsed:
+            with pytest.raises(DomainError):
+                e.guard.check(e.actor)  # A hung sweep cannot extend health past 45s.
+    e.guard.check(e.actor)
+    assert e.ledger.row["healthy_at"] == e.clock.wall()
+
+
+def test_observed_admin_failure_denies_before_remaining_inspections_finish(e, monkeypatch):
+    e.guard.check(e.actor)
+    with paused_sweep(e, monkeypatch, fail_first=True):
+        assert e.ledger.row["healthy_at"] == e.clock.wall()
+        with pytest.raises(DomainError):
+            e.guard.check(e.actor)
+    assert e.guard.cleanup_error and e.ledger.row["healthy_at"] is None
+
+
+def test_failed_ledger_record_stays_closed_until_whole_recovery_finishes(e, monkeypatch):
+    record = e.ledger.record
+
+    def failed_record(*_):
+        raise RuntimeError("fictional failed health persistence")
+
+    monkeypatch.setattr(e.ledger, "record", failed_record)
+    e.guard.sweep()
+    assert e.guard.cleanup_error
+    # A failed write leaves the previously healthy database row unchanged.
+    assert e.ledger.row["healthy_at"] == e.clock.wall()
+    monkeypatch.setattr(e.ledger, "record", record)
+    with paused_sweep(e, monkeypatch):
+        with pytest.raises(DomainError):
+            e.guard.check(e.actor)
+        assert e.guard.cleanup_error
+    e.guard.check(e.actor)
+    assert not e.guard.cleanup_error
+
+
+def test_startup_without_completed_health_denies_during_first_sweep(e, monkeypatch):
+    e.ledger.row["healthy_at"] = None
+    with paused_sweep(e, monkeypatch):
+        with pytest.raises(DomainError):
+            e.guard.check(e.actor)
+    e.guard.check(e.actor)
 
 
 @pytest.mark.parametrize("actor", [Actor(A), Actor(A, fill_f1_run=RUN),
