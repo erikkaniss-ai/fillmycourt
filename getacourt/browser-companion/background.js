@@ -9,6 +9,7 @@ let generation=0,busy=false,consentPending=0,consentQueue=Promise.resolve();
 const errors=Object.freeze({
   REQUEST_REJECTED:"Open GetACourt from its extension icon.",
   SOURCE_UNCLAIMED:"This club page does not offer verified client booking inventory.",
+  SAFETY_REVIEW_REQUIRED:"Racket ID search is paused pending review of court-selection safety. No provider actions were taken.",
   CONNECT_REQUIRED:"Connect Playtomic once from the GetACourt extension icon on a Playtomic club page.",
   SITE_ACCESS_REQUIRED:"Allow Playtomic site access once in the GetACourt extension popup. No provider password is shared.",
   CLUB_PAGE_REQUIRED:"Open an official Playtomic /clubs/ page before connecting.",
@@ -78,7 +79,7 @@ async function approveAdditional() {
   await chrome.storage.local.set({approvedExtraSources:next});
   return {status:"connected",provider:parsed.provider,sourceUrl:parsed.sourceUrl,version:VERSION};
 }
-let extraBusy=false,racketNavigation=null;
+let extraBusy=false;
 async function autoSearchAdditionalFromGet(query) {
   const {location:area,...filters}=query||{};
   if(!queryValid(filters)||(area!==undefined&&
@@ -93,6 +94,13 @@ async function autoSearchAdditionalFromGet(query) {
     const results=[];
     for(const [provider,sourceUrl] of verified.slice(0,4)){
       const result={provider,status:"unavailable",code:"READ_FAILED"};
+      // A saved grant is not proof that previewing a court cannot create a hold.
+      // Pause before permissions, rate state, tab access or provider execution.
+      if(provider==="racket_id"){
+        result.code="SAFETY_REVIEW_REQUIRED";
+        results.push(result);
+        continue;
+      }
       let createdTabId=null;
       try{
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
@@ -104,21 +112,18 @@ async function autoSearchAdditionalFromGet(query) {
         await chrome.storage.session.set({[key]:Date.now()});
         // The source page runs in this player's own ordinary Chrome profile.
         // No provider API, cross-account session, cookie read or remote agent.
-        // An open Racket ID preview belongs to the player. Read only an exact,
-        // uniquely matching existing tab; never close it or click Continue.
-        const existing=provider==="racket_id"&&!area
-          ?(await chrome.tabs.query({url:sourceUrl})).filter(t=>t.url===sourceUrl):[];
-        if(existing.length>1)fail("TAB_CHANGED");
-        const tab=existing[0]||await chrome.tabs.create({url:sourceUrl,active:false});
-        if(!existing.length)createdTabId=tab.id;
+        const tab=await chrome.tabs.create({url:sourceUrl,active:false});
+        createdTabId=tab.id;
         await waitForPage(tab.id);
         if(epoch!==generation)fail("CONSENT_WITHDRAWN");
+        const loaded=additionalProviderRoute((await chrome.tabs.get(tab.id))?.url);
+        if(!loaded||loaded.provider!==provider||loaded.sourceUrl!==sourceUrl)fail("TAB_CHANGED");
+        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         await chrome.scripting.executeScript({target:{tabId:tab.id},
-          files:["visible-provider-offers.js","racket-preview.js","visible-provider-page.js"]});
-        if(provider==="racket_id"&&area)racketNavigation={tabId:tab.id,epoch};
+          files:["visible-provider-offers.js","visible-provider-page.js"]});
+        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         const captured=await chrome.scripting.executeScript({target:{tabId:tab.id},
-          func:async(q,epoch)=>q.location&&location.href==="https://racket.id/booking"
-            ?GetACourtRacketPreview.search(q,epoch):readVisibleProviderPage(q),args:[query,epoch]});
+          func:q=>readVisibleProviderPage(q),args:[query]});
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         const observation=captured?.find(x=>x.frameId===0)?.result;
         if(observation?.readerError)fail(observation.readerError);
@@ -130,7 +135,6 @@ async function autoSearchAdditionalFromGet(query) {
       }catch(error){
         result.code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
       }finally{
-        if(provider==="racket_id")racketNavigation=null;
         // This search owns only the tab it just created. Never close an existing
         // player tab; cleanup cannot replace the provider-read result or error.
         if(Number.isInteger(createdTabId)&&typeof chrome.tabs.remove==="function"){
@@ -449,19 +453,9 @@ async function runSearch(query){
   }finally{busy=false;}
 }
 async function handle(message,sender){
-  // Only this active task's exact Racket tab can ask whether its existing
-  // grant is still valid. Content scripts do not have chrome.permissions.
+  // An earlier content script must not revive navigation while Racket is paused.
   if(message?.action==="racketNavigationConsent"){
-    const active=racketNavigation;
-    if(!active||Object.keys(message).sort().join(",")!=="action,epoch"||
-      sender?.id!==chrome.runtime.id||sender.frameId!==0||
-      sender.url!=="https://racket.id/booking"||sender.tab?.id!==active.tabId||
-      message.epoch!==active.epoch||generation!==active.epoch||consentPending)
-      return {allowed:false};
-    const {approvedExtraSources={}}=await chrome.storage.local.get("approvedExtraSources");
-    const permitted=await chrome.permissions.contains({origins:["https://racket.id/*"]});
-    return {allowed:permitted&&approvedExtraSources.racket_id==="https://racket.id/booking"&&
-      racketNavigation===active&&generation===active.epoch&&!consentPending};
+    return {allowed:false};
   }
   const role=caller(sender);
   const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],

@@ -15,7 +15,7 @@ const query={date:new Date().toISOString().slice(0,10),sport:'Padel',from:'08:00
 
 function fixture({approvedSource=source,grant=true,previousSession={},extraSources=null}={}){
   const local={...(approvedSource?{approvedSource}:{}),...(extraSources?{approvedExtraSources:extraSources}:{})},session={...previousSession};
-  const handlers={},created=[],windows=[];let searchCount=0,newWindow=false;
+  const handlers={},created=[],windows=[],permissionChecks=[];let searchCount=0,newWindow=false;
   const store=data=>({
     async get(key){return Object.fromEntries((Array.isArray(key)?key:[key]).map(k=>[k,data[k]]));},
     async set(obj){Object.assign(data,obj);},
@@ -24,10 +24,10 @@ function fixture({approvedSource=source,grant=true,previousSession={},extraSourc
   const chrome={
     runtime:{id:'reader',getURL:p=>'chrome-extension://reader/'+p,onMessage:{addListener:f=>handlers.internal=f}},
     storage:{local:store(local),session:store(session)},
-    permissions:{contains:async()=>grant},
+    permissions:{contains:async options=>{permissionChecks.push(...options.origins);return grant;}},
     tabs:{
       query:async()=>[{id:1,windowId:5,url:source}],
-      get:async id=>id===2?{id:2,windowId:newWindow?6:5,url:source,status:'complete'}:
+      get:async id=>id===2?{id:2,windowId:newWindow?6:5,url:created.at(-1)?.url||source,status:'complete'}:
         {id:1,windowId:5,url:source,status:'complete'},
       create:async data=>{created.push(data);return {id:2};},
       onUpdated:{addListener(){},removeListener(){}},
@@ -50,7 +50,7 @@ function fixture({approvedSource=source,grant=true,previousSession={},extraSourc
     globalThis:null});
   vm.runInContext(script,context);
   const call=(message,from=sender)=>new Promise(resolve=>handlers.internal(message,from,resolve));
-  return {call,session,local,created,windows,get searchCount(){return searchCount;}};
+  return {call,session,local,created,windows,permissionChecks,get searchCount(){return searchCount;}};
 }
 
 test('without one-time site permission personal Get search fails closed, with zero provider UI work',async()=>{
@@ -83,6 +83,29 @@ test('one-time permission and ordinary remembered club survive service-worker an
   assert.ok(!JSON.stringify(restarted.local).includes('cookie'));
   await restarted.call({action:'revoke'});
   assert.equal((await restarted.call({action:'autoSearchFromGet',query})).code,'CONNECT_REQUIRED');
+});
+
+test('a saved Racket grant stays paused across worker restart without affecting independent Playtomic access',async()=>{
+  const racket='https://racket.id/booking';
+  const original=fixture({extraSources:{racket_id:racket}});
+  const restarted=fixture({extraSources:{...original.local.approvedExtraSources}});
+  for(const f of [original,restarted]){
+    const before=JSON.stringify(f.local);
+    const result=await f.call({action:'autoSearchAdditionalFromGet',query:{...query,location:'Cascais'}});
+    assert.equal(result.version,'0.4.2');
+    assert.deepEqual(JSON.parse(JSON.stringify(result.sources)),[
+      {provider:'racket_id',status:'unavailable',code:'SAFETY_REVIEW_REQUIRED'}
+    ]);
+    assert.equal(f.permissionChecks.length,0);
+    assert.equal(f.created.length,0);
+    assert.equal(f.searchCount,0);
+    assert.deepEqual(f.session,{});
+    assert.equal(JSON.stringify(f.local),before);
+    assert.equal((await f.call({action:'autoSearchFromGet',query})).status,'observed');
+    assert.equal(f.searchCount,1);
+    assert.deepEqual(f.permissionChecks,['https://playtomic.com/*']);
+    assert.equal(JSON.stringify(f.local),before);
+  }
 });
 
 test('normal provider challenge is not bypassed; no retry, no booking or payment',async()=>{
