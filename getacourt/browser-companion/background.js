@@ -123,7 +123,8 @@ async function autoSearchAdditionalFromGet(query) {
           files:["visible-provider-offers.js","visible-provider-page.js"]});
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         const captured=await chrome.scripting.executeScript({target:{tabId:tab.id},
-          func:q=>readVisibleProviderPage(q),args:[query]});
+          func:(q,expectedSourceUrl)=>location.origin+location.pathname===expectedSourceUrl
+            ?readVisibleProviderPage(q):{readerError:"TAB_CHANGED"},args:[query,sourceUrl]});
         if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
         const observation=captured?.find(x=>x.frameId===0)?.result;
         if(observation?.readerError)fail(observation.readerError);

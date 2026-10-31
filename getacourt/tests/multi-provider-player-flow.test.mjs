@@ -25,7 +25,7 @@ const official={
   racket_id:{url:source2,venue:"Rackets Pro Academy — Quinta da Marinha"},
   smashpro:{url:source3,venue:"FICTIONAL Smashpro Lisboa club"}
 };
-function rig({denySmashpro=false,wrongProvider=false,timeoutSmashpro=false,revokeSmashpro=false,existingRacket=false,racketFirst=false,redirectTieToRacket=false}={}){
+function rig({denySmashpro=false,wrongProvider=false,timeoutSmashpro=false,revokeSmashpro=false,existingRacket=false,racketFirst=false,redirectTieToRacket=false,lateRedirectTieToRacket=false}={}){
   const local={approvedExtraSources:racketFirst
     ?{racket_id:source2,tiesports:source1,smashpro:source3}
     :{tiesports:source1,racket_id:source2,smashpro:source3}};
@@ -83,8 +83,14 @@ function rig({denySmashpro=false,wrongProvider=false,timeoutSmashpro=false,revok
         offers:[{court:"Court 1",startLabel:"6:00 PM",endLabel:"7:30 PM",
           durationMinutes:90,priceEur:provider==="tiesports"?36:38}]
       };
-      calls.push({source:url,func:true});
-      return [{frameId:0,result:offer}];
+      // Execute the actual injected function so its URL binding is exercised.
+      const actualUrl=lateRedirectTieToRacket&&url===source1?source2:url;
+      const result=vm.runInNewContext('('+data.func.toString()+')(...args)',{
+        args:data.args,location:new URL(actualUrl),readVisibleProviderPage:()=>{
+          calls.push({source:actualUrl,func:true});return offer;
+        }
+      });
+      return [{frameId:0,result}];
     }}
   };
   const ctx=vm.createContext({chrome,URL,Date,setTimeout,clearTimeout,importScripts(){}});
@@ -204,6 +210,18 @@ test("another provider redirecting to Racket is rejected before injection or obs
   assert.equal(r.calls.some(c=>c.files?.includes('racket-preview.js')),false);
   assert.ok(!r.tabReads.includes(2));
   assert.ok(!r.removed.includes(2));
+  assert.deepEqual(r.removed,r.created.map(t=>t.id));
+});
+
+test("a redirect after metadata validation cannot invoke the DOM observer on Racket",async()=>{
+  const r=rig({lateRedirectTieToRacket:true});find(r);
+  const result=await response(r);
+  assert.equal(result.sources[0].code,'TAB_CHANGED');
+  assert.equal(result.sources[1].code,'SAFETY_REVIEW_REQUIRED');
+  assert.equal(result.sources[2].status,'observed');
+  assert.deepEqual(r.calls.filter(c=>c.func).map(c=>c.source),[source3]);
+  assert.equal(r.permissionChecks.includes('https://racket.id/*'),false);
+  assert.equal(r.calls.some(c=>c.files?.includes('racket-preview.js')),false);
   assert.deepEqual(r.removed,r.created.map(t=>t.id));
 });
 
