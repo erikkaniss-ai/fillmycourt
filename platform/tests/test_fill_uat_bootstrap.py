@@ -451,6 +451,39 @@ def test_bootstrap_shutdown_does_not_close_admin_before_inflight_step_finishes(e
         original_close()
 
 
+def test_actual_lifespan_waits_for_sole_cleanup_health_before_canary_activation(e, monkeypatch):
+    e.journal.prepare()
+    e.guard.bootstrap = e.boot
+    phases = []
+    original_tick = e.boot.tick
+    def tracked_tick():
+        phases.append("start")
+        original_tick()
+        phases.append("done")
+    e.boot.tick = tracked_tick
+    monkeypatch.setattr(g, "POLL_SECONDS", 0.08)
+    monkeypatch.setattr(g, "BOOTSTRAP_SECONDS", 0.005)
+    async def wait_until(predicate):
+        for _ in range(2000):
+            if predicate(): return
+            await asyncio.sleep(0.005)
+        raise AssertionError("Synthetic lifespan phase: " + repr({
+            "stopped": e.journal.row["stopped"], "health": e.ledger.healthy_at,
+            "attempts": [(a["label"], a["operation"], a["verified"]) for a in e.journal.row["attempts"]],
+            "calls": e.server.calls, "ticks": phases}))
+    async def scenario():
+        async with e.guard.lifespan(None):
+            await wait_until(lambda: e.journal.row["preflight_at"] is not None)
+            assert e.journal.row["starts_at"] is None
+            e.journal.row["released_at"] = e.clock.wall()
+            await wait_until(lambda: any(a["operation"] == "activate" and a["verified"]
+                                         for a in e.journal.row["attempts"]))
+            assert not e.journal.row["stopped"] and e.ledger.healthy_at is not None
+            assert len(e.server.users) == 3
+            assert sum(u["banned_until"] is None for u in e.server.users.values()) == 1
+    asyncio.run(scenario())
+
+
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="Existing local/CI PostgreSQL only")
 def test_postgres_private_journal_constraints_barrier_and_transaction_rollback():
     engine = create_engine(os.environ["TEST_DATABASE_URL"])

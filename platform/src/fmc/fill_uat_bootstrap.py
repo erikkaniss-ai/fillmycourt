@@ -454,6 +454,13 @@ class Bootstrap:
                     raise Closed()
             row, now = self.fresh(seconds=60 if label == "canary" else 600)
             principal = existing.principal(creates[label]["user_id"])
+            snapshot = self.guard.ledger.snapshot(existing, principal.id)
+            if (self.guard.cleanup_error or (snapshot and (snapshot["healthy_at"] is None
+                    or (now-snapshot["healthy_at"]).total_seconds() > g.HEALTH_SECONDS))):
+                # The sole cleanup cadence must inspect a newly enrolled lease
+                # first. Do not turn that normal startup wait into an unban or
+                # a failed run, and never run a second sweep from bootstrap.
+                return
             from .supabase_v1 import Actor
             self.guard.check(Actor(principal.id, self.plan.email(label), self.plan.run_id, True))
             self.admin.owned(self.admin.read(principal.id), self.plan, label, row["starts_at"], now,

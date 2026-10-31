@@ -31,6 +31,7 @@ OLD_USERS = frozenset({"b82a8774-839f-4b73-8c4d-5c76c10dd957",
                        "c29ba3be-d7ae-4dff-b662-88d1b0504024"})
 HEALTH_SECONDS = 45
 POLL_SECONDS = 10
+BOOTSTRAP_SECONDS = 1
 MAX_RESPONSE = 4_000_000
 
 
@@ -304,7 +305,7 @@ class Guard:
             try:
                 while not stop.is_set():
                     try:
-                        await asyncio.wait_for(stop.wait(), timeout=1 if self.bootstrap else POLL_SECONDS)
+                        await asyncio.wait_for(stop.wait(), timeout=BOOTSTRAP_SECONDS if self.bootstrap else POLL_SECONDS)
                     except TimeoutError:
                         if not self.bootstrap or time.monotonic() >= due:
                             # Bootstrap HTTP never blocks this existing cleanup cadence.
