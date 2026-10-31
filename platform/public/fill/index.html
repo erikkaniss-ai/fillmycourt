@@ -16,6 +16,7 @@
       <button class="nav-item active" data-view="today">Today</button>
       <button class="nav-item" data-view="calendar">Calendar</button>
       <button class="nav-item" data-view="revenue">Revenue & Capacity</button>
+      <button class="nav-item" data-view="provenance">Provider evidence</button>
     </nav>
     <div class="side-foot"><span>Revenue infrastructure for racket clubs.</span><a href="https://fillmycourt.com/en/" target="_blank" rel="noreferrer">Public site ↗</a></div>
   </aside>
@@ -31,16 +32,206 @@
         <p class="eyebrow">SECURE OPERATOR ACCESS</p>
         <h2>Sign in required</h2>
         <p>This staging interface only reads operator data with a valid Supabase bearer session. No club data is exposed anonymously.</p>
-        <p class="muted">Email sign-in will be connected once project mail delivery is active. The UI already accepts a valid Supabase session returned in the URL hash.</p>
+        <p class="muted">Use an administrator-provisioned Supabase staging operator account with an assigned club role. No self-registration or password reset is available.</p>
+        <form id="operatorSignIn" class="operator-login" method="post" action="/api/fmc-auth/login">
+          <label>Email<input id="operatorEmail" type="email" autocomplete="username" inputmode="email" required maxlength="254"></label>
+          <label>Password<input id="operatorPassword" type="password" autocomplete="current-password" required></label>
+          <button id="operatorLoginButton" class="button primary" type="submit">Sign in to operator workspace</button>
+          <p id="operatorLoginError" class="login-feedback" role="alert" hidden></p>
+        </form>
+        <a id="demoPreviewLink" href="/fill/?demo=1" class="button primary demo-entry" hidden>Explore synthetic demo</a>
+        <p class="muted demo-disclaimer">Fabricated courts, bookings, rates and revenue; never actual partner data or confirmed availability.</p>
       </div>
     </section>
 
     <section id="workspace" hidden>
-      <div class="toolbar">
+      <div id="demoNotice" class="demo-notice" role="status" hidden>
+        <strong>DEMONSTRATION ONLY · SYNTHETIC FIXTURE</strong>
+        <span>Illustrative courts, utilisation, bookings, prices and revenue. No club, customer or provider data. No backend API requests.</span>
+      </div>
+      <div id="dateToolbar" class="toolbar">
         <label>Date<input id="dateInput" type="date"></label>
         <button id="refreshButton" class="button primary">Refresh</button>
       </div>
       <div id="error" class="error" hidden></div>
+      <p class="read-only-notice"><strong>Staging · read-only.</strong> This workspace shows the existing Core snapshot only. Until a club or provider source is explicitly authorised, displayed inventory is fixture-safe test data — not partner availability, a booking confirmation, or recoverable revenue.</p>
+
+      <section id="provenanceView" hidden>
+        <section class="panel review-summary-panel" aria-labelledby="clubReviewHeading">
+          <p class="eyebrow">SELECTED CLUB · READ ONLY</p>
+          <h2 id="clubReviewHeading">Preflight and provenance summary</h2>
+          <p class="read-only-notice"><strong>UAT and pilot not approved.</strong> This summary only reflects manual reads below. It does not refresh data, authorise provider requests or deployment, or confirm available slots, bookings or payments.</p>
+          <p class="muted">Separate snapshots, not a combined assessment or live state. Receipt counts describe only the latest reviewed page of one connection, not every connection or booking in this club. Re-check after scope or runtime changes.</p>
+          <div id="clubReviewSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+          <div class="review-gate-columns">
+          <section class="uat-blockers" aria-labelledby="clubUatBlockerHeading">
+            <h3 id="clubUatBlockerHeading">UAT blockers and unverified gates</h3>
+            <p class="muted">Read-only, based on the separate summary snapshots above. This is not a complete UAT checklist, a live assessment or permission to start UAT. Unverified conditions stay unresolved; nothing can be approved or repaired here.</p>
+            <div id="clubUatBlockers" role="status" aria-live="polite" aria-atomic="true"></div>
+            <section class="package-preparation-summary-panel club-package-preparation-summary-panel" aria-labelledby="clubPackageStepsSummaryHeading">
+              <h4 id="clubPackageStepsSummaryHeading">Preparation snapshot — club</h4>
+              <p id="clubPackageDisclosureHelp" class="muted">Read-only local club UAT preparation, not pilot or GetACourt GO. Nothing is sent, approved or executed here.</p>
+              <label class="theme-filter" for="clubPackageThemeFilter">Theme step state — club
+                <select id="clubPackageThemeFilter" aria-describedby="clubPackageThemeFilterHelp" disabled>
+                  <option value="ALL">MISSING + UNKNOWN</option><option value="MISSING">MISSING only</option><option value="UNKNOWN">UNKNOWN only</option>
+                </select>
+              </label>
+              <p id="clubPackageThemeFilterHelp" class="muted">Local view filter only. Snapshot/theme totals and full notes stay unfiltered. Hidden notes remain unresolved; no GO. Theme match counts apply even when collapsed; expand to view, not completed work.</p>
+              <div id="clubPackageThemeFilterStatus" role="status" aria-live="polite" aria-atomic="true"></div>
+              <div id="clubPackageStepsSummary"></div>
+              <details id="clubPackageStepsDisclosure" class="go-package-disclosure" hidden>
+                <summary aria-describedby="clubPackageDisclosureHelp">Show read-only preparation notes — club</summary>
+                <section class="package-preparation-panel club-package-preparation-panel" aria-labelledby="clubPackageStepsHeading">
+                  <h5 id="clubPackageStepsHeading">Missing-part preparation — club</h5>
+                  <p class="muted">Read-only planning for this club UAT manifest only, not pilot or GetACourt GO. No collection, sending, assignment or execution. UNKNOWN stays unresolved; nothing here verifies approval.</p>
+                  <div id="clubPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+                </section>
+              </details>
+            </section>
+            <section class="go-next-panel package-summary-panel club-package-summary-panel" aria-labelledby="clubPackageSummaryHeading">
+              <h4 id="clubPackageSummaryHeading">GO package snapshot — club</h4>
+              <p class="muted">Only the last local club manifest checked below. No combined readiness, verified GO or pilot permission.</p>
+              <div id="clubPackageSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+              <section class="package-missing-panel club-package-missing-panel" aria-labelledby="clubPackageMissingHeading">
+                <h5 id="clubPackageMissingHeading">Missing parts — club</h5>
+                <p class="muted">Local club declarations only: MISSING and UNKNOWN are separate unresolved states, not an action list or permission. Verified GO: none. Execution NOT_RUN. Existing blockers stay open.</p>
+                <div id="clubPackageMissing" role="status" aria-live="polite" aria-atomic="true"></div>
+              </section>
+            </section>
+            <section class="go-next-panel club-next-panel" aria-labelledby="clubNextHeading">
+              <h4 id="clubNextHeading">Next steps — club GO</h4>
+              <p class="muted">Planning notes only, not an execution checklist or approval. Club UAT and pilot GO remain separate from GetACourt.</p>
+              <div id="clubNextSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
+            <section class="go-next-panel club-request-panel" aria-labelledby="clubGoRequestHeading">
+              <h4 id="clubGoRequestHeading">GO request template — club</h4>
+              <p class="muted">Read-only unsent draft for protected club UAT, not pilot GO. Select text manually if needed; nothing is sent, saved or approved.</p>
+              <div id="clubGoRequest"></div>
+            </section>
+            <section class="go-next-panel club-package-panel" aria-labelledby="clubPackageHeading">
+              <h4 id="clubPackageHeading">GO package completeness — club</h4>
+              <p id="clubPackageHelp" class="muted">Local sanitized manifest only, maximum 32 KiB; no raw approvals, URLs, personal data or credentials. First complete an explicit scoped Operations read below. Checks declared presence for protected read-only club UAT only, not pilot GO. No upload, sending or authority verification.</p>
+              <form id="clubPackageForm" class="provenance-controls">
+                <label>Club GO package manifest JSON<input id="clubPackageFile" type="file" accept="application/json,.json" aria-describedby="clubPackageHelp" required></label>
+                <button id="clubPackageReview" type="submit" class="button secondary" disabled>Check club package locally</button>
+              </form>
+              <div id="clubPackageResult" role="status" aria-live="polite"></div>
+            </section>
+          </section>
+          <section class="acceptance-summary" aria-labelledby="acceptanceSummaryHeading">
+            <p class="eyebrow">GETACOURT CANDIDATE · SEPARATE SCOPE</p>
+            <h3 id="acceptanceSummaryHeading">Preflight and missing GO snapshot</h3>
+            <p class="read-only-notice"><strong>No verified GO. All real checks remain NOT_RUN.</strong> Separate from the club blockers: candidate-wide evidence cannot grant club UAT/pilot GO, provider rights or deployment authority.</p>
+            <p class="muted">Only summarises the local report explicitly reviewed below. No automatic file/API read, combined assessment, readiness score or action.</p>
+            <div id="acceptanceSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+            <section class="package-preparation-summary-panel get-package-preparation-summary-panel" aria-labelledby="getPackageStepsSummaryHeading">
+              <h4 id="getPackageStepsSummaryHeading">Preparation snapshot — GetACourt</h4>
+              <p id="getPackageDisclosureHelp" class="muted">Read-only preparation for one local Get check, not club UAT, pilot or combined GO. Nothing is sent, approved or executed here.</p>
+              <label class="theme-filter" for="getPackageThemeFilter">Theme step state — GetACourt
+                <select id="getPackageThemeFilter" aria-describedby="getPackageThemeFilterHelp" disabled>
+                  <option value="ALL">MISSING + UNKNOWN</option><option value="MISSING">MISSING only</option><option value="UNKNOWN">UNKNOWN only</option>
+                </select>
+              </label>
+              <p id="getPackageThemeFilterHelp" class="muted">Local view filter only. Snapshot/theme totals and full notes stay unfiltered. Hidden notes remain unresolved; no GO. Theme match counts apply even when collapsed; expand to view, not completed work.</p>
+              <div id="getPackageThemeFilterStatus" role="status" aria-live="polite" aria-atomic="true"></div>
+              <div id="getPackageStepsSummary"></div>
+              <details id="getPackageStepsDisclosure" class="go-package-disclosure" hidden>
+                <summary aria-describedby="getPackageDisclosureHelp">Show read-only preparation notes — GetACourt</summary>
+                <section class="package-preparation-panel get-package-preparation-panel" aria-labelledby="getPackageStepsHeading">
+                  <h5 id="getPackageStepsHeading">Missing-part preparation — GetACourt</h5>
+                  <p class="muted">Read-only planning for this one Get check only, never club UAT or pilot GO. No collection, sending, assignment or execution. Device, OAuth and location permissions remain separate.</p>
+                  <div id="getPackageSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+                </section>
+              </details>
+            </section>
+            <section class="go-next-panel package-summary-panel get-package-summary-panel" aria-labelledby="getPackageSummaryHeading">
+              <h4 id="getPackageSummaryHeading">GO package snapshot — GetACourt</h4>
+              <p class="muted">One explicitly reviewed local Get package/check only, not club evidence, permission or a combined GO.</p>
+              <div id="getPackageSummary" role="status" aria-live="polite" aria-atomic="true"></div>
+              <section class="package-missing-panel get-package-missing-panel" aria-labelledby="getPackageMissingHeading">
+                <h5 id="getPackageMissingHeading">Missing parts — GetACourt</h5>
+                <p class="muted">This local Get check only, never club evidence or combined GO. Declared presence never verifies authority. Verified GO: none. Execution NOT_RUN.</p>
+                <div id="getPackageMissing" role="status" aria-live="polite" aria-atomic="true"></div>
+              </section>
+            </section>
+            <section class="go-next-panel candidate-next-panel" aria-labelledby="candidateNextHeading">
+              <h4 id="candidateNextHeading">Next steps — GetACourt GO</h4>
+              <p class="muted">Planning notes only. Flags describe the imported snapshot, not current authority. Nothing here can run, approve, deploy or send a request.</p>
+              <div id="candidateNextSteps" role="status" aria-live="polite" aria-atomic="true"></div>
+            </section>
+            <section class="go-next-panel candidate-request-panel" aria-labelledby="candidateGoRequestsHeading">
+              <h4 id="candidateGoRequestsHeading">GO request templates — GetACourt</h4>
+              <p class="muted">Read-only unsent drafts selected only by missing-GO flags in the current local report. Each check needs separate authority; no combined GO or sending control.</p>
+              <div id="candidateGoRequests"></div>
+            </section>
+            <section class="go-next-panel get-package-panel" aria-labelledby="getPackageHeading">
+              <h4 id="getPackageHeading">GO package completeness — GetACourt</h4>
+              <p id="getPackageHelp" class="muted">Review the local Get report below, then explicitly choose one check. One sanitized manifest per check, no combined GO. Declared completeness is not permission. No raw documents, URLs, personal data or credentials; maximum 32 KiB. Nothing sent or saved.</p>
+              <form id="getPackageForm" class="provenance-controls">
+                <label><span id="getPackageCheckLabel">GetACourt package check</span><select id="getPackageCheck" required disabled aria-labelledby="getPackageCheckLabel" aria-describedby="getPackageHelp">
+                  <option value="">Choose one check</option>
+                  <option value="hosted-perimeter">Hosted access perimeter</option>
+                  <option value="hosted-ui">Hosted fixture UI</option>
+                  <option value="ios-safari">Physical iOS / Safari</option>
+                  <option value="android-chrome">Physical Android / Chrome</option>
+                  <option value="device-location">Device location permission</option>
+                  <option value="google-oauth">Google OAuth</option>
+                  <option value="human-accessibility">Human accessibility</option>
+                </select></label>
+                <label>GetACourt GO package manifest JSON<input id="getPackageFile" type="file" accept="application/json,.json" aria-describedby="getPackageHelp" required></label>
+                <button id="getPackageReview" type="submit" class="button secondary" disabled>Check GetACourt package locally</button>
+              </form>
+              <div id="getPackageResult" role="status" aria-live="polite"></div>
+            </section>
+          </section>
+          </div>
+        </section>
+        <section class="panel">
+          <p class="eyebrow">PILOT PREPARATION · READ ONLY</p>
+          <h2>Provider evidence</h2>
+          <p>Review stored Playtomic booking receipts, not live provider data. TieSports evidence is not supported by this report.</p>
+          <p class="muted">Owner or admin access is required. Other operator roles cannot review provider evidence under the current access policy.</p>
+          <p class="read-only-notice"><strong>Pilot not approved.</strong> Internal consistency never authorises provider requests, available slots, bookings or payments. Missing or hidden evidence stays unresolved; this screen cannot repair or refresh receipts.</p>
+          <form id="provenanceForm" class="provenance-controls">
+            <label>Provider connection<select id="provenanceConnection" required><option value="">Choose connection</option></select></label>
+            <label>Maximum receipt age (seconds)<input id="provenanceAge" type="number" min="1" max="31536000" step="1" required aria-describedby="provenanceAgeHelp"></label>
+            <button id="provenanceReview" type="submit" class="button primary" disabled>Review stored evidence</button>
+          </form>
+          <p id="provenanceAgeHelp" class="muted">Enter the approved review threshold explicitly (1–31,536,000 seconds). No provider freshness SLA is assumed.</p>
+          <p id="provenanceMessage" role="status" aria-live="polite"></p>
+          <div id="provenanceReport"></div>
+          <button id="provenanceNext" class="button secondary" type="button" hidden>Review next page</button>
+          <p class="muted">Each page is a separate snapshot, not a complete pilot assessment. A receipt from another organisation is hidden and shown as unavailable, never fetched through privileged access.</p>
+        </section>
+        <section class="panel acceptance-panel" aria-labelledby="acceptanceHeading">
+          <p class="eyebrow">GETACOURT CANDIDATE · LOCAL READ ONLY</p>
+          <h2 id="acceptanceHeading">Hosted / device / OAuth preflight and missing GO</h2>
+          <p>Signed-in owner or admin scope only. Select a nonsecret JSON report produced by the GetACourt offline preflight. The file is read locally, not uploaded or fetched from GitHub.</p>
+          <p class="read-only-notice"><strong>No verified GO; all real checks remain NOT_RUN.</strong> This candidate-wide report is not club-specific evidence or pilot permission. Nothing can be approved, executed, deployed, refreshed or repaired here. OAuth and device permissions require separate state-change GO.</p>
+          <form id="acceptanceForm" class="provenance-controls">
+            <label>Expected GetACourt SHA<input id="acceptanceSha" type="text" minlength="40" maxlength="40" pattern="[0-9a-f]{40}" required autocomplete="off" spellcheck="false" autocapitalize="none" aria-describedby="acceptanceHelp"></label>
+            <label>Local preflight report JSON<input id="acceptanceFile" type="file" accept="application/json,.json" required aria-describedby="acceptanceHelp"></label>
+            <button id="acceptanceReview" type="submit" class="button secondary" disabled>Review local acceptance report</button>
+          </form>
+          <p id="acceptanceHelp" class="muted">Exact SHA only; no default or remembered candidate. Report must be at most 24 hours old and 64 KiB. Use the sanitized report, never raw evidence, approvals, passwords, tokens, OAuth codes, email addresses or personal data. Leaving this scope clears the file, SHA and result.</p>
+          <p class="muted">GO needs a separately verified authorised approver, exact SHA / existing deploy / action scope, current consent and expiry. A complete record only permits manual GO review, never execution. Worker activation and provider API rights stay separate.</p>
+          <p id="acceptanceMessage" role="status" aria-live="polite"></p>
+          <div id="acceptanceReport"></div>
+        </section>
+        <section class="panel preflight-panel" aria-labelledby="preflightHeading">
+          <p class="eyebrow">OPERATIONS PREREQUISITES · READ ONLY</p>
+          <h2 id="preflightHeading">Operations preflight</h2>
+          <p>Owner or admin only. Check the selected organisation against an explicitly chosen Operations revision, not the operator interface revision.</p>
+          <p class="read-only-notice"><strong>No UAT or pilot approval.</strong> A pass does not authorise hosted UAT, provider requests, available slots, bookings, payments or deployment. This check does not provision fixtures or change runtime settings.</p>
+          <form id="preflightForm" class="provenance-controls">
+            <label>Expected Operations SHA<input id="operationsSha" type="text" minlength="40" maxlength="40" pattern="[0-9a-f]{40}" spellcheck="false" autocapitalize="none" autocomplete="off" required aria-describedby="operationsShaHelp"></label>
+            <button id="preflightCheck" type="submit" class="button secondary">Check Operations preflight</button>
+          </form>
+          <p id="operationsShaHelp" class="muted">Enter the exact 40-character lowercase SHA from the authorised Operations candidate record. Nothing is inferred or remembered; this input is not deployment GO.</p>
+          <p id="preflightMessage" role="status" aria-live="polite"></p>
+          <div id="preflightReport"></div>
+        </section>
+      </section>
 
       <section id="todayView">
         <div id="kpis" class="kpi-grid"></div>
@@ -59,33 +250,26 @@
       <section id="calendarView" hidden>
         <section class="panel">
           <div class="panel-head"><div><p class="eyebrow">SHARED BOOKING TRUTH</p><h2>Day calendar</h2></div></div>
+          <p class="calendar-swipe-hint">Swipe the timeline horizontally to inspect all hours and courts.</p>
           <div id="calendarTimeline" class="calendar-timeline"></div>
         </section>
       </section>
 
       <section id="revenueView" hidden>
         <div id="revenueKpis" class="kpi-grid"></div>
-        <p class="muted validation-note">Rate coverage is checked for the selected date. Active courts without a matching active rate remain visible below as <strong>No rate coverage</strong>; this workspace does not write rates, bookings, payments, or prices.</p>
+        <p class="muted validation-note">Rate coverage is checked for the selected date. Active courts without a matching active rate remain visible below as <strong>No rate coverage</strong>. A rate quote is a configured price for an open slot, not a demand forecast, a discounted offer, or realised recovery.</p>
         <section class="panel">
           <div class="panel-head">
-            <div><p class="eyebrow">EMPTY CAPACITY CONTROL ROOM</p><h2>Opportunity queue</h2></div>
-            <span class="badge">Recommendation only · no execution writes</span>
+            <div><p class="eyebrow">EMPTY CAPACITY CONTROL ROOM</p><h2>Recovery candidates</h2></div>
+            <span class="badge">Core snapshot · no execution writes</span>
           </div>
-          <p class="muted control-room-note">Opportunities are ranked by expected incremental contribution using demand fit, freshness, organic baseline, urgency and slot value. GetACourt demand is aggregated; player identity is never exposed to the club. No pricing, messaging, booking or provider writes are executed here.</p>
+          <p class="muted control-room-note">Candidates are the current sellable windows returned by Core, ordered by available duration. They do not use demand, CRM, provider, payment, or booking-write signals; no action is prepared or sent from this screen.</p>
           <div id="opportunityQueue" class="opportunity-queue"></div>
         </section>
         <section class="panel comparison-panel">
           <div class="panel-head">
-            <div><p class="eyebrow">FINANCIAL OPERATIONS · SHADOW</p><h2>Reconciliation & Disputes</h2></div>
-            <span class="badge">Shadow review · no billing</span>
-          </div>
-          <p id="financeSummary" class="muted" role="status">Finance ledger not loaded.</p>
-          <div id="disputesQueue" class="dispute-queue" aria-live="polite"></div>
-        </section>
-        <section class="panel comparison-panel">
-          <div class="panel-head">
             <div><p class="eyebrow">COURT ECONOMICS</p><h2>Daily comparison</h2></div>
-            <span class="badge">Rate coverage + realised revenue</span>
+            <span class="badge">Rate coverage + Core totals</span>
           </div>
           <div id="courtComparison" class="court-comparison"></div>
         </section>
@@ -93,6 +277,7 @@
     </section>
   </main>
 
+  <script src="/fill/demo-fixture.js" defer></script>
   <script src="/fill/app.js" defer></script>
 </body>
 </html>

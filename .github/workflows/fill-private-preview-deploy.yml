@@ -1,0 +1,173 @@
+name: FillMyCourt private draft preview
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'platform/**'
+      - '.github/workflows/fill-private-preview-deploy.yml'
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+# A new PR8 HEAD cancels only the preceding PR8 private draft, never GetACourt.
+concurrency:
+  group: fill-private-draft-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  private-draft:
+    # Owner authorizes protected staging only for one exact SHA recorded
+    # separately in PR metadata and rechecked at upload; later SHA is denied.
+    # Full exact-head PostgreSQL/Chromium CI and HTTP 401 remain mandatory.
+    if: >-
+      github.repository == 'erikkaniss-ai/fillmycourt' &&
+      github.event.pull_request.number == 8 &&
+      github.base_ref == 'platform/v0.4-staging' &&
+      github.head_ref == 'fill/operator-mvp-readonly' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.FILL_NETLIFY_AUTH_TOKEN || secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: d763b7a1-dccd-4638-8876-ac1670171698
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # GitHub pull_request GITHUB_SHA points to a merge ref, not the
+          # reviewed Fill branch commit. Always deploy the exact head SHA.
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require single exact-SHA owner staging GO before any credentials
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs --check-owner-go
+
+      - name: Check private preview credential
+        id: eligibility
+        shell: bash
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'FILL PRIVATE DEPLOY SKIPPED: add GitHub Actions secret FILL_NETLIFY_AUTH_TOKEN.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify existing preview inaccessible anonymously
+        if: steps.eligibility.outputs.configured == 'true'
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' \
+            "https://fillmycourt-preview.netlify.app/")
+          test "$status" = "401" || {
+            echo "::error::Existing Fill preview must return HTTP 401, observed $status"
+            exit 1
+          }
+
+      - name: Install pinned Netlify CLI
+        if: steps.eligibility.outputs.configured == 'true'
+        run: npm install --no-save --no-audit --no-fund netlify-cli@27.12.1
+
+      # Full PostgreSQL-from-zero + Chromium E2E + all contracts still run
+      # in Platform CI. Never upload based on fixture-only checks or old SHA.
+      - name: Require full green Platform CI on exact PR8 HEAD before private upload
+        if: steps.eligibility.outputs.configured == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs
+
+      - name: Independent fast auth and gateway preflight
+        if: steps.eligibility.outputs.configured == 'true'
+        run: |
+          node --check platform/public/fill/app.js
+          node --experimental-strip-types --test platform/tests/fill_operator_password_login_contract.test.mjs platform/tests/fill_operator_preview_gateway_contract.test.mjs
+
+      - name: Stamp authorized review manifest
+        if: steps.eligibility.outputs.configured == 'true'
+        shell: bash
+        run: |
+          node -e '
+            const fs=require("fs");
+            fs.writeFileSync("platform/public/fill/preview-build.json",
+              JSON.stringify({
+                kind: "FILL_PRIVATE_DRAFT",
+                source_sha: process.env.SOURCE_SHA,
+                site_id: process.env.NETLIFY_SITE_ID,
+                source_pr: 8,
+                fixture_data_only: true
+              }, null, 2) + "\n");
+          '
+
+      - name: Recheck active PR8 HEAD before any Netlify upload
+        if: steps.eligibility.outputs.configured == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs --check-head
+
+      - name: Revalidate exact-SHA owner staging GO before private upload
+        if: steps.eligibility.outputs.configured == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node platform/scripts/fill_ci_gate.mjs --check-owner-go
+
+      - name: Upload DRAFT only to existing private Fill site
+        if: steps.eligibility.outputs.configured == 'true'
+        shell: bash
+        working-directory: platform
+        run: |
+          # NO --prod, NO --prod-if-unlocked, NO --create-site, NO DNS.
+          short_sha=$(printf '%s' "$SOURCE_SHA" | cut -c1-7)
+          ../node_modules/.bin/netlify deploy \
+            --site "$NETLIFY_SITE_ID" \
+            --dir public \
+            --functions netlify/functions \
+            --alias "fill-pr8-$short_sha" \
+            --no-build \
+            --json \
+            > "$RUNNER_TEMP/fill-private-draft-result.json"
+          # A draft deploy MUST never overwrite the site production deploy.
+          test -s "$RUNNER_TEMP/fill-private-draft-result.json"
+
+      - name: Validate draft URL and anonymous protection
+        if: steps.eligibility.outputs.configured == 'true'
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const d=JSON.parse(fs.readFileSync(
+            process.env.RUNNER_TEMP + "/fill-private-draft-result.json", "utf8"));
+          const u=new URL(d.deploy_url || d.deployUrl || d.url || "");
+          const expected="fill-pr8-"+process.env.SOURCE_SHA.slice(0,7)+
+            "--fillmycourt-preview.netlify.app";
+          if(u.protocol!=="https:" || u.hostname!==expected)
+            throw Error("Netlify returned an unexpected draft deploy target");
+          if(d.site_id && d.site_id!==process.env.NETLIFY_SITE_ID)
+            throw Error("Netlify returned an unexpected site ID");
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            "Private Fill draft uploaded at "+u.origin+" for SHA "+process.env.SOURCE_SHA+"\n");
+          NODE
+          short_sha=$(printf '%s' "$SOURCE_SHA" | cut -c1-7)
+          url="https://fill-pr8-$short_sha--fillmycourt-preview.netlify.app/fill/?demo=1"
+          safe=0
+          for attempt in 1 2 3 4 5 6; do
+            status=$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' "$url" || true)
+            if [ "$status" = "401" ]; then safe=1; break; fi
+            if [ "$status" = "200" ]; then
+              echo "::error::New draft is anonymously accessible — STOP."
+              exit 1
+            fi
+            sleep 5
+          done
+          test "$safe" = 1 || {
+            echo "::error::Anonymous HTTP 401 for the private draft is unverified."
+            exit 1
+          }
+          echo 'Team-login perimeter confirmed: anonymous HTTP 401. No real operator sign-in claimed.' >> "$GITHUB_STEP_SUMMARY"
