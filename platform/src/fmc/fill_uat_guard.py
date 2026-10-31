@@ -1,7 +1,7 @@
 """Opt-in Operations staging fixture lease and durable, ban-only cleanup.
 
-No provisioning, activation, SQL Auth writes or runtime schema creation. The
-private ledger must be enrolled separately under a later, explicit runtime GO.
+BanAdmin stays ban-only. An optional private, once-only bootstrap can enroll the
+ledger under separate runtime authority; no SQL Auth writes or runtime DDL.
 """
 from __future__ import annotations
 
@@ -122,6 +122,7 @@ class SQLLedger:
     """Only the private guard ledger is writable. No enrolment API exists."""
     def __init__(self, engine):
         self.engine = engine
+        self.bootstrap_barrier = False
 
     def pending(self):
         with self.engine.begin() as c:
@@ -147,11 +148,15 @@ class SQLLedger:
     def record(self, lease, receipts, healthy):
         # The immutable spec comparison protects against a changed registry.
         with self.engine.begin() as c:
+            barrier = (" and not exists (select 1 from fill_private.uat_bootstrap_attempts a "
+                       "where a.run_id=cast(:run as uuid) and a.operation='activate' "
+                       "and (not a.settled or a.first_ban_readback_at is null))"
+                       if self.bootstrap_barrier else "")
             result = c.execute(text("""
                 update fill_private.uat_runs
                 set receipts=cast(:receipts as jsonb),
                     healthy_at=case when :healthy then clock_timestamp() else null end,
-                    cleanup_complete=:complete, attempts=attempts+1
+                    cleanup_complete=(:complete""" + barrier + """), attempts=attempts+1
                 where run_id=cast(:run as uuid) and spec=cast(:spec as jsonb)
             """), {"run": lease.run_id, "spec": lease.document,
                    "receipts": json.dumps(receipts), "healthy": healthy,
@@ -168,6 +173,7 @@ class BanAdmin:
         self.http = httpx.Client(base_url=ORIGIN + "/auth/v1/", timeout=5,
                                  follow_redirects=False, trust_env=False, transport=transport,
                                  headers={"apikey": key, "Authorization": "Bearer " + key})
+        self.settlement = None
 
     def owned(self, lease, principal):
         # Defence in depth even when called without Guard.sweep().
@@ -187,9 +193,12 @@ class BanAdmin:
 
     def inspect(self, lease, principal, *, ban):
         data = self.owned(lease, principal)
+        newly_settled = self.settlement.observe(lease, principal, data) if self.settlement else False
         if not ban:
             return False
-        if data.get("banned_until") and timestamp(data["banned_until"]) > utcnow() + timedelta(days=365):
+        if not newly_settled and data.get("banned_until") and timestamp(data["banned_until"]) > utcnow() + timedelta(days=365):
+            if self.settlement:
+                self.settlement.ban_proof(lease, principal, data)
             return True
         response = self.http.put("admin/users/" + principal.id, json={"ban_duration": "876000h"})
         if response.status_code != 200:
@@ -197,6 +206,8 @@ class BanAdmin:
         data = self.owned(lease, principal)
         if timestamp(data["banned_until"]) <= utcnow() + timedelta(days=365):
             raise ValueError("Ban readback unverified")
+        if self.settlement:
+            self.settlement.ban_proof(lease, principal, data)
         return True
 
     def close(self):
@@ -209,6 +220,7 @@ class Guard:
         self.clock, self.monotonic = clock, monotonic
         self.anchor_wall, self.anchor_tick = clock(), monotonic()
         self.cleanup_error = False
+        self.bootstrap = None
 
     def now(self):
         wall = self.clock()
@@ -279,7 +291,7 @@ class Guard:
 
     @asynccontextmanager
     async def lifespan(self, app):
-        if self.lease is None:
+        if self.lease is None and self.bootstrap is None:
             yield
             return
         # Start before accepting traffic, including after crash/restart.
@@ -287,11 +299,24 @@ class Guard:
         stop = asyncio.Event()
 
         async def run():
-            while not stop.is_set():
-                try:
-                    await asyncio.wait_for(stop.wait(), timeout=POLL_SECONDS)
-                except TimeoutError:
-                    await asyncio.to_thread(self.sweep)
+            pending = None
+            due = time.monotonic() + POLL_SECONDS
+            try:
+                while not stop.is_set():
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=1 if self.bootstrap else POLL_SECONDS)
+                    except TimeoutError:
+                        if not self.bootstrap or time.monotonic() >= due:
+                            # Bootstrap HTTP never blocks this existing cleanup cadence.
+                            await asyncio.to_thread(self.sweep)
+                            due = time.monotonic() + POLL_SECONDS
+                        if self.bootstrap and (pending is None or pending.done()):
+                            if pending is not None:
+                                pending.result()  # tick contains sanitized, fail-closed handling.
+                            pending = asyncio.create_task(asyncio.to_thread(self.bootstrap.tick))
+            finally:
+                if pending is not None:
+                    await pending
 
         worker = asyncio.create_task(run())
         try:
@@ -306,11 +331,28 @@ class Guard:
 
 def from_environment(settings, service, engine):
     mode = os.environ.get("FILL_UAT_GUARD", "off")
-    if mode == "off":
+    bootstrap_mode = os.environ.get("FILL_UAT_BOOTSTRAP", "off")
+    if mode == "off" and bootstrap_mode == "off":
         return Guard()
     if mode != "on" or service != "operations" or settings.environment != "staging" or settings.supabase_url.rstrip("/") != ORIGIN:
         raise RuntimeError("Fill guard requires pinned Operations staging")
     try:
+        if bootstrap_mode == "on":
+            from .fill_uat_bootstrap import Bootstrap, FixtureAdmin, Journal, Plan, TARGET
+            if "FILL_UAT_LEASE" in os.environ or any(os.environ.get(k) != v for k, v in TARGET.items()):
+                raise ValueError("Bootstrap target mismatch")
+            plan = Plan.parse(json.loads(os.environ["FILL_UAT_BOOTSTRAP_INPUT"]))
+            if os.environ.get("RAILWAY_GIT_COMMIT_SHA") != plan.candidate_sha:
+                raise ValueError("Candidate mismatch")
+            deployment = uid(os.environ["RAILWAY_DEPLOYMENT_ID"])
+            admin = BanAdmin(os.environ["FILL_UAT_ADMIN_KEY"])
+            guard = Guard(None, SQLLedger(engine), admin)
+            guard.bootstrap = Bootstrap(plan, Journal(engine, deployment=deployment), FixtureAdmin(admin), guard)
+            guard.ledger.bootstrap_barrier = True
+            admin.settlement = guard.bootstrap.journal
+            return guard
+        if bootstrap_mode != "off":
+            raise ValueError("Invalid bootstrap mode")
         lease = Lease.parse(json.loads(os.environ["FILL_UAT_LEASE"]))
         if os.environ.get("RAILWAY_GIT_COMMIT_SHA") != lease.candidate_sha:
             raise ValueError("Candidate mismatch")

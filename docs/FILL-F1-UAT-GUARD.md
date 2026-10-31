@@ -1,5 +1,164 @@
 # F1 fixture guard — GO-A source and tests only
 
+## Source-only bootstrap extension (CTO five-file lease, 2026-10-31)
+
+The accepted guard baseline is `38fecf3cc6440968f4feb27e1d1627e119be92e4`.
+The new lease authorizes source/tests only. It does **not** authorize deploying
+the resulting new SHA, applying remote DDL, changing runtime variables,
+preparing/releasing an intent, creating/activating users or starting T0. The
+historical GO-B for baseline38 does not silently transfer to this candidate.
+The older manual-manifest procedure below remains historical documentation;
+bootstrap mode replaces its provisioning/config-redeploy steps as described here.
+
+The extension has no route, booking writer, SSH/OAuth grant, service, cron,
+external worker or automation. An optional one-shot component shares the
+existing Operations lifespan. The existing `BanAdmin` and `Guard.sweep` remain
+the only ban controller. Default `FILL_UAT_BOOTSTRAP=off` performs no new work.
+Normal users, Core, Get and the existing buffered fixture access rules retain
+their previous behavior. The accepted38 migration is not modified.
+
+### Private configuration and pre-T0 readiness
+
+Only a future reviewed candidate may use `FILL_UAT_GUARD=on` together with
+`FILL_UAT_BOOTSTRAP=on`. No `FILL_UAT_LEASE` may coexist with bootstrap mode.
+The exact Railway project/environment/Operations service IDs below, canonical
+`RAILWAY_DEPLOYMENT_ID`, full `RAILWAY_GIT_COMMIT_SHA`, staging environment and
+Supabase origin must all match. The service-only `FILL_UAT_ADMIN_KEY` remains
+inside Operations. It is never returned, printed or transferred by bootstrap.
+
+`FILL_UAT_BOOTSTRAP_INPUT` is private planned input with exactly four keys:
+`run_id` (canonical UUID), `authorization_id` (canonical UUID), `candidate_sha`
+(full reviewed SHA), and `passwords` (exactly `canary`, `a`, `b`). An authorized
+private runner generates three distinct random test passwords, each at least
+40 characters, retaining them privately for subsequent protected Fill login.
+Emails are derived as `fill-f1-<canonical-run-UUID>-<label>@example.invalid`;
+arbitrary emails/roles/organizations are not accepted. Passwords are omitted
+from object representations, database journal, responses and logs. No owner
+manual QA/password-entry ceremony is required. Newly generated fictional login
+credentials may be handled in the private test context; never put them in the
+repository, final chat, public logs or artifacts, or reuse them outside this run.
+The existing server Admin key has the stricter no-exposure/no-export boundary.
+
+Private control tables are `fill_private.uat_bootstrap_intents` and
+`fill_private.uat_bootstrap_attempts`, created only by the reviewed new migration
+`20261031004340_fill_uat_bootstrap.sql`. They have RLS, revoked PUBLIC/anon/
+authenticated access and SECURITY INVOKER triggers. There is no runtime DDL.
+The intent binds run/authorization UUIDs, source SHA, deployment ID, exact
+fictional orgs, SHA256 of canonical planned input, settled-deployment timestamp
+and a request expiry at most five minutes after creation. The input digest is
+computed with UTF-8 JSON, sorted keys and separators `(',', ':')`; it contains
+no recoverable password. One authorization ID can be inserted only once.
+Control rows, attempted slots, first timestamps and verdicts cannot be deleted,
+reused or renewed. These controls trust the authenticated administrator channel;
+they are not a cryptographic claim about a CTO's personal identity.
+
+Future runtime sequence, requiring exact new-SHA approval first:
+
+1. Install only the reviewed migrations and service-only configuration, settle
+   the exact candidate deployment and protected Fill preview, and verify the
+   expected one Operations replica, clocks, readiness and rollback resources.
+   No runnable intent exists during deployment. Do not disable existing guard
+   cleanup or restore an older image while unresolved attempts remain.
+2. Through the existing authenticated private database control path, prepare
+   the exact intent **after** independently verifying the settled deployment.
+   `settled_at` must be no later than creation and within five minutes before it.
+   Leave all execution/preflight/release/verdict fields at their inactive defaults.
+   The runtime cannot insert its own authority or select a different run.
+3. Before T0, bootstrap checks the pinned DB tables, both fictional orgs and
+   required current-role SELECT/INSERT/UPDATE privileges/RLS execution context.
+   It performs one supported Admin GET for an explicitly known blocked historical
+   fixture, checking ID, authenticated role and long ban. It never lists users,
+   changes old identities, consumes a create slot, or starts T0. Successful
+   preflight stamps the private intent. Failure invalidates that stamp and can
+   retry these reads; it cannot create users. External readback of the fresh
+   stamp is required before release. A stamp older than 30 seconds cannot start.
+4. CTO/executor releases the prepared intent using the existing private DB
+   channel. The first matching process atomically claims it and fixes DB T0
+   before any POST. T0 is immutable and includes all provisioning and testing.
+   Other processes/restarts cannot take over creation or activation. No new
+   window, regenerated credentials or second authorization is created on retry.
+5. A durable unique create slot is committed before each supported Auth Admin
+   POST. At most three slots exist (`canary`, `a`, `b`), including failures and
+   crashes before transmission. Each first POST includes `ban_duration=876000h`,
+   `email_confirm=true` and trusted `app_metadata.fill_f1_run`/`fictional=true`.
+   Validate canonical ID, derived email, role, metadata, creation time,
+   confirmation and long ban with canonical GET readback. Persist returned IDs
+   before later steps. No POST retry, redirect following, SQL Auth write,
+   existing-account password reset, invitation or create-then-ban flow exists.
+6. Only after all three readbacks, insert memberships for those NEW IDs alone:
+   `a`/`canary` owner in fictional org A `af24d8dd-813f-4919-bd6d-49a6d1169b25`,
+   `b` manager in fictional org B `4484cf28-1947-41dd-9b41-14891ac93752`.
+   Any preexisting membership is a failure; never overwrite it. Other role/
+   removal tests require the separately approved fixture-only UAT procedure.
+   Derive the immutable lease internally and persist/arm it before activation.
+   Use original T0: canary ban begins by T+120s, hard cutoff T+180s;
+   operator ban begins by T+20m, hard cutoff T+30m. No config redeploy is needed
+   after IDs are created. Provisioning, enrollment and canary activation must
+   complete before T+60s, leaving time for the positive hosted GET. Otherwise stop.
+7. Reserve a unique activation nonce durably before the ONE canary unban PUT.
+   Send the nonce in `app_metadata.fill_f1_activation_nonce`, with the same trusted
+   run/fictional markers, **in the same supported update** as `ban_duration=none`.
+   Verify the canonical response by GET, then run the protected login/GET test.
+   Leave both operators banned while the existing controller performs its ban.
+   A process crash or uncertain PUT result never causes an unban retry.
+8. Independently read back canary evidence and record the CTO verdict in the
+   private intent. Exact verdict fields are `decision` (`pass`/`fail`), `run_id`,
+   `candidate_sha`, `lease_digest`, `evidence_ref`, `positive_get`, `denied_login`,
+   `denied_api`. The lease digest is the database's
+   `encode(sha256(convert_to(spec::text,'UTF8')),'hex')`, **not** a client JSON hash.
+   Record only a nonsecret evidence reference. PASS requires positive GET plus
+   denied login/API evidence, the settled activation nonce, canonical long-ban
+   receipt, and its **first post-activation readback at or before T0+180s**.
+   PASS cannot be recorded before T+180s or at/after T+10m. Late first cleanup is
+   FAIL even if the latest health/ban receipt looks good. A verdict is immutable
+   and binds the exact run/SHA/lease. The runtime never writes its own verdict.
+9. Only that external PASS can allow the two one-shot operator activation slots
+   before T+10m, leaving ten minutes before early ban. Run F1 desktop/mobile
+   read-only checks within the original window; no renewal or post-cutoff login.
+   Rehearsal must show this time budget is sufficient before any live T0.
+   Missing/rejected/late/mismatched verdict stops further activation. Verify all
+   bans, first receipts, unresolved slots and final ledger state externally.
+
+### Ambiguity, late unban and restart recovery
+
+Auth and the database cannot commit atomically. Reservation-before-send can
+consume a slot without creating/updating anything; that safe loss is accepted.
+An ambiguous create freezes all creation/activation and records reconciliation
+required. Unknown identities must be inspected through supported Admin by an
+authorized administrator; never infer an empty/error response means no user.
+Known partial IDs receive a once-only stopped cleanup lease. Initial bans limit
+the unknown outcome, but are not claimed as verified final cleanup of an unknown
+identity. The reconciliation marker is durable and is not automatically cleared.
+
+A timed-out unban may commit **after** a successful point-in-time cleanup ban.
+Therefore an issued activation slot is a durable cleanup barrier until canonical
+Auth GET observes its unique nonce. Only then can the sole controller perform
+and verify the subsequent long ban and preserve `first_ban_readback_at` using
+database time. Until nonce settlement and post-settlement ban proof exist,
+`cleanup_complete` stays false even if every current GET says banned. The loop
+continues after restart, and no operator activation, rollback, Admin-key removal
+or successful acceptance may be inferred. An unobserved nonce can leave the run
+pending indefinitely and requires explicit administrator reconciliation; there
+is no unsafe timeout override. First receipt timestamps cannot be refreshed to
+hide a late canary ban. The existing whole-service/Auth/DB outage and global JWT
+limitations below still apply; this is not an unconditional account-ban SLA.
+
+Rollback before any intent/account attempt is straightforward under its own
+approved deployment procedure. After T0, stop the private intent/run and keep
+this candidate, guard and Admin key available until every issued activation
+barrier, known final ban and unknown create outcome is resolved and independently
+accepted. `uat_runs.cleanup_complete` alone covers known enrolled IDs, not the
+intent's unknown-create reconciliation flag. Preserve evidence and memberships;
+do not delete users, reset intent state, remove the schema or unban the old four.
+No source-only CI or fixture evidence establishes hosted acceptance.
+
+Tests use intercepted HTTP and the existing CI's disposable PostgreSQL only.
+CI Auth rows, where needed for relational fixtures, are synthetic and are never
+hosted provisioning evidence. Supabase's supported Admin implementation updates
+metadata and ban in one Auth transaction; deployment-specific behavior still
+needs the guarded canary before operator activation:
+https://github.com/supabase/auth/blob/master/internal/api/admin.go
+
 Based on `aa3ec1d8d137a58d7f2da95259d54bc0415a4534`, existing Draft PR #8.
 Owner GO-A authorizes development/tests, not deployment, schema application,
 secret installation, account creation/activation or hosted UAT. CTO granted the
