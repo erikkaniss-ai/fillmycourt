@@ -148,9 +148,9 @@ async function autoSearchAdditionalFromGet(query) {
   }finally{extraBusy=false;}
 }
 
-const comparisonPageAllowed=value=>{
-  try{return new URL(value).href===COMPARISON_PAGE;}catch{return false;}
-};
+// Match the exact receiver before its fragment; never normalize queries/userinfo.
+const comparisonPageAllowed=value=>typeof value==="string"&&
+  value.split("#",1)[0]===COMPARISON_PAGE;
 const nonceAllowed=value=>typeof value==="string"&&/^[A-Za-z0-9_-]{24,128}$/.test(value);
 function caller(sender){
   if(sender?.id!==chrome.runtime.id)fail("REQUEST_REJECTED");

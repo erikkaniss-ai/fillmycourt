@@ -151,10 +151,38 @@ test("comparison handoff rejects stale data, extra fields and foreign pages; dis
   await fresh.call({action:"revoke"});assert.equal(fresh.session.comparisonObservation,undefined);
   const foreign={...page,url:"https://evil.example/search-all.html",tab:{id:9,url:"https://evil.example/search-all.html"}};
   assert.equal((await fresh.call({action:"pageBridgeReady",nonce:"a".repeat(48)},foreign)).code,"REQUEST_REJECTED");
-  for(const url of ['https://getacourt.com/search-all.html',comparisonUrl+'?next=foreign',comparisonUrl+'#data',comparisonUrl.replace('get-pr5-reader-uat','other-preview')]){
+  for(const url of ['https://getacourt.com/search-all.html',comparisonUrl+'?next=foreign',
+    comparisonUrl+'?',comparisonUrl+'?#results',comparisonUrl+'/other#search',
+    comparisonUrl.replace('https://','https://user@'),comparisonUrl.replace('https://','https://@'),
+    comparisonUrl.replace('get-pr5-reader-uat','other-preview')]){
     assert.equal((await fresh.call({action:"pageBridgeReady",nonce:"a".repeat(48)},{...page,url})).code,"REQUEST_REJECTED");
   }
 });
+test("fragment page callers still require an intact fresh prepared report, valid nonce and single-use delivery",async()=>{
+  for(const fragment of ['#results','#search','#data']){
+    const h=harness();await h.connect();
+    const from={...page,url:comparisonUrl+fragment,tab:{...page.tab,url:comparisonUrl+fragment}};
+    const message={action:'pageBridgeReady',nonce:'a'.repeat(48)};
+    assert.equal((await h.call(message,from)).code,'COMPARISON_PREP_REQUIRED');
+    await h.call({action:'prepareComparison',observation:validObservation()});
+    assert.equal((await h.call({...message,nonce:'invalid'},from)).code,'REQUEST_REJECTED');
+    assert.ok(h.session.comparisonObservation);
+    h.session.comparisonObservation={...h.session.comparisonObservation,access_token:'FICTIONAL forbidden field'};
+    assert.equal((await h.call(message,from)).code,'REQUEST_REJECTED');
+    await h.call({action:'prepareComparison',observation:validObservation()});
+    h.advance();
+    assert.equal((await h.call(message,from)).code,'COMPARISON_EXPIRED');
+    assert.equal(h.calls,0);
+    assert.equal(h.canceled.filter(row=>row.action==='deliverComparisonObservation').length,0);
+    const fresh=harness();await fresh.connect();
+    await fresh.call({action:'prepareComparison',observation:validObservation()});
+    assert.equal((await fresh.call(message,from)).status,'comparison_delivered');
+    assert.equal((await fresh.call(message,from)).code,'COMPARISON_PREP_REQUIRED');
+    assert.equal(fresh.canceled.filter(row=>row.action==='deliverComparisonObservation').length,1);
+    assert.equal(fresh.calls,0);
+  }
+});
+
 test("a revoke queued during approval wins without a late restored grant",async()=>{
   const h=harness();const finish=h.deferConsent();
   const approval=h.connect();await new Promise(r=>setImmediate(r));
