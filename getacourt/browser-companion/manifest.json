@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "GetACourt Personal Playtomic Reader",
+  "version": "0.4.2",
+  "description": "One-time player login; on-demand four-club Playtomic and named other booking-site UI search. No provider API or checkout.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'"
+  },
+  "optional_host_permissions": [
+    "https://playtomic.com/*",
+    "https://clubs.tiesports.com/*",
+    "https://racket.id/*",
+    "https://smashpro.pt/*",
+    "https://www.matchi.se/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html"
+      ],
+      "js": [
+        "get-page-relay.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

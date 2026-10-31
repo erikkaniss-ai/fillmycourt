@@ -1,0 +1,39 @@
+name: GetACourt offline privacy contract
+
+on:
+  push:
+    branches: ["cto/getacourt-offline-failclosed-20261021"]
+    paths: ["getacourt/offline-safety/**", ".github/workflows/getacourt-offline-safety-ci.yml"]
+  pull_request:
+    branches: ["getacourt-staging"]
+    paths: ["getacourt/offline-safety/**", ".github/workflows/getacourt-offline-safety-ci.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Static offline privacy/source checks
+        run: |
+          node --check getacourt/offline-safety/sw.js
+          node --check getacourt/offline-safety/test/browser-offline.mjs
+          node --test getacourt/offline-safety/test/offline-safety.test.mjs
+      - name: Install pinned ephemeral Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/gac-offline-tools" --no-audit --no-fund --no-package-lock --no-save playwright-core@1.56.1
+          node "$RUNNER_TEMP/gac-offline-tools/node_modules/playwright-core/cli.js" install --with-deps chromium
+      - name: Network-isolated service worker offline browser acceptance
+        env:
+          GAC_OFFLINE_TOOLS: ${{ runner.temp }}/gac-offline-tools/node_modules
+        run: node getacourt/offline-safety/test/browser-offline.mjs
+      - name: Changed-file whitespace verification
+        run: git diff --check

@@ -2,16 +2,146 @@ name: Platform CI
 
 on:
   push:
-    branches: ["platform/v0.4-staging"]
+    branches: ["getacourt-staging"]
     paths:
       - "platform/**"
+      - "getacourt/**"
+      - "netlify/functions/**"
       - ".github/workflows/platform-ci.yml"
   pull_request:
     paths:
       - "platform/**"
+      - "getacourt/**"
+      - "netlify/functions/**"
       - ".github/workflows/platform-ci.yml"
 
+# RC receives required PR CI only; staging integration pushes retain full CI.
+# Cancel only obsolete revisions of the same PR; staging push runs remain.
+concurrency:
+  group: get-platform-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  integration-qa:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Integrated accessibility, offline privacy and current-RC boundary contracts
+        run: node --test getacourt/tests/accessibility-contract.test.mjs getacourt/tests/integration-contract.test.mjs getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs getacourt/tests/connected-accounts-activation-gate.test.mjs getacourt/tests/personal-booking-import.test.mjs getacourt/offline-safety/test/offline-safety.test.mjs
+      - name: Offline hosted-device-OAuth preflight contracts (no hosted or production traffic)
+        run: node --test getacourt/tests/acceptance-preflight.test.mjs
+      - name: Personal browser companion permission and revocation contracts
+        run: node --test getacourt/tests/personal-playtomic-reader.test.mjs getacourt/tests/personal-source-observation.test.mjs
+      - name: Record fail-closed preflight against exact candidate (NOT RUN, not hosted acceptance)
+        env:
+          GAC_REVIEW_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          node getacourt/qa/preflight-cli.mjs --input getacourt/qa/current-preflight.json --sha "$GAC_REVIEW_SHA" --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$RUNNER_TEMP/get-acceptance-preflight.json"
+          result=$?
+          set -e
+          test "$result" -eq 2
+          node --input-type=module -e 'import {readFileSync} from "node:fs"; import assert from "node:assert/strict"; const r=JSON.parse(readFileSync(process.env.RUNNER_TEMP+"/get-acceptance-preflight.json","utf8")); assert.equal(r.reviewedSha,process.env.GAC_REVIEW_SHA); assert.equal(r.executionEnabled,false); assert.equal(r.checks.length,7); assert.ok(r.checks.every(c=>c.preflight==="BLOCKED"&&c.execution==="NOT_RUN"));'
+      - name: Offline preflight report - NOT RUN
+        uses: actions/upload-artifact@v4
+        with:
+          name: getacourt-acceptance-preflight-NOT-RUN
+          path: ${{ runner.temp }}/get-acceptance-preflight.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Install pinned ephemeral integration browser tools (no deploy)
+        run: |
+          npm install --prefix "$RUNNER_TEMP/gac-integration-tools" --no-save --no-package-lock --no-audit --no-fund --ignore-scripts playwright-core@1.56.1 axe-core@4.14.0
+          node "$RUNNER_TEMP/gac-integration-tools/node_modules/playwright-core/cli.js" install --with-deps chromium
+      - name: Integrated current-RC accessibility and 32 automated axe audits
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+          GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
+        run: node getacourt/tests/browser-accessibility.mjs
+      - name: Isolated Connected Accounts UX Chromium and WCAG — fixture only
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+          GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
+        run: node getacourt/tests/connected-accounts-browser.mjs
+      - name: Personal reader UI and bounded search DOM — fictional fixtures only
+        env:
+          GAC_A11Y_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+          GAC_INTEGRATION_ARTIFACT_DIR: platform/qa-artifacts/get-integration
+          GAC_FIXTURE_BROWSER: chromium
+        run: node getacourt/tests/personal-reader-browser.mjs
+      - name: Integrated unregistered module offline network-loss and exact-cache proof
+        env:
+          GAC_OFFLINE_TOOLS: ${{ runner.temp }}/gac-integration-tools/node_modules
+        run: node getacourt/offline-safety/test/browser-offline.mjs
+      - name: Fixture-only integrated Get screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: getacourt-integrated-fixture-only
+          path: platform/qa-artifacts/get-integration/
+          if-no-files-found: warn
+          retention-days: 7
+  fast-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Control Tower source-only read-only contracts
+        run: |
+          node --check platform/control-tower/model.mjs
+          node --check platform/control-tower/server.mjs
+          node --check platform/control-tower/public/app.js
+          node --test platform/control-tower/test/control_tower.test.mjs
+      - name: Fast Get JS syntax and authorization boundaries
+        run: |
+          node --test getacourt/tests/personal-playtomic-reader.test.mjs getacourt/tests/personal-source-observation.test.mjs
+          node --check getacourt/browser-companion/background.js
+          node --check getacourt/browser-companion/capture.js
+          node --check getacourt/browser-companion/popup.js
+          node --check getacourt/assets/personal-source-observation.js
+          node --check getacourt/browser-companion/search.js
+          node --check getacourt/browser-companion/reader.js
+          node --check getacourt/browser-companion/observation.js
+          node --check getacourt/tests/personal-reader-browser.mjs
+          node --check getacourt/assets/app.js
+          node --check getacourt/assets/auth-pkce.js
+          node --check getacourt/assets/commercial-signals.js
+          node --check getacourt/assets/provider-connection-foundation.js
+          node --check getacourt/assets/provider-account-test-lab.js
+          node --check getacourt/qa/connected-accounts-demo.js
+          node --check getacourt/qa/connected-accounts-lifecycle.js
+          node --check getacourt/qa/connected-accounts-activation-gate.mjs
+          node --check getacourt/assets/personal-booking-import.js
+          node --experimental-strip-types --test \
+            platform/tests/getacourt_booking_source_guard.test.mjs \
+            platform/tests/getacourt_date_contract.test.mjs \
+            platform/tests/getacourt_geolocation_contract.test.mjs \
+            platform/tests/getacourt_google_auth_contract.test.mjs \
+            platform/tests/getacourt_auth_facade_contract.test.mjs \
+            platform/tests/getacourt_session_contract.test.mjs \
+            platform/tests/getacourt_session_isolation.test.mjs \
+            platform/tests/getacourt_netlify_contract.test.mjs \
+            platform/tests/getacourt_map_csp_contract.test.mjs \
+            platform/tests/getacourt_install_contract.test.mjs \
+            platform/tests/getacourt_commercial_signals_contract.test.mjs \
+            platform/tests/getacourt_provider_connection_foundation.test.mjs \
+            platform/tests/getacourt_provider_supply_contract.test.mjs \
+            platform/tests/getacourt_provider_account_lab.test.mjs \
+            getacourt/tests/connected-accounts-contract.test.mjs \
+            getacourt/tests/connected-accounts-lifecycle.test.mjs \
+            getacourt/tests/connected-accounts-activation-gate.test.mjs \
+            getacourt/tests/personal-booking-import.test.mjs \
+            platform/tests/getacourt_ci_dispatch_contract.test.mjs
   contract:
     runs-on: ubuntu-latest
     services:
@@ -40,6 +170,54 @@ jobs:
         run: pip install -r platform/requirements-dev.txt
       - name: Compile
         run: python -m compileall -q platform/src
+      - name: Verify GetAcourt CI dispatch and full-suite retention contracts
+        run: node --test platform/tests/getacourt_ci_dispatch_contract.test.mjs
+      - name: Verify GetAcourt browser JS syntax
+        run: node --check getacourt/assets/app.js && node --check getacourt/assets/commercial-signals.js && node --check getacourt/assets/provider-connection-foundation.js
+      - name: Decision 104 GetAcourt commercial observability shadow contracts
+        run: node --test platform/tests/getacourt_commercial_signals_contract.test.mjs
+      - name: GetAcourt synthetic provider connection foundation contracts
+        run: node --test platform/tests/getacourt_provider_connection_foundation.test.mjs
+      - name: Connected Accounts / club supply fail-closed synthetic contracts
+        run: |
+          node --check getacourt/assets/provider-supply-contract.js
+          node --test platform/tests/getacourt_provider_supply_contract.test.mjs
+      - name: Personal provider-account readiness contracts (no live API)
+        run: node --test platform/tests/getacourt_provider_account_lab.test.mjs
+      - name: Personal browser companion permission and revocation contracts
+        run: node --test getacourt/tests/personal-playtomic-reader.test.mjs getacourt/tests/personal-source-observation.test.mjs
+      - name: Connected Accounts fixture-only UI and rights evidence contracts
+        run: |
+          node --check getacourt/qa/connected-accounts-demo.js
+          node --check getacourt/qa/connected-accounts-lifecycle.js
+          node --check getacourt/qa/connected-accounts-activation-gate.mjs
+          node --test getacourt/tests/connected-accounts-contract.test.mjs getacourt/tests/connected-accounts-lifecycle.test.mjs getacourt/tests/connected-accounts-activation-gate.test.mjs getacourt/tests/personal-booking-import.test.mjs
+      - name: GetACourt native-only booking source guard contracts
+        run: node --test platform/tests/getacourt_booking_source_guard.test.mjs
+      - name: Install isolated QA-08 browser runner (no deploy)
+        run: npm install --prefix platform/tests/browser --no-save --no-package-lock --ignore-scripts playwright-core@1.56.1 leaflet@1.9.4
+      - name: GetAcourt QA-08 real Chromium local fixture E2E (no external requests or writes)
+        run: node --test platform/tests/browser/getacourt_browser_e2e.mjs
+      - name: QA-09 actual upstream Leaflet/SRI local Chromium E2E (no external writes)
+        run: node --test platform/tests/browser/getacourt_real_leaflet_e2e.mjs
+      - name: GetAcourt UI date contract tests
+        run: node --test platform/tests/getacourt_date_contract.test.mjs
+      - name: GetAcourt location permission + near-me contract tests
+        run: node --test platform/tests/getacourt_geolocation_contract.test.mjs
+      - name: GetAcourt Leaflet map CSP and resource integrity contracts
+        run: node --test platform/tests/getacourt_map_csp_contract.test.mjs
+      - name: GetAcourt PWA installability contract tests
+        run: node --test platform/tests/getacourt_install_contract.test.mjs
+      - name: GetAcourt Google login PKCE + session contract tests
+        run: node --test platform/tests/getacourt_google_auth_contract.test.mjs
+      - name: GetAcourt auth gateway security contracts
+        run: node --experimental-strip-types --test platform/tests/getacourt_auth_facade_contract.test.mjs
+      - name: GetAcourt session race and revocation contracts
+        run: node --test platform/tests/getacourt_session_contract.test.mjs
+      - name: GetAcourt authenticated tabs and PWA privacy contracts
+        run: node --test platform/tests/getacourt_session_isolation.test.mjs
+      - name: GetAcourt Netlify facade contract tests (no network / no writes)
+        run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract
         run: |
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
@@ -59,3 +237,8 @@ jobs:
           done
       - name: Test
         run: pytest -q platform/tests
+      # QA-PREVIEW-02 live perimeter is a separate explicit GO, not automatic CI.
+      # The historical script also requests production; never execute it here.
+      - name: QA-PREVIEW-02 offline preflight regression (no hosted or production traffic)
+        run: node --test getacourt/tests/acceptance-preflight.test.mjs
+
