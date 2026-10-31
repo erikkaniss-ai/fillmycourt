@@ -327,6 +327,7 @@ class Bootstrap:
     def __init__(self, plan, journal, admin, guard, *, executor=None):
         self.plan, self.journal, self.admin, self.guard = plan, journal, admin, guard
         self.executor = executor or str(uuid.uuid4())
+        self.next_preflight = float("-inf")
 
     def fresh(self, *, seconds):
         row = self.journal.read(self.plan)
@@ -381,9 +382,15 @@ class Bootstrap:
             self.recover()
             return
         if row["starts_at"] is None:
+            if row["db_now"] >= row["request_expires_at"]:
+                self.journal.stop(self.plan, reconcile=False)
+                return
             if row["released_at"] is None:
                 if (row["preflight_at"] is None or str(row["preflight_executor"]) != self.executor
                         or (row["db_now"]-row["preflight_at"]).total_seconds() >= 20):
+                    if self.guard.monotonic() < self.next_preflight:
+                        return
+                    self.next_preflight = self.guard.monotonic() + 20
                     self.admin.preflight()
                     self.journal.preflight(self.plan, self.executor)
                 return

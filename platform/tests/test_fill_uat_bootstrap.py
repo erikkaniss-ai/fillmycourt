@@ -47,6 +47,7 @@ class MemoryJournal:
     def prepare(self):
         self.row = {"starts_at": None, "executor": None, "stopped": False, "released_at": None,
                     "preflight_at": None, "preflight_executor": None, "verdict": None, "verdict_at": None,
+                    "request_expires_at": self.clock.wall()+timedelta(minutes=5),
                     "attempts": [], "reconciliation_required": False, "lease_digest": "1" * 64}
     def read(self, _):
         if self.failure == "db":
@@ -220,8 +221,19 @@ def test_preflight_failure_retries_reads_only_without_consuming_authority(e):
     assert e.journal.row["preflight_at"] is None
     e.server.failure = None
     e.boot.tick()
+    assert len(e.server.calls) == 1  # Failed preflight reads are rate-bounded too.
+    e.clock.advance(20)
+    e.boot.tick()
     assert e.journal.row["preflight_at"] and e.journal.row["attempts"] == []
     assert all(m == "GET" for m, _ in e.server.calls)
+
+
+def test_expired_prepared_intent_stops_without_auth_or_t0(e):
+    e.journal.prepare()
+    e.clock.advance(301)
+    e.boot.tick()
+    assert e.journal.row["stopped"] and e.journal.row["starts_at"] is None
+    assert not e.journal.row["reconciliation_required"] and e.server.calls == []
 
 
 @pytest.mark.parametrize("change", ["hex", "sha", "missing", "extra", "weak", "same"])
