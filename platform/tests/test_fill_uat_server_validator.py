@@ -501,7 +501,7 @@ def test_single_data_statement_and_native_nested_type_parity(e):
     port, calls = query_port(e, raw)
     got = port.read()
     assert len(calls) == 1 and calls[0][0] is s.JournalPort.SNAPSHOT
-    assert calls[0][1] == {"run": e.cfg.run_id, "history": list(e.cfg.historical_ids)}
+    assert calls[0][1] == {"run": e.cfg.run_id, "history": list(e.cfg.historical_ids), "ban_limit": 21}
     assert got["intent"]["db_now"] == e.clock.wall()
     assert got["intent"]["input_digest"] == e.plan.digest
     assert isinstance(got["intent"]["attempts"][0]["activation_nonce"], uuid.UUID)
@@ -631,8 +631,60 @@ def test_snapshot_fixture_rejects_unsafe_target_before_engine(url, opt_in, monke
     assert not url or url not in str(rejected.value)
 
 
+def set_history(e, count):
+    raw = dict(e.cfg.__dict__, historical_ids=[ID(i) for i in range(1,count+1)],
+               admission_expires_at=e.cfg.admission_expires_at.isoformat())
+    e.cfg = s.Binding.parse(raw)
+    e.runner.binding = e.cfg
+
+
+@pytest.mark.parametrize("count", [17,20])
+def test_supported_history_and_three_new_principals_complete_with_same_budget(e,count):
+    set_history(e,count)
+    asyncio.run(e.runner.run())
+    final = next(x for x in e.logs if x["kind"]=="PRIVATE_VALIDATOR_TASK_STOPPED")
+    assert final["status"]=="READS_COMPLETE" and final["owned_pending"]==0
+    assert final["cleanup"]["known_banned"]==count+3
+    assert len(e.runner.identities)==3 and len(e.runner.events)==21
+    assert len([x for x in e.http if x[0]=="POST"])==4
+    raw=wire_snapshot(e)
+    port,calls=query_port(e,raw)
+    assert len(port.read()["bans"])==count+3
+    assert calls[0][1]["ban_limit"]==count+4<=24
+
+
+@pytest.mark.parametrize("count", [0,16,18,19,21,23,24])
+def test_only_two_explicit_history_cardinalities_are_supported(e,count):
+    with pytest.raises(s.Closed): set_history(e,count)
+    assert not e.http
+
+
+@pytest.mark.parametrize("fault", ["duplicate","missing_old","invalid_uuid"])
+def test_history_scope_rejects_duplicate_missing_protected_or_noncanonical_id(e,fault):
+    raw=dict(e.cfg.__dict__,historical_ids=[ID(i) for i in range(1,21)],
+             admission_expires_at=e.cfg.admission_expires_at.isoformat())
+    if fault=="duplicate": raw["historical_ids"][-1]=ID(1)
+    elif fault=="missing_old": raw["historical_ids"][0]=ID(999)
+    else: raw["historical_ids"][-1]="invalid"
+    with pytest.raises(s.Closed): s.Binding.parse(raw)
+    assert not e.http
+
+
+@pytest.mark.parametrize("fault", ["missing_history_ban","ledger_identity_omitted"])
+def test_full_history_is_required_before_admission_not_just_old_subset(e,fault):
+    set_history(e,20)
+    def mutate(data):
+        if fault=="missing_history_ban": data["bans"].pop(ID(20))
+        else: data["prior_unknown"]=True
+    e.port.mutate=mutate
+    asyncio.run(e.runner.run())
+    assert e.runner.failed and not e.runner.admission_ready and not e.http
+    assert e.port.stopped and not e.runner.operator_gate
+
+
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="Disposable local/CI PostgreSQL only")
-def test_postgres_single_snapshot_matches_legacy_payload_and_privileges():
+@pytest.mark.parametrize("history_count", [17, 20])
+def test_postgres_single_snapshot_matches_legacy_payload_and_privileges(history_count):
     # Synthetic SQL contract only, never supported Auth provisioning/hosted UAT.
     # All fixture schema/data changes roll back in the disposable CI database.
     opt_in = os.environ.get("FILL_SERVER_SNAPSHOT_FIXTURES")
@@ -640,7 +692,7 @@ def test_postgres_single_snapshot_matches_legacy_payload_and_privileges():
         opt_in = "ci-local-only"  # existing disposable PostgreSQL job only
     engine = snapshot_fixture_engine(os.environ["TEST_DATABASE_URL"], opt_in)
     run, authority, deployment, executor = (str(uuid.uuid4()) for _ in range(4))
-    history = list(g.OLD_USERS) + [str(uuid.uuid4()) for _ in range(13)]
+    history = list(g.OLD_USERS) + [str(uuid.uuid4()) for _ in range(history_count-len(g.OLD_USERS))]
     plan = b.Plan.parse({"run_id": run, "authorization_id": authority, "candidate_sha": "a"*40,
                          "passwords": {k: PASSWORD+k for k in s.LABELS}})
     with engine.connect() as c:
@@ -669,7 +721,7 @@ def test_postgres_single_snapshot_matches_legacy_payload_and_privileges():
             cfg = SimpleNamespace(run_id=run, historical_ids=history)
             port = s.JournalPort(boot, cfg)
             before = port.read()
-            assert before["run"] is None and before["intent"]["attempts"] == [] and len(before["bans"]) == 17
+            assert before["run"] is None and before["intent"]["attempts"] == [] and len(before["bans"]) == history_count
             journal.preflight(plan, executor)
             c.execute(text("update fill_private.uat_bootstrap_intents set released_at=clock_timestamp() where run_id=cast(:run as uuid)"), {"run": run})
             journal.claim(plan, executor)
@@ -701,7 +753,7 @@ def test_postgres_single_snapshot_matches_legacy_payload_and_privileges():
             assert got == expected
             assert decoded["run"]["spec"] == json.loads(lease.document)
             assert decoded["run"]["healthy_at"].tzinfo is not None
-            assert len(decoded["bans"]) == 20 and len(decoded["markers"]) == len(decoded["members"]) == 3
+            assert len(decoded["bans"]) == history_count+3 and len(decoded["markers"]) == len(decoded["members"]) == 3
             native_members = [dict(x) for x in c.execute(text("select user_id,organization_id,role::text "
                 "from public.organization_members where user_id=any(cast(:ids as uuid[]))"),
                 {"ids": [p.id for p in lease.principals]}).mappings()]
@@ -710,6 +762,27 @@ def test_postgres_single_snapshot_matches_legacy_payload_and_privileges():
                 with pytest.raises(Exception), c.begin_nested():
                     c.execute(text("set local role "+role))
                     port.read()  # no SECURITY DEFINER/elevated SQL or RLS bypass
+            # New inactive synthetic intent checks earlier-journal completeness
+            # before any new admission/action; this is not Auth provisioning.
+            next_plan=b.Plan.parse({"run_id":str(uuid.uuid4()),"authorization_id":str(uuid.uuid4()),
+                                   "candidate_sha":plan.candidate_sha,"passwords":{k:PASSWORD+k for k in s.LABELS}})
+            c.execute(text("insert into fill_private.uat_bootstrap_intents "
+                "(run_id,authorization_id,candidate_sha,project_ref,organization_ids,input_digest,deployment_id,settled_at,request_expires_at) "
+                "select cast(:next as uuid),cast(:authority as uuid),candidate_sha,project_ref,organization_ids,:digest,"
+                "deployment_id,clock_timestamp(),clock_timestamp()+interval '4 minutes' "
+                "from fill_private.uat_bootstrap_intents where run_id=cast(:prior as uuid)"),
+                {"next":next_plan.run_id,"authority":next_plan.authorization_id,"digest":next_plan.digest,"prior":run})
+            next_port=s.JournalPort(SimpleNamespace(plan=next_plan,journal=journal),SimpleNamespace(run_id=next_plan.run_id,historical_ids=history))
+            assert next_port.read()["prior_unknown"] is True
+            if history_count==17:
+                complete=history+[p.id for p in lease.principals]
+                next_port.binding=SimpleNamespace(run_id=next_plan.run_id,historical_ids=complete)
+                readback=next_port.read()
+                assert readback["prior_unknown"] is False and len(readback["bans"])==20
+                incomplete=list(complete)
+                incomplete[-1]=str(uuid.uuid4())
+                next_port.binding=SimpleNamespace(run_id=next_plan.run_id,historical_ids=incomplete)
+                assert next_port.read()["prior_unknown"] is True
         finally:
             transaction.rollback()
     engine.dispose()

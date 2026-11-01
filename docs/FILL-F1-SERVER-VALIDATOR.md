@@ -19,6 +19,11 @@ verdict, release an intent, retry a consumed operation or renew deadlines.
 Bootstrap admission is held until the validator checks the privately configured
 binding/history against the existing canonical intent. Operator activation is
 also held until the server validates the independent private proof grant.
+Only two explicit history cardinalities (17 and 20) are accepted, with unique
+canonical UUIDs and the protected subset retained. The bounded ban read uses
+history length plus four (maximum 24): three per-run identities and one overflow
+fence. Full prior-journal identity completeness remains required; a smaller
+subset cannot bypass it. This changes no allocation budget or timing gate.
 
 User login uses only a modern publishable key. User JWTs remain in memory and
 are cleared on close; refresh tokens are unused. Auth requests are pinned to
@@ -141,7 +146,7 @@ preparation. It is the reviewable scope for a separate exact future staging GO.
    canonical intent and release. Keep guard/bootstrap enabled for cleanup.
 3. Privately configure `FILL_UAT_SERVER_BINDING` with `operations_sha`,
    `preview_sha`, `deployment_id: "runtime"`, fresh `run_id`/`authorization_id`,
-   the independently verified seventeen `historical_ids`, the two fixture
+   the independently verified `historical_ids` (only 17- or 20-entry scopes), the two fixture
    `organizations`, private `receipt_document`, and `admission_expires_at`.
    `operations_origin` must equal the official HTTPS origin from that same
    Operations service's trusted `RAILWAY_PUBLIC_DOMAIN` metadata; other origins

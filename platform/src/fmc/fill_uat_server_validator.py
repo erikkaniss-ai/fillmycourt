@@ -73,7 +73,8 @@ class Binding:
             for key in ("deployment_id", "run_id", "authorization_id"):
                 g.uid(value[key])
             history = value["historical_ids"]
-            require(isinstance(history, list) and len(history) == len(set(history)) == 17 and g.OLD_USERS.issubset(set(history)), "BINDING")
+            require(isinstance(history, list) and len(history) in {17, 20} and len(history) == len(set(history))
+                    and g.OLD_USERS.issubset(set(history)), "BINDING")
             for uid in history:
                 g.uid(uid)
             orgs = value["organizations"]
@@ -108,7 +109,7 @@ class JournalPort:
             'spec',r.spec,'armed',r.armed,'stopped',r.stopped,'healthy_at',r.healthy_at,
             'receipts',r.receipts,'cleanup_complete',r.cleanup_complete) end as _run,
           coalesce((select jsonb_agg(to_jsonb(b)) from (
-            select id,banned_until from auth.users where id in (select id from known) limit 21
+            select id,banned_until from auth.users where id in (select id from known) limit :ban_limit
           ) b),'[]'::jsonb) as _bans,
           coalesce((select jsonb_agg(to_jsonb(m)) from (
             select id,created_at,raw_app_meta_data->>'fill_f1_run' as run_marker,
@@ -132,9 +133,10 @@ class JournalPort:
 
     def read(self):
         boot, cfg = self.bootstrap, self.binding
-        require(boot.plan.run_id == cfg.run_id, "BINDING")
+        require(boot.plan.run_id == cfg.run_id and len(cfg.historical_ids) in {17, 20}, "BINDING")
         with boot.journal.tx() as c:
-            raw = c.execute(self.SNAPSHOT, {"run": cfg.run_id, "history": list(cfg.historical_ids)}).mappings().first()
+            raw = c.execute(self.SNAPSHOT, {"run": cfg.run_id, "history": list(cfg.historical_ids),
+                                          "ban_limit": len(cfg.historical_ids)+4}).mappings().first()
         if raw is None:
             return None
         try:
@@ -178,7 +180,7 @@ class JournalPort:
             require(isinstance(run, dict) and isinstance(run["spec"], dict) and isinstance(run["receipts"], dict)
                     and all(type(run[k]) is bool for k in ("armed", "stopped", "cleanup_complete")), "BINDING")
             run = date_fields(dict(run), ("healthy_at",))
-        bans = rows("_bans", 21)
+        bans = rows("_bans", min(len(self.binding.historical_ids)+4, 24))
         markers = rows("_markers", 4)
         members = rows("_members", 7)
         for ban in bans:
