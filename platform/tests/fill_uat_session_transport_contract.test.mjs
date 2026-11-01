@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { performance } from 'node:perf_hooks';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { SyntheticSessionReadout, createSyntheticSession, MAX_SESSION_BYTES } from '../scripts/fill_uat_session_transport.mjs';
 import { EVENTS, PHASES, SCENARIOS, WATCHDOG_MS, frame } from '../scripts/fill_uat_synthetic_session.mjs';
 
@@ -21,6 +23,19 @@ function fake(chunks, extra = {}) {
   return { transport, commands, get stopped() { return stopped; } };
 }
 const chunk = output => ({ output });
+
+async function observedStderrClosure(session) {
+  // Bounded observation of actual fatal/stop/close, never quiet-as-success or a
+  // new protocol budget. Independent OS pipes need not be delivered in order.
+  const deadline = performance.now() + 700;
+  while (true) {
+    const state = session.snapshot;
+    if (state.fatal) assert.equal(state.fatal, 'STDERR_PRESENT');
+    if (state.fatal === 'STDERR_PRESENT' && state.stopConfirmed && state.processClosedObserved) return;
+    assert.ok(performance.now() < deadline, 'stderr fatal and observed teardown did not arrive');
+    await nextTurn();
+  }
+}
 
 test('one native child spans five fenced phases; close is separate from phase completion', async () => {
   const session = createSyntheticSession();
@@ -58,6 +73,19 @@ for (const [scenario, expectedCodes] of Object.entries(nativeFaults)) {
     try {
       assert.equal((await session.phase('configure')).ok, true);
       const result = await session.phase('positive');
+      if (scenario === 'stderr' && result.ok) {
+        // stdout end may be observed before the child's earlier stderr write.
+        // The completed phase is immutable; the SESSION must still fail closed.
+        const prior = JSON.stringify(result);
+        await observedStderrClosure(session);
+        assert.equal(JSON.stringify(result), prior);
+        assert.equal(session.snapshot.hostedAcceptance, false);
+        const next = await session.phase('negative');
+        assert.equal(next.ok, false);
+        assert.equal(next.code, 'STDERR_PRESENT');
+        assert.deepEqual(next.events, []);
+        return;
+      }
       if (scenario === 'extra_after_end' && result.ok) {
         // A later OS chunk may arrive after a valid explicit end was returned.
         // The idle observer must then fence the SESSION, not rewrite history.
@@ -75,6 +103,41 @@ for (const [scenario, expectedCodes] of Object.entries(nativeFaults)) {
       if (scenario !== 'unverified') assert.deepEqual(result.events, []);
       else { assert.equal(result.complete, true); assert.equal(result.events[0].verified, false); }
       assert.deepEqual((await session.phase('negative')).events, []);
+    } finally { await session.abort(); }
+  });
+}
+
+for (const ordering of ['before-end', 'after-end']) {
+  test(`injected stderr ${ordering} rejects phase or closes session without rewriting history`, async () => {
+    let onFatal;
+    const f = fake([chunk(hello + wire('configure')), chunk(wire('positive'))], {
+      observe(fatal) { onFatal = fatal; },
+    });
+    const session = new SyntheticSessionReadout(f.transport);
+    try {
+      assert.equal((await session.phase('configure')).ok, true);
+      if (ordering === 'before-end') {
+        f.transport.read = async () => { onFatal('STDERR_PRESENT'); return chunk(wire('positive')); };
+      }
+      const result = await session.phase('positive');
+      if (ordering === 'before-end') {
+        assert.equal(result.ok, false);
+        assert.equal(result.code, 'STDERR_PRESENT');
+        assert.deepEqual(result.events, []);
+      } else {
+        assert.equal(result.ok, true);
+        const prior = JSON.stringify(result);
+        onFatal('STDERR_PRESENT');
+        await observedStderrClosure(session);
+        assert.equal(JSON.stringify(result), prior);
+      }
+      await observedStderrClosure(session);
+      assert.equal(session.snapshot.hostedAcceptance, false);
+      assert.equal(f.stopped, 1);
+      const next = await session.phase('negative');
+      assert.equal(next.ok, false);
+      assert.equal(next.code, 'STDERR_PRESENT');
+      assert.deepEqual(next.events, []);
     } finally { await session.abort(); }
   });
 }
@@ -159,7 +222,10 @@ test('blocked writes, reads, and empty-read loops are bounded without leaking ad
     [{ read: async () => { throw new Error('SYNTHETIC_PRIVATE_SENTINEL'); } }, 'READOUT_FAILED'],
     [{ write: async () => { throw new Error('SYNTHETIC_PRIVATE_SENTINEL'); } }, 'READOUT_FAILED'],
   ]) {
-    const f = fake([], extra); const session = new SyntheticSessionReadout(f.transport, { phaseMs: 40 });
+    const f = fake([], extra);
+    // Isolate the finite read-count fence from wall-clock scheduling. Blocked
+    // write/read fixtures above still exercise the original real 40ms deadline.
+    const session = new SyntheticSessionReadout(f.transport, { phaseMs: 40, ...(code === 'READ_LIMIT' ? { now: () => 0 } : {}) });
     const result = await session.phase('configure');
     assert.equal(result.code, code); assert.equal(JSON.stringify(result).includes('PRIVATE_SENTINEL'), false);
     assert.equal(result.stopConfirmed, true);
