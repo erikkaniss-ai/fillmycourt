@@ -1,5 +1,34 @@
 # GAC-PLAY-01 — fictional event discovery
 
+## 1 November 2026 — static package integrity candidate
+
+The source/fictional UX baseline `e62111b6e7c34521d11fb2bb3b290f97b1d0db14` was accepted separately from release preparation. GET-STATIC-PACKAGE-01 fixes the static package's omitted event assets; it does not deploy that source, update the installed Reader or accept live event data. The final source/test SHA belongs to the existing PR5/Issue11 completion receipt.
+
+The explicit package has 20 source files: Find HTML, 14 reviewed top-level assets (including the Leaflet license) and five pinned Leaflet PNGs. No directory-wide copying, companion, auth app, server function or environment file is included. The previous unused `federated-search.css` package entry is removed. HTML links/scripts, static module imports/re-exports and CSS references must close within that exact list. Relative parent traversal, wrong case, encoded/escaped paths, URL queries/fragments, remote dependencies, dynamic imports, inline active HTML, unsupported CSS resource escapes and extra input files fail closed. This is a constrained packaging grammar, not a general-purpose web bundler or a security audit of arbitrary JavaScript. The two default Leaflet runtime marker images are explicit reviewed roots; the pinned vendor JS/CSS is copied byte-for-byte.
+
+`createStaticPackage` is a pure in-memory builder; `writeStaticPackage` reads regular exact-case files, rejects symlinks and creates a fresh output directory only after validation. It emits the source SHA, per-file SHA-256/byte count/dependency graph and the existing protection/CSP headers. The empty functions directory and `functions: 0` metadata describe a local artifact, not proof of a hosting configuration or live protection. Normal CI-only prepare/gate/verify and owner SHA markers are preserved; local verification never sets `GITHUB_ACTIONS` or calls deploy.
+
+The real Chromium package test serves only generated files with their actual HTTP headers and checks all four 320/390/768/1440 viewports: module/style loading without 404, closed REAL game/tournament mode, explicit fictional opt-in, filters, one map/list projection, keyboard marker/detail/disabled handoff, empty storage and zero Reader/provider requests. OSM tiles are replaced with a blank local fixture. Optional `GAC_PACKAGE_AXE_FILE` supplies an already installed axe-core for an additional local automated audit; CI browser assertions run regardless, and the separate existing Get accessibility workflow remains mandatory. No full assistive-technology or live provider acceptance is inferred.
+
+### Leaflet static image provenance
+
+Official package [leaflet 1.9.4](https://registry.npmjs.org/leaflet/1.9.4), [distribution tarball](https://registry.npmjs.org/leaflet/-/leaflet-1.9.4.tgz), npm integrity `sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==`. The archive was verified against this SHA-512 before extracting the five `package/dist/images/` files. License is the existing `assets/leaflet-1.9.4-LICENSE.txt` (BSD-2-Clause); archive vendor JS/CSS SHA-256 matched the already pinned source bytes. No vendor code or stylesheet was modified.
+
+| Image | SHA-256 |
+| --- | --- |
+| layers.png | `1dbbe9d028e292f36fcba8f8b3a28d5e8932754fc2215b9ac69e4cdecf5107c6` |
+| layers-2x.png | `066daca850d8ffbef007af00b06eac0015728dee279c51f3cb6c716df7c42edf` |
+| marker-icon.png | `574c3a5cca85f4114085b6841596d62f00d7c892c7b03f28cbfa301deb1dc437` |
+| marker-icon-2x.png | `00179c4c1ee830d3a108412ae0d294f55776cfeb085c60129a39aa6fc4ae2528` |
+| marker-shadow.png | `264f5c640339f042dd729062cfc04c17f8ea0f29882b538e3848ed8f10edb4da` |
+
+```text
+node --test getacourt/tests/private-reader-preview.test.mjs
+python -m pytest getacourt/tests/test_private_event_bundle.py -v
+```
+
+---
+
 This source slice adds three discovery intentions to the existing `find.html`: courts, games/notices, and tournaments/mini-tournaments. The existing court Reader protocol and first-party grants are unchanged. One existing Leaflet instance renders either court offers or event examples.
 
 ## Acceptance boundary
