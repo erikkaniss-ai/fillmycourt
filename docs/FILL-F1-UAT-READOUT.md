@@ -180,3 +180,123 @@ approval gate. A new source SHA is not staging approval. Preserve the old marker
 an expected private-preview gate rejection is not a reason to authorize deploy.
 No production/main/public/provider/customer/booking/hold/payment action belongs
 to this batch.
+
+## Persistent synthetic session — SESSION-03, 1 November 2026
+
+Batch `FILL-F1-SESSION-03-20261101` starts from accepted source
+`16d55b77a8e4bc2f4ba9376ec3b0b7d0d2e3832d`, in the same PR #8 / Issue #9.
+The parser, one-shot transport, frozen helper and prior receipts above remain
+unchanged. This is a **new synthetic protocol**, not the helper's protocol and
+not a credential channel or hosted F1 acceptance.
+
+The new `fill_uat_session_transport.mjs` launches only the adjacent fixed
+`fill_uat_synthetic_session.mjs` with one of sixteen finite synthetic scenarios.
+It accepts no executable, path, URL, environment, user/run configuration or
+arbitrary command override. The factory accepts only bounded integer timing
+options. It uses documented Node `child_process.spawn` pipes, `shell:false`,
+`windowsHide:true`, and no parent environment except noncredential Windows
+`SystemRoot`. Stderr is drained without retaining text and immediately aborts
+the session. PID is exposed only as synthetic process-identity evidence.
+
+One child serves the fixed sequence `configure`, `positive`, `negative`,
+`operator_simulation`, `close`. Each stdin write is exactly
+`SYNTHETIC_SENTINEL:<allowlisted-phase>` plus LF. No password, token, authority,
+account or runtime fields are accepted. The simulations contain only constant
+fictional events; their statuses are not HTTP observations.
+
+The producer emits one ASCII hello frame with a random 32-hex **synthetic
+correlation ID**, then explicit begin/end frames for each monotonically numbered
+phase. The exact frame grammar is:
+
+```text
+FMC_SYNTHETIC/1 <32-lowercase-hex> 0 hello begin
+FMC_SYNTHETIC/1 <same-id> <1..5> <fixed-phase-name> begin
+<canonical six-key safe-event JSONL records>
+FMC_SYNTHETIC/1 <same-id> <same-sequence> <same-phase-name> end
+```
+
+Frames themselves have no ANSI/extra fields. They are handled by the separate
+synthetic framing contract; only record lines enter the unchanged
+`SafeEventReadout`. Unknown text/echo, nested JSON, unsupported controls, bad
+frames/correlation, replayed or reordered phases/events and trailing bytes fail
+closed. It never searches arbitrary text for JSON or strips terminal editing.
+LF and CRLF plus record SGR formatting survive arbitrary chunk boundaries.
+
+`SyntheticSessionReadout.phase(name)` releases immutable safe records only
+after the complete expected records **and** matching explicit phase end. Event
+count or quiet is insufficient. This is synthetic phase completion, not process
+closure or authentication. The same process remains open for subsequent phases.
+`close` additionally needs an explicit zero exit with EOF and separately observed
+process closure. The frozen terminal `closed` event has `verified=false`, so its
+valid close receipt intentionally has `complete=true`, `ok=false`,
+`code=UNVERIFIED_EVENTS`; stop/closure metadata establishes teardown only.
+Unverified outcomes in any earlier phase remain failures and terminate the
+session. No self-reported event grants hosted acceptance.
+
+The constructor fixes one absolute monotonic session deadline: default 16 s,
+maximum 18 s, never renewed across phases or tool calls. Each phase is bounded
+by the lesser of remaining lifetime and its default 3 s / maximum 5 s budget.
+The parent has an independent real-time idle watchdog; the producer has its own
+20 s lifetime watchdog. Reads/writes are bounded, each read loop is capped at
+1,024 iterations, and stop confirmation is at most 2 s (default 1 s).
+Total session ingress including consumed records, frames and formatting is
+capped at 64 KiB; the native queued output also has a 64 KiB cap. Input is
+capped at 128 characters and permits one exact command at a time.
+
+On fatal error, abort or expiry, staged parser/text/queued output references are
+cleared, pending native reads are aborted, future phases are fenced and only the
+owned synthetic child is stopped. A false/late/failed stop is explicitly
+`TEARDOWN_UNCONFIRMED`, never success. Logical clearing does not promise physical
+heap zeroization. Caller adapters must honor abort and return true from stop
+only after observing closure. An unsolicited later OS chunk/exit while idle
+aborts the session; it cannot retroactively rewrite an already returned valid
+phase receipt, and that receipt never asserts session/authenticated closure.
+
+### Tests and actual-tool compatibility boundary
+
+The new suite has 32 tests. A normal native child completes all five phases with
+the same PID/correlation ID and no echoed input accepted. Fifteen fixed fault
+scenarios cover echo, stderr, wrong correlation/phase, duplicate records, early
+EOF, nonzero exit, missing end, overflow, replay, unverified outcome, forbidden
+CSI, trailing output, zero exit without end and stall. Every native scenario
+requires observed closure; a separate idle watchdog test closes a caller-idle
+child. Offline adapter tests cover every split of framed JSON/CRLF/SGR, monotonic
+deadline nonrenewal, clock failure, read/write hangs, empty-read limits, phase
+isolation, atomic rejection, concurrent commands and unconfirmed teardown.
+
+Run without credentials or network:
+
+```text
+node --test platform/tests/fill_uat_session_transport_contract.test.mjs
+```
+
+The new suite runs explicitly in both existing Platform CI jobs, preserving the
+exact-head checkout settings. Local affected suites plus frozen parser/one-shot
+and deployment/CI gate regressions passed **78/78**, with no skips. Only the
+new suite needs repetition after a new session-test change; full required CI is
+run once on the final source candidate.
+
+Actual persistent-tool probe on 1 November 2026:
+
+1. Documented `mcp__node_repl__js` persistent state, repository file access and
+   dynamic imports of `node:fs/promises`, `node:url` and `node:child_process`
+   succeeded. Documentation explicitly says `node:process` import is unavailable;
+   the absence of a global `process` was observed in the next step.
+2. The first session probe failed while dynamically importing the source module:
+   **`process is not defined`** at its producer's main-entry guard. Import did
+   not complete; `createSyntheticSession()` was never called, no child was
+   launched and no phase command was sent. This is the tool's observed error,
+   not an automatic approval rejection or proof that a spawn was attempted.
+3. Per the CTO plan, that probe was stopped. No alternate process import,
+   executable derivation, terminal/security setting, hidden bridge, installation
+   or permission workaround was attempted. No raw producer output existed.
+
+Therefore **two-call persistent-tool no-echo acceptance is NOT ESTABLISHED**.
+Ordinary Node child PIPE tests establish only their own source contract. Prior
+direct execution-tool PIPE and TTY observations remain separate and unchanged;
+none proves this persistent tool or compatibility with the frozen hosted helper.
+The historical run cause stays UNKNOWN and its authority stays consumed, with
+all thirteen prior identities blocked. No Auth/staging/helper/account/credential
+operation or new UAT/quota request belongs to SESSION-03. The remaining gate is
+a documented, supported actual-tool capability reviewed by CTO; this batch does
+not implement a substitute credential transport. `PUBLIC_GO=false`.
