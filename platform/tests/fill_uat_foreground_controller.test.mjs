@@ -65,3 +65,12 @@ test('RPC metadata is finite/allowlisted; raw private error and code are discard
 test('STOP response may retain last COMPLETE trace, but is never labelled as fresh STOP node timing',async()=>{
   const rpc=new ControlRpc({mcp__node_repl__js:async()=>({content:[{type:'text',text:JSON.stringify({readTrace:{nodeEntryAt:1,nodeReturnAt:2,nodeElapsedMs:1}})}]})});await rpc.request('STOP','PUBLIC_STOP',{startup:true});const r=await rpc.drain(100);assert.equal(Object.hasOwn(r.records[0],'nodeEntryAt'),false);
 });
+
+test('first COMPLETE timeout survives a subsequent STOP timeout; both late RPCs stay owned',async()=>{
+  const scope={run_id:'00000000-0000-0000-0000-000000009000',authorization_id:'00000000-0000-0000-0000-000000009001'};
+  const reply=v=>({content:[{type:'text',text:JSON.stringify(v)}]});
+  const tools={mcp__node_repl__js:async({code})=>{if(code.includes('.begin()'))return reply({discovery:true,query:'PUBLIC_QUERY',project_id:'PUBLIC_PROJECT'});if(code.includes('.complete(')||code.includes('.requestStop('))await sleep(45);return reply({closed:true});},mcp__codex_apps__supabase_execute_sql:async()=>reply({publicOnly:true})};
+  const rpc=new ControlRpc(tools,{activeMs:20,startupMs:1000}),prepared={rpc,scope,ready:{live_ready:true,pre_t0:true,prepare_id:'PUBLIC_FIRST_FAILURE',expires_at:Date.now()+10000}};
+  const r=await runFillForeground(tools,scope,prepared,{wall:Date.now,sleep,stopJournal:async()=>({confirmed:true,publicOnly:true})});
+  assert.deepEqual(r.failure,{code:'RPC_TIMEOUT',stage:'COMPLETE'});assert.ok(r.rpc.records.some(x=>x.stage==='STOP'&&x.code==='RPC_TIMEOUT'));assert.equal(r.rpc.pending,0);assert.equal(r.rpc.records.filter(x=>x.lateSettlement).length,2);assert.equal(r.state.closed,true);
+});

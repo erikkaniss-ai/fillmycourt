@@ -183,7 +183,7 @@ export async function runFillForeground(tools, scope, prepared, io={wall:Date.no
       // activity stops on any failure; cleanup observations remain readonly.
       if((state.stopped&&(state.cleanup==='PASS'||state.discovery)) || io.wall()>=state.cutoff) break;
     }
-  }catch(error){failure={code:error instanceof SafeRpcError?error.code:'CONTROL_FAILED',stage:error instanceof SafeRpcError?error.stage:'BEGIN'};rpc.closed=true;}
+  }catch(error){failure??={code:error instanceof SafeRpcError?error.code:'CONTROL_FAILED',stage:error instanceof SafeRpcError?error.stage:'BEGIN'};rpc.closed=true;}
   finally {
     if(!journalStop){try{journalStop=await io.stopJournal();if(journalStop?.confirmed!==true)failure??={code:'CONTROL_FAILED',stage:'STOP'};}catch{failure??={code:'CONTROL_FAILED',stage:'STOP'};}}
     try {state=await rpc.request('STOP',`nodeRepl.write(JSON.stringify(await fill10Hosts.get(${JSON.stringify(prepared.ready.prepare_id)}).stop()));`,{startup:true});}catch{failure??={code:'RPC_REMOTE_FAILED',stage:'STOP'};}

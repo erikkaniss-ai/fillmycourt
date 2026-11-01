@@ -1421,3 +1421,65 @@ the original30min deadline are unchanged. No timed-out operation is claimed
 cancelled. A source/CI PASS is not a hosted repair proof or F1 acceptance.
 Future hosted verification needs its own exact scope/authority; current GO
 cannot be renewed by unused quota, a source fix, CI or this replay.
+
+## FILL-F1-PUBLIC-E2E-13: ordinary transport limit demonstrated, no full PASS
+
+The sole ordinary PUBLIC rehearsal used the accepted4af caller/controller,
+actual functions/V8-to-Node transport and clearly test-only public arm seam.
+The unchanged production arm/private-envelope branch was not substituted or
+relaxed. SQL/GitHub/guard/collector adapters were local allowlisted simulations;
+there were no actual Supabase/Railway/GitHub/provider/HTTP/Auth/helper calls
+inside either rehearsal. Existing historical IDs appeared only as fictional
+fixture namespace constants, never as queried or activated accounts. Public
+run/authority/principal IDs had the all-zero test prefix and public sentinels.
+
+The harness used actual Date/performance clocks and real timers/cadence, with
+no accelerated canary/operator clock. Its configured model read profile was
+2900/4500/5500ms (2900ms during simulated activation staggering). Only the first
+2900ms sample was reached; the later delay samples, five canary observations,
+JSON-first Root gate, staggered operators and route chain are NOT RUN. The
+single ordinary rehearsal failed before binding or fake collector launch.
+An initial test-harness AbortController compatibility error occurred before
+any RPC/host/T0; a narrow test-only signal implementation corrected it before
+this one actual ordinary rehearsal. No positive run was repeated after failure.
+
+Preserved finite timing evidence:
+
+- Model SQL delay:2900ms configured,2909ms observed (not a real SQL measurement).
+- First COMPLETE caller timed out after2014ms; actual settled roundtrip4425ms.
+  Native tool duration4389.577ms, native execution1ms; instrumented controller
+  processing0.503ms. Dispatch-to-node-entry was4393ms on recorded wall clocks.
+- Node measured total read7341.022ms, exceeding unchanged6s by1341.022ms;
+  finite rejection was READ_BUDGET / READ_TIME_REJECTED.
+- The next active STOP also timed out after2016ms, settling after3664ms.
+  Existing startup-class cleanup STOPs completed within their original10s bound.
+- Active settled RTT samples963/4425/3664ms have p50=3664ms, p95/max=4425ms.
+  These are distinct from bounded caller wait samples963/2014/2016ms. Actual
+  maximum RTT exceeded the2s active limit by2425ms, not merely its16ms timer lag.
+
+This ordinary sample proves failure to meet the current limits for that run,
+not the infrastructure cause or inevitability of every future failure. It is
+not a full public E2E PASS, hosted repair proof or F1 acceptance. No timeout or
+read budget was increased. The original B11 cause remains UNKNOWN separately.
+
+The one allowed negative case injected2234ms before its first COMPLETE tool
+dispatch. It timed out at2013ms; STOP/host closure preceded the eventual real
+Node call, which returned the finite FILL10_HOST_REJECTED guard error. Native
+tool time727.883ms is separate from the injected delay. Late settlement was
+owned/drained. Both cases ended closed, host timers0/pending0/fake factory0,
+operator gates/logins0; no actual process existed, so EOF/exit/close are N/A.
+All17 prior banned accounts and consumed B11 authority remain untouched.
+
+B13 also demonstrated a genuine source observability defect: the outer
+foreground catch overwrote the original COMPLETE timeout with the secondary
+STOP timeout. The source fix preserves the first finite failure; secondary
+cleanup failures remain in the owned RPC records. Its regression reproduces
+both delayed operations and verifies drain/closure. This fix does not repair
+the observed tool latency; the full public rehearsal has not been repeated.
+
+The reviewable NONSECRET.work next-source proposal is a pure pre-admission
+transport assessment of already-completed public evidence. Any overrun/late
+response/incomplete coverage leaves admission closed. It proposes no new
+channel, timer extension, automated retry, resource or authority. Even a
+future PASS_PUBLIC_ONLY cannot grant GO or spend account quota. Current B13
+evidence evaluates FAIL; further concrete source scope needs CTO review.
