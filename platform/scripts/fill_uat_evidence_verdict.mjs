@@ -3,8 +3,9 @@ export const HELPER_HASH = '6ca033af474c21180652652c21ee6d4d4dafd16d379a4c11eb64
 export const CANDIDATE = 'ed0eeea4ccde35ff54ee8331795326c15a49a5f9';
 export const LABELS = Object.freeze(['canary', 'a', 'b']);
 export const GET_ROUTES = Object.freeze(['me', 'organizations', 'own_today', 'foreign_today', 'own_calendar', 'foreign_calendar', 'provider_connections']);
-export const CONSUMED_RUNS = Object.freeze(['90d00651-5b01-418d-8769-51aef782b7b0', '0c7664ff-6920-4a09-91b5-22a423187864', '0e3a5a5a-fa68-4b3f-9a96-bdca500b1ab4']);
-export const CONSUMED_AUTHORITIES = Object.freeze(['01a18fc1-08b7-76d2-b9ec-062882378ab8', '01a18f95-f6ff-7642-9a6a-4cc95929f5aa', '01a19021-4661-7770-af81-f1ee25bd0362']);
+export const HISTORICAL_COUNT = 16, MAX_KNOWN_COUNT = 19;
+export const CONSUMED_RUNS = Object.freeze(['90d00651-5b01-418d-8769-51aef782b7b0', '0c7664ff-6920-4a09-91b5-22a423187864', '0e3a5a5a-fa68-4b3f-9a96-bdca500b1ab4', '4c0cdb3b-c138-479b-9b69-fef96420642b']);
+export const CONSUMED_AUTHORITIES = Object.freeze(['01a18fc1-08b7-76d2-b9ec-062882378ab8', '01a18f95-f6ff-7642-9a6a-4cc95929f5aa', '01a19021-4661-7770-af81-f1ee25bd0362', '01a1958f-5bc5-7382-822d-27d4db023a3e']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const HEX = /^[0-9a-f]{64}$/;
 const ERROR_CODES = new Set(('INVALID_DTO AUTHORITY_REJECTED AUTHORITY_EXPIRED CONSUMED_AUTHORITY BINDING_MISMATCH EVIDENCE_TIME_REJECTED IDENTITY_MISMATCH OBSERVATION_REJECTED MISSING_OBSERVATIONS MISSING_CANARY_PROOF BUDGET_UNVERIFIED CANARY_BAN_UNVERIFIED AUTH_DENIAL_UNVERIFIED INDEPENDENT_VERDICT_REJECTED OPERATOR_LOGIN_LATE CLEANUP_UNVERIFIED CLEANUP_TIME_REJECTED INVALID_CONFIGURATION CONFIGURATION_TOO_LARGE CONFIGURATION_DEADLINE CLOCK_INVALID CLOCK_REVERSED CLOCK_SKEW ORIGINAL_DEADLINE ABORTED STDERR_PRESENT OVERFLOW TRANSPORT_FAILED UNEXPECTED_OUTPUT UNEXPECTED_EXIT COMMAND_REJECTED INDEPENDENT_GATE_REQUIRED POSITIVE_WINDOW_EXPIRED INDEPENDENT_LEASE_EXPIRED DENIAL_TOO_EARLY LOGIN_REQUIRED CONCURRENT_REQUEST SESSION_CLOSED GATE_STATE_REJECTED INDEPENDENT_GATE_REJECTED CANARY_RECEIPT_MISMATCH CONTROL_ORDER READY_REQUIRED CONFIGURATION_REQUIRED CONSUMED_SLOT COMMAND_LIMIT RESPONSE_DEADLINE READ_LIMIT INVALID_CHUNK NONZERO_EXIT INVALID_RESPONSE HELPER_CLOSED HELPER_DEADLINE UNVERIFIED_RESPONSE EARLY_EXIT INCOMPLETE_RESPONSE READOUT_FAILED TEARDOWN_UNCONFIRMED STOP_TIMEOUT UNEXPECTED_CLOSE_OUTPUT').split(' '));
@@ -64,7 +65,7 @@ export function validateBinding(input) {
   uuid(b.run_id); uuid(b.authorization_id); requireContract(b.candidate_sha === CANDIDATE && b.helper_sha256 === HELPER_HASH);
   instant(b.t0); exact(b.identities, LABELS); LABELS.forEach(label => uuid(b.identities[label]));
   requireContract(new Set(Object.values(b.identities)).size === 3);
-  requireContract(Array.isArray(b.historical_ids) && b.historical_ids.length === 13 && new Set(b.historical_ids).size === 13);
+  requireContract(Array.isArray(b.historical_ids) && b.historical_ids.length === HISTORICAL_COUNT && new Set(b.historical_ids).size === HISTORICAL_COUNT);
   b.historical_ids.forEach(id => { uuid(id); requireContract(!Object.values(b.identities).includes(id)); });
   exact(b.pins, ['operations_service_id', 'operations_sha', 'core_service_id', 'core_sha', 'preview_site_id', 'preview_sha', 'supabase_project_ref']);
   requireContract(b.pins.operations_service_id === 'c0c6e5e2-0040-48e0-a0af-abfb1ec81b61' && b.pins.operations_sha === CANDIDATE &&

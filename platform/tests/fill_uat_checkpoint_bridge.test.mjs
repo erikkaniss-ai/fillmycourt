@@ -8,7 +8,7 @@ import { publicFixture } from '../scripts/fill_uat_synthetic_wire_child.mjs';
 import { instant, CONSUMED_RUNS } from '../scripts/fill_uat_evidence_verdict.mjs';
 
 // PUBLIC, FICTIONAL, in-memory rows. No process launch/network/Auth/credential.
-const HASH = '831b3e2d460390cb194e956499e2e3567c0185f2fe6a2e7ecc7c1926abd504cf';
+const HASH = '694f67cdcd99b30ed2eefabd2e5a377890bd8bceeeecfd28c369176646e82894';
 const T0 = Date.parse('2030-01-01T00:00:00Z');
 const at = seconds => new Date(T0 + seconds * 1000).toISOString().replace(/(\.\d{3})Z$/, '$1000Z');
 const clone = structuredClone;
@@ -70,6 +70,19 @@ test('active canary maps a real permit shape without inventing authority, freshn
   assert.ok(instant(f.snapshot.intent.request_expires_at) < f.now); assert.equal(s.cleanup, 'UNKNOWN');
   const c = cache(f); assert.equal(c.install({ sequence: 1, state: s }), true); assert.equal(c.current().checked_at, s.permit.checked_at);
 });
+
+test('SELECT is bounded to19; closed16 metadata remains readable but cannot authorize a19 binding', () => {
+  const f=fixture();assert.equal(f.plan.scope.known_ids.length,19);assert.match(f.plan.query,/order by id limit 20/);
+  assert.throws(()=>buildCheckpointReadPlan({...f.plan.scope,known_ids:[...f.plan.scope.known_ids,'00000000-0000-0000-0000-999999999999']}));
+  const plan16=buildCheckpointReadPlan({...f.plan.scope,known_ids:f.plan.scope.known_ids.slice(0,16)});assert.equal(plan16.scope.known_ids.length,16);
+  const s=clone(f.snapshot);s.scope_ids=plan16.scope.known_ids;s.bans=s.bans.filter(b=>s.scope_ids.includes(b.id));
+  assert.equal(assembleCheckpoint(plan16,s,{...f.provenance,query_sha256:plan16.query_sha256},f.owner,f.now).decision,'DENY');
+});
+test('fresh reserved operator slot is DENY/WAIT input, never ALLOW; overdue/wrong identity/nonce remains terminal',()=>{
+  const f=fixture(195);pass(f);f.snapshot.attempts.push({label:'b',operation:'activate',user_id:null,verified:false,settled:false,has_nonce:true,reserved_at:at(194),first_ban_readback_at:null});
+  const state=f.map();assert.deepEqual(state.reasons,['UNSETTLED_ACTIVATION']);assert.equal(state.decision,'DENY');assert.equal(state.permit,null);
+  for(const mutate of [s=>{s.attempts.at(-1).reserved_at=at(184);},s=>{s.attempts.at(-1).user_id=f.owner.binding.identities.a;},s=>{s.attempts.at(-1).has_nonce=false;}]){const s=clone(f.snapshot);mutate(s);assert.ok(f.map(s).reasons.includes('ACTIVATION_IDENTITY_CONFLICT'));}
+});
 test('no owner or untrusted provenance cannot mint a permit from canonical rows', () => {
   const f = fixture(); assert.equal(f.map(f.snapshot, f.now, null).decision, 'DENY');
   for (const mutate of [p => { p.trusted_readback = false; }, p => { p.project_id = 'other'; }, p => { p.query_sha256 = 'b'.repeat(64); }, p => { p.tool = 'other'; }]) { const p = clone(f.provenance); mutate(p); assert.deepEqual(f.map(f.snapshot, f.now, f.owner, p).reasons, ['UNVERIFIED_READBACK']); }
@@ -119,7 +132,7 @@ test('closed consumed run DENY and original-as-of cleanup PASS are independent',
   f.snapshot.run.cleanup_complete = true; f.snapshot.run.stopped = true; f.snapshot.intent.stopped = true; f.snapshot.intent.reconciliation_required = true;
   f.snapshot.principals.forEach(p => { p.receipt = true; }); f.snapshot.bans.forEach(b => { b.banned_until = '2100-01-01T00:00:00.000000Z'; }); f.snapshot.attempts[3].first_ban_readback_at = at(130);
   const s = assembleCheckpoint(plan, f.snapshot, { ...f.provenance, query_sha256: plan.query_sha256 }, null, f.now);
-  assert.equal(s.decision, 'DENY'); assert.equal(s.cleanup, 'PASS'); assert.equal(s.knownBanCount, 16); assert.ok(s.reasons.includes('CONSUMED_CONTEXT')); assert.ok(s.reasons.includes('RECONCILIATION_REQUIRED'));
+  assert.equal(s.decision, 'DENY'); assert.equal(s.cleanup, 'PASS'); assert.equal(s.knownBanCount, 19); assert.ok(s.reasons.includes('CONSUMED_CONTEXT')); assert.ok(s.reasons.includes('RECONCILIATION_REQUIRED'));
   const c = new CheckpointCache({ binding: null, transportHash: HASH, wall: () => f.now }); c.install({ sequence: 1, state: s }); assert.throws(() => c.current());
   c.deny('READ_FAILED'); assert.equal(c.snapshot.lastVerifiedCleanup.status, 'PASS'); assert.equal(c.snapshot.lastVerifiedCleanup.dbObservedAt, f.snapshot.observed_at);
   f.snapshot.bans[0].banned_until = null; assert.equal(assembleCheckpoint(plan, f.snapshot, { ...f.provenance, query_sha256: plan.query_sha256 }, null, f.now).cleanup, 'FAIL');
@@ -183,7 +196,7 @@ test('relay rejects wall/monotonic skew and cached data outside the bounded read
   const g = fixture(), b = relay(g); const u = b.r.begin(); const old = clone(g.snapshot); old.observed_at = at(57); assert.equal(await b.r.complete(u.sequence, old, g.provenance), false); assert.equal(b.output[0].state.reasons[0], 'READ_FAILED'); await b.r.stop();
 });
 test('frozen collaborators preserved; both existing CI jobs run this new suite exactly once', async () => {
-  const hashes = { 'fill_uat_helper_collector.mjs': '4751a40941ddb9379e6d7efc96f6b8e207fc3aa7d45d9e1965c623cb891cad04', 'fill_uat_evidence_verdict.mjs': 'a63c49bba0a97304820dec05cd5a00ae197065b084e573e7bf938857c4e223da', 'fill_uat_process_transport.mjs': HASH, 'fill_uat_synthetic_wire_child.mjs': 'a41f6cc6b99e75d12d91bf4be144185dfe91e87606e0c861fd8cb9f80a3644d8' };
+  const hashes = { 'fill_uat_helper_collector.mjs': '4751a40941ddb9379e6d7efc96f6b8e207fc3aa7d45d9e1965c623cb891cad04', 'fill_uat_evidence_verdict.mjs': '7537808996568eeef8f0b0943926120c9159f6197a5e06448ae04ff6776e6d69', 'fill_uat_process_transport.mjs': HASH, 'fill_uat_synthetic_wire_child.mjs': '710a8cb167c28faaff78ba85370bd664e390ddeefb6eed5556075c2e5e51ea28' };
   for (const [name, hash] of Object.entries(hashes)) assert.equal(createHash('sha256').update(await readFile(new URL('../scripts/' + name, import.meta.url))).digest('hex'), hash);
   const source = await readFile(new URL('../scripts/fill_uat_checkpoint_bridge.mjs', import.meta.url), 'utf8'); assert.doesNotMatch(source, /node:child_process|\bfetch\s*\(|launchReviewedLiveCollector\s*\(|console\./);
   const ci = await readFile(new URL('../../.github/workflows/platform-ci.yml', import.meta.url), 'utf8'); assert.equal(ci.split('node --test platform/tests/fill_uat_checkpoint_bridge.test.mjs').length - 1, 2);

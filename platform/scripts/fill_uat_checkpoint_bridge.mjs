@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { validateCurrentPermit, PERMIT_FRESH_MS } from './fill_uat_process_transport.mjs';
 import { copyDto, exact, uuid, instant, frozen, bindingMatches, validateBinding, validateAuthority,
-  CONSUMED_RUNS, CONSUMED_AUTHORITIES, LABELS, CANDIDATE } from './fill_uat_evidence_verdict.mjs';
+  CONSUMED_RUNS, CONSUMED_AUTHORITIES, LABELS, CANDIDATE, MAX_KNOWN_COUNT } from './fill_uat_evidence_verdict.mjs';
 
 export const PROJECT = 'yclqnbcrchwieyzkyumx';
 export const TOOL = 'mcp__codex_apps__supabase_execute_sql';
@@ -24,7 +24,7 @@ const sqlTime = expression => `to_char((${expression}) at time zone 'UTC','YYYY-
 
 export function buildCheckpointReadPlan(input) {
   const scope = copyDto(input); exact(scope, ['run_id', 'known_ids', 'expected_lease_digest']); uuid(scope.run_id);
-  check(Array.isArray(scope.known_ids) && scope.known_ids.length >= 3 && scope.known_ids.length <= 16 && new Set(scope.known_ids).size === scope.known_ids.length);
+  check(Array.isArray(scope.known_ids) && scope.known_ids.length >= 3 && scope.known_ids.length <= MAX_KNOWN_COUNT && new Set(scope.known_ids).size === scope.known_ids.length);
   scope.known_ids.forEach(uuid); check(scope.expected_lease_digest === null || HEX.test(scope.expected_lease_digest));
   const params = [scope.run_id, [...scope.known_ids].sort(), scope.expected_lease_digest];
   // Raw-SQL connector has no bind-parameter argument. Render ONLY validated
@@ -64,7 +64,7 @@ select jsonb_build_object(
    from (select label,operation,user_id,verified,settled,activation_nonce,reserved_at,first_ban_readback_at
      from fill_private.uat_bootstrap_attempts where run_id=q.run_id order by label,operation limit 7) a),'[]'::jsonb),
  'bans',coalesce((select jsonb_agg(jsonb_build_object('id',u.id,'banned_until',${sqlTime('u.banned_until')}) order by u.id)
-   from (select id,banned_until from auth.users where id=any(q.ids) order by id limit 17) u),'[]'::jsonb)
+   from (select id,banned_until from auth.users where id=any(q.ids) order by id limit 20) u),'[]'::jsonb)
 ) as snapshot
 from request q cross join moment t
 left join fill_private.uat_runs r on r.run_id=q.run_id
@@ -126,7 +126,7 @@ export function validateSnapshot(input, plan) {
     check(s.intent.verdict_candidate_sha === null || /^[0-9a-f]{40}$/.test(s.intent.verdict_candidate_sha));
     check(s.intent.verdict_evidence_ref === null || /^[A-Za-z0-9_:/#.-]{1,200}$/.test(s.intent.verdict_evidence_ref));
   }
-  check(Array.isArray(s.principals) && s.principals.length <= 3 && Array.isArray(s.attempts) && s.attempts.length <= 6 && Array.isArray(s.bans) && s.bans.length <= 16);
+  check(Array.isArray(s.principals) && s.principals.length <= 3 && Array.isArray(s.attempts) && s.attempts.length <= 6 && Array.isArray(s.bans) && s.bans.length <= MAX_KNOWN_COUNT);
   const labels = new Set(), principalIds = new Set(), slots = new Set(), banIds = new Set();
   for (const p of s.principals) {
     exact(p, ['id', 'label', 'ban_at', 'expires_at', 'receipt', 'isolated']); uuid(p.id); check(plan.scope.known_ids.includes(p.id) && LABELS.includes(p.label) && !labels.has(p.label) && !principalIds.has(p.id));
@@ -140,6 +140,16 @@ export function validateSnapshot(input, plan) {
   }
   for (const b of s.bans) { exact(b, ['id', 'banned_until']); uuid(b.id); check(plan.scope.known_ids.includes(b.id) && !banIds.has(b.id)); banIds.add(b.id); optionalTime(b.banned_until); }
   return frozen(s);
+}
+
+// A canonical reserved slot may precede the Admin response/readback. It is
+// never a permit: only a short WAIT classification for an already known label.
+export function isBoundedActivationPending(snapshot, activation, now) {
+  if(!activation||activation.operation!=='activate'||activation.verified&&activation.settled||!activation.has_nonce)return false;
+  const create=snapshot.attempts.find(a=>a.operation==='create'&&a.label===activation.label&&a.verified&&a.user_id);
+  if(!create||activation.user_id!==null&&activation.user_id!==create.user_id)return false;
+  const age=now-instant(activation.reserved_at);
+  return Number.isFinite(age)&&age>=0&&age<10000;
 }
 
 export function assembleCheckpoint(plan, result, provenance, owner, now) {
@@ -174,7 +184,7 @@ export function assembleCheckpoint(plan, result, provenance, owner, now) {
     if (!run.armed || guardAgeMs === null || guardAgeMs < 0 || guardAgeMs > 45000) add('GUARD_NOT_HEALTHY');
     if (intent.starts_at !== run.starts_at || intent.candidate_sha !== run.candidate_sha || run.candidate_sha !== CANDIDATE || intent.preflight_at === null || intent.released_at === null || !intent.input_digest_valid) add('CANONICAL_SCOPE_CONFLICT');
     if (s.principals.length !== 3 || creates.length !== 3 || run.receipt_count !== 3 || !s.principals.every(p => p.isolated && p.receipt !== null && creates.some(a => a.label === p.label && a.user_id === p.id && a.verified))) add('IDENTITY_SET_UNVERIFIED');
-    if (activations.some(a => !creates.some(c => c.label === a.label && c.user_id === a.user_id && c.verified))) add('ACTIVATION_IDENTITY_CONFLICT');
+    if (activations.some(a => !creates.some(c => c.label === a.label && c.user_id === a.user_id && c.verified) && !isBoundedActivationPending(s,a,now))) add('ACTIVATION_IDENTITY_CONFLICT');
     if (s.principals.some(p => !(instant(p.ban_at) > t0 && instant(p.ban_at) <= t0 + (p.label === 'canary' ? 120000 : 1200000) && instant(p.expires_at) <= expiry && instant(p.expires_at) >= instant(p.ban_at) + 30000))) add('PRINCIPAL_WINDOW_CONFLICT');
     if (creates.some(a => !a.has_nonce || a.settled || a.first_ban_readback_at !== null || instant(a.reserved_at) < t0 || instant(a.reserved_at) >= t0 + 60000 || instant(a.reserved_at) > observed)) add('CREATE_STATE_CONFLICT');
     if (activations.some(a => instant(a.reserved_at) < t0 || instant(a.reserved_at) >= t0 + (a.label === 'canary' ? 60000 : 600000) || instant(a.reserved_at) > observed ||
@@ -229,7 +239,7 @@ export class CheckpointCache {
       if (Object.hasOwn(state, 'dbObservedAt')) {
         exact(state, allowed); instant(state.dbObservedAt);
         ['sourceAgeMs', 'guardAgeMs'].forEach(k => check(state[k] === null || Number.isFinite(state[k])));
-        ['unknownCreates', 'unsettledActivations', 'activeKnownCount', 'knownBanCount'].forEach(k => check(Number.isInteger(state[k]) && state[k] >= 0 && state[k] <= 16));
+        ['unknownCreates', 'unsettledActivations', 'activeKnownCount', 'knownBanCount'].forEach(k => check(Number.isInteger(state[k]) && state[k] >= 0 && state[k] <= MAX_KNOWN_COUNT));
         check(state.reconciliationRequired === null || typeof state.reconciliationRequired === 'boolean'); bool(state.operatorGateEligible);
       } else { exact(state, ['decision', 'reasons', 'permit', 'cleanup', 'grantsOwnerGo']); check(state.decision === 'DENY' && state.cleanup === 'UNKNOWN'); }
       check(Array.isArray(state.reasons) && state.reasons.length <= 40 && state.reasons.every(r => REASONS.has(r)));

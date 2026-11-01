@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reduceEvidence, CANDIDATE, HELPER_HASH, copyDto } from '../scripts/fill_uat_evidence_verdict.mjs';
+import { reduceEvidence, CANDIDATE, HELPER_HASH, copyDto, validateBinding, HISTORICAL_COUNT, MAX_KNOWN_COUNT } from '../scripts/fill_uat_evidence_verdict.mjs';
 
 const id = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const T0 = Date.parse('2030-01-01T00:00:00Z'), at = seconds => new Date(T0 + seconds * 1000).toISOString();
 function fixture() {
   const b = { run_id: id(9000), authorization_id: id(9001), candidate_sha: CANDIDATE, helper_sha256: HELPER_HASH,
-    t0: at(0), identities: { canary: id(9010), a: id(9011), b: id(9012) }, historical_ids: Array.from({ length: 13 }, (_, i) => id(9100 + i)),
+    t0: at(0), identities: { canary: id(9010), a: id(9011), b: id(9012) }, historical_ids: Array.from({ length: 16 }, (_, i) => id(9100 + i)),
     pins: { operations_service_id: 'c0c6e5e2-0040-48e0-a0af-abfb1ec81b61', operations_sha: CANDIDATE,
       core_service_id: 'fc97f78f-d39e-4598-a615-b2413b9b3f76', core_sha: '0134f603445ea7f282ef0cb866d0f3591518cbb9',
       preview_site_id: 'd763b7a1-dccd-4638-8876-ac1670171698', preview_sha: CANDIDATE, supabase_project_ref: 'yclqnbcrchwieyzkyumx' } };
@@ -28,6 +28,18 @@ function fixture() {
   return { b: structuredClone(b), e: JSON.parse(JSON.stringify(evidence)) };
 }
 const evaluate = (f, seconds = 1400, trustedInput = true) => reduceEvidence(f.b, f.e, { at: at(seconds), trustedInput });
+
+test('exact16 historical +3 new binding: reject old13/15/17, duplicates and reused old identity', () => {
+  assert.equal(HISTORICAL_COUNT,16); assert.equal(MAX_KNOWN_COUNT,19);
+  const f=fixture(); assert.equal(validateBinding(f.b).historical_ids.length,16);
+  for(const count of [13,15,17]) {const b=structuredClone(f.b);b.historical_ids=Array.from({length:count},(_,i)=>id(9100+i));assert.throws(()=>validateBinding(b));}
+  for(const mutate of [b=>{b.historical_ids[15]=b.historical_ids[0];},b=>{b.identities.a=b.historical_ids[15];},b=>{b.identities.b=b.identities.a;}]) {const b=structuredClone(f.b);mutate(b);assert.throws(()=>validateBinding(b));}
+  f.e.cleanup.historical_banned_ids.pop();assert.equal(evaluate(f).cleanup,'FAIL');
+});
+test('last failed4c run and actual prior authority are permanently consumed independently', () => {
+  for(const kind of ['run','authority']) {const f=fixture(),value=kind==='run'?'4c0cdb3b-c138-479b-9b69-fef96420642b':'01a1958f-5bc5-7382-822d-27d4db023a3e';
+    const encoded=JSON.stringify(f).replaceAll(kind==='run'?id(9000):id(9001),value),r=evaluate(JSON.parse(encoded));assert.equal(r.functionality,'FAIL');assert.ok(r.reasons.includes('CONSUMED_AUTHORITY'));assert.equal(r.operatorEligible,false);}
+});
 
 test('complete explicitly trusted synthetic DTO yields separate PASS results, never owner GO', () => {
   const r = evaluate(fixture());
@@ -125,7 +137,7 @@ test('operator identity/lease/window errors fail functionality without changing 
     const f = fixture(); mutate(f.e); const r = evaluate(f); assert.equal(r.functionality, 'FAIL'); assert.equal(r.cleanup, 'PASS'); assert.equal(r.operatorEligible, false);
   }
 });
-test('cleanup requires all known and historical13 banned, unknown0/current activation0', () => {
+test('cleanup requires all known and historical16 banned, unknown0/current activation0', () => {
   for (const mutate of [e => { e.cleanup.known_banned_ids.pop(); }, e => { e.cleanup.historical_banned_ids.pop(); },
     e => { e.cleanup.historical_banned_ids[0] = id(999); }, e => { e.cleanup.unknown_create_count = 1; },
     e => { e.cleanup.active_count = 1; }, e => { e.cleanup.pending_activation_count = 1; }, e => { e.cleanup.unresolved_nonce_count = 1; },

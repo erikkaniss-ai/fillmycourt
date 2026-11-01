@@ -202,7 +202,7 @@ test('no generic exec/path/env options, inert CLI guards, fixed prelaunch hashes
   assert.doesNotMatch(child, /f1-readonly-validator|\.work\/|FMC_SYNTHETIC\/1/);
   assert.match(child, /typeof process !== 'undefined'/); assert.equal(WATCHDOG_MS, 20000); assert.equal(SCENARIOS.length, 19);
   const hashes = { 'fill_uat_helper_collector.mjs': '4751a40941ddb9379e6d7efc96f6b8e207fc3aa7d45d9e1965c623cb891cad04',
-    'fill_uat_evidence_verdict.mjs': 'a63c49bba0a97304820dec05cd5a00ae197065b084e573e7bf938857c4e223da',
+    'fill_uat_evidence_verdict.mjs': '7537808996568eeef8f0b0943926120c9159f6197a5e06448ae04ff6776e6d69',
     'fill_uat_safe_events.mjs': 'f4dd8fef0f3088eceb4043b0ddbaa48e08fd2508c6200aea7c41fe5f0281cb5a' };
   for (const [file, hash] of Object.entries(hashes)) assert.equal(createHash('sha256').update(await readFile(new URL('../scripts/' + file, import.meta.url))).digest('hex'), hash);
   const ci = await readFile(new URL('../../.github/workflows/platform-ci.yml', import.meta.url), 'utf8');

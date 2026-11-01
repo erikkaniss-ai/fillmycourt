@@ -11,7 +11,7 @@ const wire = e => JSON.stringify(e) + '\n';
 const event = (label, route, status = 0, denied = false, verified = true) => ({ label, route, status, request_id: '', verified, denied });
 function fixture({ age = 60, transportOverrides = {}, responseMs = 100, stopMs = 20, capture = false } = {}) {
   const b = { run_id: id(9000), authorization_id: id(9001), candidate_sha: CANDIDATE, helper_sha256: HELPER_HASH, t0: at(0),
-    identities: { canary: id(9010), a: id(9011), b: id(9012) }, historical_ids: Array.from({ length: 13 }, (_, i) => id(9100 + i)),
+    identities: { canary: id(9010), a: id(9011), b: id(9012) }, historical_ids: Array.from({ length: 16 }, (_, i) => id(9100 + i)),
     pins: { operations_service_id: 'c0c6e5e2-0040-48e0-a0af-abfb1ec81b61', operations_sha: CANDIDATE,
       core_service_id: 'fc97f78f-d39e-4598-a615-b2413b9b3f76', core_sha: '0134f603445ea7f282ef0cb866d0f3591518cbb9',
       preview_site_id: 'd763b7a1-dccd-4638-8876-ac1670171698', preview_sha: CANDIDATE, supabase_project_ref: 'yclqnbcrchwieyzkyumx' } };

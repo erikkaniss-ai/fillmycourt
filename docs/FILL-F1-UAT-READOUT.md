@@ -1085,3 +1085,124 @@ Next: CTO reviews this exact bridge/transport integration and measured timing,
 including the preserved initial timeout and limited two-sample CLOSED pass.
 This batch requests no new GO/quota; prior authority is consumed and all13
 historical accounts remain banned. `PUBLIC_GO=false`; production untouched.
+
+## FILL-F1-19-BATCH-11: source and foreground preparation, no runtime yet
+
+The owner granted exactly one fresh attempt and at most three new fictional
+identities in the original CTO chat, human message
+`01a195d0-a2d3-7492-ada1-13093bfac556`. Native readback verified it. The prior
+`4c0cdb3b-c138-479b-9b69-fef96420642b` attempt remains FAIL, its authority
+`01a1958f-5bc5-7382-822d-27d4db023a3e` consumed, and all16 previous identities
+must remain long-banned. This section records PHASE A, not runtime acceptance.
+
+The binding now requires exactly16 distinct historical identities disjoint
+from the three new principals; known scope is capped at19. The query reads
+only validated explicit IDs, narrow ban metadata, one run, at most three
+principals and six operation slots. Its Auth subquery limit20 detects an
+oversized result without widening the allowlisted scope. Closed16 diagnostic
+scopes remain DENY without owner authority. Old run/authority are explicitly
+consumed. Backend, migrations, helper6ca, deployed Operationsed0, Core and
+workers, protected preview, Get source and provider rules are unchanged.
+
+The canonical historical16 set is the earlier13 plus:
+
+- `70e38a5b-a980-4b1a-8a62-e7478fcb8b08`
+- `9e30235b-9ddf-4a7f-83dc-1aa95bd56c0b`
+- `b3ab3f9d-b94c-456c-84f0-35181e0ec224`
+
+The actual controller is now reviewed as
+`platform/scripts/fill_uat_foreground_controller.mjs`, with portable PUBLIC
+2030 model tests. Its live installer still uses the existing fixed Windows
+checkout and one unchanged reviewed helper. The local serialization wrapper
+must match this controller function exactly. Genuine owner/source acceptance
+and exact checkout/hash verification are trusted caller prerequisites:
+`trustedOwnerReceiptVerified` and `trustedSourceAcceptanceVerified` do not
+authenticate themselves. Source SHA must equal the independently accepted SHA.
+No public fixture or readiness receipt grants owner GO.
+
+Canary readiness requires all three verified creates, a verified and settled
+canary activation and fresh guard before the first positive helper command.
+After independent canary acceptance, the controller holds WAIT_OPERATORS until
+BOTH a/b activation rows are verified and settled, identity/nonce correlated,
+the current guard is healthy and both operators are unbanned. A missing b or
+a short canonical reserved b slot does not consume a gate/login. A pending
+known slot is bounded below10s, never ALLOW, and never refreshes the permit:
+the prior genuine permit retains its original DB timestamp and10s expiry.
+Unknown/mismatched/overdue state, stale guard/cache or revocation is terminal.
+Only after both ready does one helper gate and one login per operator occur,
+under the original below600s admission window. The backend is not changed.
+
+### One awaited tool lifetime, before allocation
+
+`platform/scripts/fill_uat_foreground_lifetime.mjs` runs this complete sequence
+in ONE awaited `functions.exec`, with functions and ControlRpc retained in that
+same isolate:
+
+```javascript
+await runFillLifetime({
+  scope, rpc,
+  prepare: () => prepareFillForeground(tools, {prepare_id}, rpc),
+  arm: prepared => armFillForeground(prepared, scope),
+  admit: () => existingTrustedCanonicalAdmission(),
+  run: armed => runFillForeground(tools, scope, armed),
+});
+```
+
+The trusted admission callback is bound and reviewed before this invocation.
+It is invoked exactly once only after actual install, arm and lookup complete.
+No prepared object/method is serialized through store or another fresh exec;
+there is no slow INSTALL after release, model-turn heartbeat or detached
+controller. Modules compiled into the V8 caller use separate lexical scopes.
+The root observer uses canonical receipts without steering the foreground.
+`live_ready`/`pre_t0` are scheduling/protocol prerequisites, not authenticated
+proof that canonical T0 is absent or permission to allocate accounts. Existing
+owner preflight and before-account canonical admission are still mandatory.
+
+Early stop/rejected arm/discovery timeout clears NEW password/client_plan
+references without changing actual account counts or consuming/renewing GO.
+Every failed arm/readiness/lookup closes its exact owned host; late install
+and factory ownership are retained. Safe finite caller stage/RPC code and
+duration are preserved; raw errors/configuration are discarded. Late admission
+cannot enter foreground; unresolved ownership is explicitly reported. The
+automatic server guard remains responsible for any eventual account cleanup.
+Existing active2s/checker2s/DBfresh10s/read6s/publish500ms/guard45s/canary120-180s
+and original30min limits are unchanged, with no active retry or renewal.
+
+### Verification and pre-account gates
+
+Local complete Fill UAT suites:219PASS/0FAIL/0SKIP. Deployment/CI safety
+contracts:12PASS. They cover19 boundaries/disjointness/old bans/consumed context,
+pending and ambiguous state, actual controller cleanup, staggered operator
+readiness, independent JSON-first gate, method identity and failed lifetime
+stages. A PUBLIC exact functions/V8 integration of the actual wrapper plus
+lifetime completed a real3103ms fake install BEFORE admission, then arm/lookup,
+one admission and foreground stub, ending with pending0/timers0 and no real
+network/Auth/helper activity. Both exact-head CI jobs include the new suites;
+the actual full final-SHA CI result belongs in the canonical handback receipts.
+
+After confirming the previous driver stopped/no task pending, neutral host
+closed/unarmed and prior RPC pending0, the sole executor used the supported
+reset of its own Node kernel. A fresh actual REPL import accepted16history+3,
+rejected old13 and missing-history15, confirmed max19 and both consumed IDs;
+loaded dependency hashes matched disk. No source-cache-busting assumption was
+used. Before credentials, the accepted final source and loaded semantics must
+still match; if dependencies change, repeat this pre-account readiness check
+in a safely reset own kernel, without a process or account.
+
+Before push, PR8 title `[skip netlify]` and all four Railway exact commit pins
+were read back: Operationsed0, Core0134f603, both workers3d5ef5d6, no staged
+changes. No new source SHA may deploy. Root must independently accept this
+final source and concrete lifetime before runtime. Then verify protected ed0
+alias/manifest/form/anon401, four healthy pins, old16 bans, no unknown/pending,
+sole foreground/automatic guard, supported Admin preflight, fixed interpreter
+and helper hashes/clock. Only a fresh INPUT and at most one selected SAME-BUILD
+Operations redeploy is authorized; no Netlify/new-SHA/other-service deploy.
+Any proposed single bounded closed transport read requires that source/flow
+handback acceptance first; none was executed in PHASE A.
+
+DONE: source19 contract, whole-lifetime implementation and public evidence.
+NOT DONE: new runtime attempt/canary/operator hosted acceptance, full F1 browser
+desktop/mobile/logout/revoke/expiry UAT, onboarding or MVP/pilot acceptance.
+Main current gate: independent CTO final-source/flow acceptance plus actual
+pre-account technical readiness. No credentials/input/intent/T0/accounts or
+runtime allocation have been created for this new attempt. `PUBLIC_GO=false`.

@@ -41,6 +41,7 @@ jobs:
           node --test platform/tests/fill_uat_evidence_verdict.test.mjs
           node --test platform/tests/fill_uat_process_transport.test.mjs
           node --test platform/tests/fill_uat_checkpoint_bridge.test.mjs
+          node --test platform/tests/fill_uat_foreground_controller.test.mjs platform/tests/fill_uat_foreground_lifetime.test.mjs
           node --test platform/tests/fill_operator_demo_contract.test.mjs
           node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
   contract:
@@ -107,6 +108,8 @@ jobs:
         run: node --test platform/tests/fill_uat_checkpoint_bridge.test.mjs
       - name: GetAcourt Netlify boundary contracts (no network / no writes)
         run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
+      - name: Verify actual public Fill controller and single awaited foreground lifetime
+        run: node --test platform/tests/fill_uat_foreground_controller.test.mjs platform/tests/fill_uat_foreground_lifetime.test.mjs
       - name: Bootstrap Supabase auth contract
         run: |
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
