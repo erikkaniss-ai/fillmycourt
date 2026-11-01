@@ -1210,11 +1210,14 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     raise DomainError("IMPORT_STATE", "Only a committed import can be rolled back.", 409)
                 for ch in reversed(b["result"].get("changes", [])):
                     if ch.get("created"):
-                        c.execute(text("""
+                        deleted = c.execute(text("""
                             delete from public.people p where p.id=cast(:id as uuid) and p.organization_id=cast(:org as uuid)
                               and p.auth_user_id is null
                               and not exists (select 1 from public.bookings b where b.player_id=p.id)
                         """), {"id": ch["id"], "org": org})
+                        deleted_count = deleted.rowcount
+                        if type(deleted_count) is not int or deleted_count != 1:
+                            raise DomainError("IMPORT_ROLLBACK_CONFLICT", "Import rollback requires review.", 409)
                     else:
                         before = ch.get("before") or {}
                         c.execute(text("""
