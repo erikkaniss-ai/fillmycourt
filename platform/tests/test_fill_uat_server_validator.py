@@ -433,15 +433,21 @@ def test_invalid_validator_leaves_guard_lifespan_running_and_bootstrap_closed(e,
     monkeypatch.setenv("FILL_UAT_SERVER_VALIDATOR", "on")
     monkeypatch.setenv("FILL_UAT_SERVER_BINDING", "INVALID_PRIVATE_INPUT_SENTINEL")
     calls = []
-    guard = g.Guard(g.Lease.parse(e.spec), SimpleNamespace(pending=lambda: calls.append(1) or []), SimpleNamespace(close=lambda: None), clock=e.clock.wall, monotonic=e.clock.tick)
-    guard.bootstrap = None
-    runner = s.from_environment(SimpleNamespace(environment="staging"), "operations", guard, None)
-    assert isinstance(runner, s.RejectedValidator) and not runner.admission_ready
     monkeypatch.setattr(g, "POLL_SECONDS", .01)
     async def exercise():
+        loop, two_sweeps = asyncio.get_running_loop(), asyncio.Event()
+        def pending():
+            calls.append(1)
+            if len(calls) >= 2:
+                loop.call_soon_threadsafe(two_sweeps.set)
+            return []
+        guard = g.Guard(g.Lease.parse(e.spec), SimpleNamespace(pending=pending), SimpleNamespace(close=lambda: None), clock=e.clock.wall, monotonic=e.clock.tick)
+        guard.bootstrap = None
+        runner = s.from_environment(SimpleNamespace(environment="staging"), "operations", guard, None)
+        assert isinstance(runner, s.RejectedValidator) and not runner.admission_ready
         async with guard.lifespan(None):
             async with runner.lifespan(None):
-                await asyncio.sleep(.04)
+                await asyncio.wait_for(two_sweeps.wait(), timeout=2)
                 assert len(calls) >= 2
     asyncio.run(exercise())
 
