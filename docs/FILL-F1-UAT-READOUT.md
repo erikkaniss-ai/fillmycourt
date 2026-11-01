@@ -420,6 +420,13 @@ newAccountQuota=0 / helperCompatibilityAccepted=false. Fixture success or a
 model operator-gate response cannot alter this. Prior hosted run remains CLOSED
 FAIL / cleanup accepted; all thirteen identities remain blocked.
 
+This refusal follows the synthetic-only scope, consumed authority and absence of
+current independent runtime evidence. No owner/Decision requirement mandates a
+cryptographic nonce or phase fence for local stdio. Their absence is an observed
+assumption for review, not proof that the frozen helper is intrinsically
+unsupported or a new mandatory redesign requirement. Likewise its static ID
+lists alone say nothing about what the separate current guard actually allows.
+
 ### Validation and actual persistent-tool evidence
 
 The new37-test suite covers the plain startup/configuration/op schemas, source
