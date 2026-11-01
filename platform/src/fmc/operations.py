@@ -62,7 +62,7 @@ class Operations:
     def stage_contacts(self,who,source,content):
         if len(content.encode())>2_000_000:raise DomainError('IMPORT_LIMIT','Maximum CSV size is 2 MB.',413)
         try:
-            reader=csv.DictReader(io.StringIO(content.lstrip('\ufeff')))
+            reader=csv.DictReader(io.StringIO(content.lstrip('\ufeff')),strict=True)
             required={'external_id','name'}
             if not required.issubset(reader.fieldnames or []):raise DomainError('CSV_HEADERS','Required headers: external_id,name. Optional: email,phone,consent,consent_proof.',422)
             if len(reader.fieldnames)!=len(set(reader.fieldnames)):raise DomainError('CSV_HEADERS','Duplicate column names.',422)
