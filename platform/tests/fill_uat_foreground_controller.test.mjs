@@ -9,4 +9,6 @@ test('actual public controller: guarded startup, both operator activations, term
   assert.deepEqual(r.operatorReadiness.map(x => x.result), ['ONE_GATE_ONE_LOGIN_EACH', 'DENY_NO_GATE_OR_LOGIN']);
   assert.ok(r.earlyInputReferencesCleared.includes('discovery-read-timeout'));
   assert.equal(r.budgetFactsUnchanged, true);
+  assert.equal(r.bindingReceiptTiming[0].result,'BIND_WITH_ORIGINAL_ACTION_WINDOWS');
+  assert.equal(r.bindingReceiptTiming.filter(x=>x.result==='DENY_NO_FACTORY').length,4);
 });

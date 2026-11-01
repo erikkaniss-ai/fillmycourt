@@ -1138,13 +1138,37 @@ under the original below600s admission window. The backend is not changed.
 in ONE awaited `functions.exec`, with functions and ControlRpc retained in that
 same isolate:
 
+The concrete journal adapter below supersedes the initial illustrative
+admission callback. It renders only validated fixed-scope statements against
+the existing schema; no hidden journal write is performed by another actor.
+
 ```javascript
+// All future values come from the already-authorized private input and its
+// verified settled SAME-ed0-build Operations deployment, BEFORE this flow.
+// These identifiers/digest are placeholders here; no new input exists yet.
+const scope = {run_id: futureRunId, authorization_id: verifiedHumanMessageId};
+const journal = createJournalAdmission({
+  binding: {
+    ...scope, candidate_sha: 'ed0eeea4ccde35ff54ee8331795326c15a49a5f9',
+    project_ref: 'yclqnbcrchwieyzkyumx',
+    historical_ids: [...CANONICAL_HISTORICAL_IDS],
+    input_digest: futurePrivateInputDigest,
+    deployment_id: futureVerifiedSettledOperationsDeploymentId,
+    settled_at: futureVerifiedSettledAt,
+  },
+  executeSql: args => tools.mcp__codex_apps__supabase_execute_sql(args),
+});
+const rpc = new ControlRpc(tools);
 await runFillLifetime({
   scope, rpc,
   prepare: () => prepareFillForeground(tools, {prepare_id}, rpc),
   arm: prepared => armFillForeground(prepared, scope),
-  admit: () => existingTrustedCanonicalAdmission(),
-  run: armed => runFillForeground(tools, scope, armed),
+  admit: control => journal.admit(control),
+  stop: () => journal.stop(),
+  run: (armed, {stopJournal}) => runFillForeground(tools, scope, armed, {
+    wall: Date.now, sleep: ms => new Promise(r => setTimeout(r, ms)),
+    stopJournal,
+  }),
 });
 ```
 
@@ -1206,3 +1230,81 @@ desktop/mobile/logout/revoke/expiry UAT, onboarding or MVP/pilot acceptance.
 Main current gate: independent CTO final-source/flow acceptance plus actual
 pre-account technical readiness. No credentials/input/intent/T0/accounts or
 runtime allocation have been created for this new attempt. `PUBLIC_GO=false`.
+
+### Concrete admission/stop correction after the a54a46f source review
+
+Root independently accepted a54a46f as SOURCE evidence (both exact CI
+checkouts; separate34-case two-org rehearsal; independent65 pure tests).
+Runtime was held pending this concrete admission/cleanup implementation.
+The new `fill_uat_journal_admission.mjs` is inert until called with the trusted
+official execute-SQL dependency inside the single awaited lifetime above.
+Future private INPUT/set-variables and at most one selected SAME-ed0-build
+restart are explicit pre-account preparation steps. They must be completed
+and verified before this flow; they are not hidden journal side effects.
+
+The source adapter owns the exact statements: one inactive INSERT with fixed
+source/project/two organizations/deployment/settled-time/input-digest binding,
+absolute request expiry, exact canonical old16 bans and no other open private
+intent; narrow SELECT polling for the existing server's successful supported
+Admin preflight; then at most ONE conditional release UPDATE. There is no
+Auth/customer/provider/booking write here and no DDL/permission change.
+
+The pre-T0 wait is bounded by min(prepared host expiry minus72s, admission
+start plus5min). The72s reserve covers60s actions plus two6s first-binding
+receipt rounds before the prepared host's original expiry. SQL release cutoff is10s earlier
+again, with a further2s DB-clock guard in the conditional statement. This
+separates pre-T0 waiting from the unmodified server preflight age0..30s.
+The inactive request expiry is the absolute earlier release cutoff and cannot
+be renewed. The same absolute value is exposed to the callback with synchronous
+isOpen/assertOpen; those checks run after every await and before dispatching a
+write. The callback makes no conditional retry/new intent/release replay.
+
+Release obtains the scoped journal row lock in a MATERIALIZED SELECT before
+the conditional UPDATE checks current clock, original cutoff/request expiry,
+fresh preflight/executor, original source/deployment/input/settled binding,
+starts/released NULL, stopped/reconciliation false, old16 bans and zero
+pre-T0 attempt slots. Existing database triggers independently enforce those
+immutable admission rules. The output is taken from UPDATE RETURNING, rather
+than assuming another CTE can see newly written table values in the same
+snapshot. See the [PostgreSQL WITH semantics](https://www.postgresql.org/docs/16/queries-with.html).
+
+A timeout is never treated as RPC cancellation. Before controller closure,
+the caller owns an idempotent durable STOP: scoped intent stopped=true and
+reconciliation_required=true, then its existing run stopped=true through
+RETURNING. If an initial INSERT/release RPC is still pending, one initial stop
+is followed by settlement/drain and one final stop fence; these are cleanup,
+never release retries. Uncertain release remains UNKNOWN and terminal, with
+existing automatic guard cleanup required. If durable stop is unconfirmed,
+the controller is retained until the earlier DB release cutoff plus2s clock
+margin expires; pending ownership/stop uncertainty is reported, never PASS.
+The official caller read deadline remains6s; timeout does not cancel SQL.
+
+On READS_DONE or any foreground failure, the actual foreground driver calls
+the lifetime-owned stopJournal before continuing canonical cleanup reads or
+closing the host. The outer lifetime also owns this same memoized stop on
+every admission/terminal path. Root only records the independent canary
+verdict; journal stop is no longer delegated to a message/Root reaction.
+Actual account cleanup still needs the durable guard and independent canonical
+readback, separate from SQL stop and observed helper EOF/exit/close.
+
+The first-binding timing audit keeps backend create/activate reservation and
+verified-settled action guards below original T+60s. The pinned backend checks
+fresh(60) around its supported activation/readback; no new action is admitted
+after60. Only first LOCAL observation/binding has a strict T+72s upper bound:
+60 plus at most two existing6s discovery/typed read roundtrips. Discovery data
+itself must be0..6s old; complete typed checkpoint and existing10s DB freshness
+are mandatory before any factory. Missing/pending/late backend action at or
+after60, observation outside72, stale guard or an invalid typed checkpoint
+remain terminal. Positive canary commands still end below120, ban/denials
+below180; all operator/run/checker/publish/health limits are unchanged. Public
+actual-controller cases cover timely action observed61/full-read64 (accepted),
+late actual reservation, pending-after60, discovery73 and full-read73 (denied).
+
+Public injected DB/RPC tests cover120s preflight waiting with a fresh stamp,
+late preflight/callback and SQL release beyond cutoff, stale preflight, unknown
+slots, one actual modeled release, success -> durable stop -> guard, ambiguous
+release -> stop with no replay, and uncancelled INSERT/release settlement/final
+fence. These are synthetic source/control proofs, not real SQL/hosted UAT.
+Fresh exact-head CI and superseding flow hashes are recorded in the canonical
+handback pair; no unchanged a54a46f workflow is rerun. New runtime authority
+remains unspent throughout this source-only correction.

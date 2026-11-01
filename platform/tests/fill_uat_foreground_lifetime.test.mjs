@@ -13,11 +13,12 @@ function fixture() {
     arm: async value => { assert.equal(value, prepared); events.push('arm-and-lookup'); return armed; },
     admit: async () => { events.push('admit-once'); return { ...scope, released: true }; },
     run: async value => { assert.equal(value, armed); assert.equal(value.rpc, rpc); events.push('foreground'); return { publicOnly: true }; },
+    stop: async () => { events.push('durable-stop'); return {confirmed:true}; },
   } };
 }
 test('one awaited lifetime retains actual methods and identity before release; returns only safe results', async () => {
   const f = fixture(), r = await runFillLifetime(f.options);
-  assert.deepEqual(f.events, ['prepare', 'arm-and-lookup', 'admit-once', 'foreground', 'close']);
+  assert.deepEqual(f.events, ['prepare', 'arm-and-lookup', 'admit-once', 'foreground', 'durable-stop','close']);
   assert.equal(r.failure, null); assert.equal(r.ownedPending, 0); assert.equal(r.grantsOwnerGo, false);
   assert.doesNotThrow(() => JSON.stringify(r)); assert.equal(Object.values(r).some(v => typeof v === 'function'), false);
 });
@@ -38,11 +39,11 @@ for (const stage of ['prepare', 'arm', 'admit', 'run']) test(`failure at ${stage
   if (stage !== 'prepare') assert.equal(r.closed.closed, true);
 });
 test('late admission is owned and drained but never enters foreground or renews timers', async () => {
-  const f = fixture(); f.options.admissionMs = 5; f.options.drainMs = 100;
-  f.options.admit = async () => { f.events.push('admit-once'); await new Promise(r => setTimeout(r, 30)); return { ...scope, released: true }; };
+  const f = fixture(); f.options.admissionMs = 10020; f.options.drainMs = 1000;let lateReleaseAttempts=0;
+  f.options.admit = async control => { f.events.push('admit-once'); await new Promise(r => setTimeout(r, 10060));if(control.isOpen())lateReleaseAttempts++;control.assertOpen();return { ...scope, released: true }; };
   const r = await runFillLifetime(f.options);
   assert.equal(r.failure.code, 'ADMISSION_TIMEOUT'); assert.equal(r.ownedPending, 0); assert.equal(r.closed.closed, true);
-  assert.deepEqual(f.events, ['prepare', 'arm-and-lookup', 'admit-once', 'close']);
+  assert.equal(lateReleaseAttempts,0);assert.deepEqual(f.events, ['prepare', 'arm-and-lookup', 'admit-once','durable-stop','close']);
 });
 test('finite actual RPC stage/code retained while raw private exception is discarded',async()=>{
   const f=fixture();f.options.arm=async()=>{const e=Error('SYNTHETIC_PRIVATE_ERROR');e.code='RPC_TIMEOUT';e.stage='ARM';throw e;};
@@ -55,4 +56,10 @@ test('wrong release binding and expired preparation stop before foreground', asy
     const r = await runFillLifetime(f.options); assert.ok(r.failure); assert.equal(r.closed.closed, true); assert.equal(r.ownedPending, 0);
     assert.equal(f.events.includes('foreground'), false);
   }
+});
+test('unconfirmed stop keeps controller until earlier DB cutoff, reports journal ownership uncertainty',async()=>{
+  const f=fixture();let now=Date.now(),closedAt;
+  f.options.wall=()=>now;f.options.sleep=async ms=>{now+=ms;};f.options.stop=async()=>({confirmed:false,pending:1});
+  f.prepared.close=async()=>{closedAt=now;return{closed:true};};
+  const r=await runFillLifetime(f.options);assert.equal(r.failure.code,'STOP_FAILED');assert.ok(closedAt>=r.admission.releaseCutoffAt+2000);assert.equal(r.ownedPending,1);
 });

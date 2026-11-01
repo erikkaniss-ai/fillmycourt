@@ -71,11 +71,18 @@ export async function installFillNode(scope, offline) {
   function adopt(raw) {
     const s = b.decodeReadback(raw); v.exact(s, ['run_id','authorization_id','candidate_sha','project_ref','deployment_id','starts_at','observed_at','stopped','reconciliation_required','lease_digest','attempts']);
     must(s.run_id === scope.run_id && s.authorization_id === scope.authorization_id && s.candidate_sha === v.CANDIDATE && s.project_ref === b.PROJECT);
-    must(Math.abs(wall() - v.instant(s.observed_at)) <= 2000 && !s.stopped && !s.reconciliation_required);
+    const observationAge=wall()-v.instant(s.observed_at);
+    must(observationAge>=0&&observationAge<=6000&&!s.stopped&&!s.reconciliation_required);
     if (s.starts_at === null) return;
     cutoff = Math.min(v.instant(s.starts_at) + 1800000, p.latest_authority_expiry ?? Infinity);
-    must(wall() < v.instant(s.starts_at) + 60000 && s.attempts.length <= 6);
+    const actionStart=v.instant(s.starts_at),age=wall()-actionStart;
+    // Only receipt latency gets at most two allowed6s read roundtrips. The
+    // pinned server's reserve/verify/settle actions still MUST be before60s.
+    must(age>=0&&age<72000&&s.attempts.length<=6);
     const creates = s.attempts.filter(a => a.operation === 'create');
+    const actionOnTime=a=>v.instant(a.reserved_at)>=actionStart&&v.instant(a.reserved_at)<actionStart+60000;
+    must(creates.every(actionOnTime));
+    if(age>=60000)must(creates.length===3&&creates.every(a=>a.verified&&a.user_id)&&s.attempts.some(a=>a.operation==='activate'&&a.label==='canary'&&a.verified&&a.settled&&a.user_id&&actionOnTime(a)));
     // Brief normal server in-flight admission may be observed; never replay it.
     // A missing identity/verification surviving10s or original60s is fatal.
     must(s.attempts.every(a => a.verified || wall() - v.instant(a.reserved_at) < 10000));
@@ -86,6 +93,7 @@ export async function installFillNode(scope, offline) {
     // verified AND settled. Empty/pending is a normal bounded pre-ready WAIT.
     if(!canaryActivation?.verified||!canaryActivation.settled||!canaryActivation.user_id)return;
     must(canaryActivation.user_id===creates.find(a=>a.label==='canary').user_id);
+    must(actionOnTime(canaryActivation));
     binding = v.validateBinding({ run_id: s.run_id, authorization_id: s.authorization_id, candidate_sha: v.CANDIDATE, helper_sha256: v.HELPER_HASH, t0: s.starts_at,
       identities: Object.fromEntries(creates.map(a => [a.label,a.user_id])), historical_ids: historical,
       pins: { operations_service_id:'c0c6e5e2-0040-48e0-a0af-abfb1ec81b61', operations_sha:v.CANDIDATE, core_service_id:'fc97f78f-d39e-4598-a615-b2413b9b3f76', core_sha:'0134f603445ea7f282ef0cb866d0f3591518cbb9', preview_site_id:'d763b7a1-dccd-4638-8876-ac1670171698', preview_sha:v.CANDIDATE, supabase_project_ref:b.PROJECT } });
@@ -94,6 +102,7 @@ export async function installFillNode(scope, offline) {
     plan = b.buildCheckpointReadPlan({ run_id:binding.run_id, known_ids:[...Object.values(binding.identities),...historical], expected_lease_digest:s.lease_digest });
     cache = new b.CheckpointCache({ binding, transportHash:hash, wall });
     relay = new b.CheckpointRelay({ plan, owner, publish:e=>{
+      if(!launched&&wall()>=v.instant(binding.t0)+72000)return;
       operatorAdmissionWaiting=boundedOperatorWait(e.state);
       if(!operatorAdmissionWaiting&&(positiveReady||launched))cache.install(e);
     }, wall, monotonic });
@@ -147,6 +156,7 @@ export async function installFillNode(scope, offline) {
     }
     if (phase === 'CHECKPOINT') {
       if (checkpoint.decision !== 'ALLOW') return;
+      must(age<72000);
       must(!launched); launched=true;
       const config = { op:'configure', approved_helper_sha256:v.HELPER_HASH, plan:{ ...p.client_plan, candidate_sha:v.CANDIDATE, run_id:binding.run_id, authorization_id:binding.authorization_id, t0:binding.t0,
         principals:Object.fromEntries(v.LABELS.map(label=>[label,{id:binding.identities[label],password:p.passwords[label]}])) } };
@@ -292,6 +302,20 @@ export async function validatePublicTransitions() {
   const waiting=await incomplete.driver.complete(incomplete.driver.begin(),[{snapshot:incomplete.discovery}]);assert.equal(waiting.phase,'DISCOVERY');assert.equal(waiting.stopped,false);assert.equal(incomplete.counts().launches,0);await incomplete.driver.stop();assert.equal(incomplete.inputsCleared(),true);assert.equal(incomplete.unspentFactsPreserved(),true);
   const beforeDiscovery=await model();await beforeDiscovery.driver.stop();assert.equal(beforeDiscovery.inputsCleared(),true);assert.equal(beforeDiscovery.unspentFactsPreserved(),true);assert.equal(beforeDiscovery.counts().launches,0);
   const timedDiscovery=await model(),timedTicket=timedDiscovery.driver.begin();timedDiscovery.advance(37);const timedStatus=await timedDiscovery.driver.complete(timedTicket,[{snapshot:timedDiscovery.discovery}]);assert.equal(timedStatus.stopped,true);assert.equal(timedDiscovery.inputsCleared(),true);assert.equal(timedDiscovery.unspentFactsPreserved(),true);assert.equal(timedDiscovery.counts().launches,0);await timedDiscovery.driver.stop();
+  const bindingReceiptTiming=[];
+  for(const kind of ['ontime-observed-after60','late-action','late-discovery','late-full-read','pending-after60']){
+    const m=await model();m.advance(kind==='late-discovery'?73:61);
+    if(kind==='late-action')m.discovery.attempts.at(-1).reserved_at=at(60.1);
+    if(kind==='pending-after60')m.discovery.attempts.at(-1).settled=false;
+    let discoveryTicket;
+    if(kind==='ontime-observed-after60'){m.discovery.attempts.at(-1).reserved_at=at(54);m.advance(55);discoveryTicket=m.driver.begin();m.advance(61);m.discovery.observed_at=at(55);}
+    else discoveryTicket=m.driver.begin();
+    let s=await m.driver.complete(discoveryTicket,[{snapshot:m.discovery}]);
+    if(['ontime-observed-after60','late-full-read'].includes(kind)){assert.equal(s.stopped,false);m.advance(kind==='late-full-read'?73:64);const t=m.driver.begin();s=await m.driver.complete(t,[{snapshot:m.snapshot(t)}]);}
+    if(kind==='ontime-observed-after60'){assert.equal(s.stopped,false);assert.equal(m.counts().launches,1);m.driver.requestStop();m.release();await m.driver.stop();}
+    else{assert.equal(s.stopped,true);assert.equal(m.counts().launches,0);await m.driver.stop();}
+    bindingReceiptTiming.push({kind,result:kind==='ontime-observed-after60'?'BIND_WITH_ORIGINAL_ACTION_WINDOWS':'DENY_NO_FACTORY'});
+  }
   const publicData=publicFixture(),authScope={run_id:publicData.binding.run_id,authorization_id:publicData.binding.authorization_id};
   const noGo={publicOnly:true,moduleRoot:ROOT,prepared:{trustedOwnerReceiptVerified:false,trustedSourceAcceptanceVerified:true,source_sha:'c3df8f020379acc7054fb6b6deb01c8a7250f7a6',accepted_source_sha:'c3df8f020379acc7054fb6b6deb01c8a7250f7a6',...authScope,max_new_accounts:3,public_go:false,consumed:false,passwords:Object.fromEntries(v.LABELS.map(label=>[label,publicData.config.plan.principals[label].password]))},wall:()=>base+30000,monotonic:()=>0,factory:()=>{throw Error('Public factory must not run');}};
   await assert.rejects(()=>installFillNode(authScope,noGo),/FILL09_REJECTED/);assert.equal(noGo.prepared.passwords,null);assert.equal(noGo.prepared.client_plan,null);assert.equal(noGo.prepared.consumed,false);
@@ -349,7 +373,7 @@ export async function validatePublicTransitions() {
     for(let age=201;age<=285;age+=3){m.advance(age);t=m.driver.begin();s=await m.driver.complete(t,[{snapshot:passSnapshot(t)}]);await new Promise(r=>setTimeout(r,0));if(s.stopped)break;}
     assert.equal(m.gateCount(),1);assert.deepEqual(m.operatorLogins(),{a:1,b:1});assert.equal(s.outcome,'READS_COMPLETE');await m.driver.stop();operatorReadiness.push({scenario,result:'ONE_GATE_ONE_LOGIN_EACH',missingAndPendingNoEarlyUse:true,originalWindowPreserved:true});
   }
-  return{actualControllerOffline:'PASS',modelDate:'2030-01-01',discoveryToFirstCanonical:'PASS',noLaunchBeforeSnapshot:true,firstCanonicalDenyNoLaunch:true,operatorReadiness,
+  return{actualControllerOffline:'PASS',modelDate:'2030-01-01',discoveryToFirstCanonical:'PASS',noLaunchBeforeSnapshot:true,firstCanonicalDenyNoLaunch:true,operatorReadiness,bindingReceiptTiming,
     stopDuringFactory:'PASS',factoryAfterFinalStop:'PASS',lateFakeChildrenAborted:2,lateReadyCalls:0,lateCloseObserved:2,incompleteDiscoveryNoLaunch:true,missingRealGoRejected:true,consumedAuthorityRejected:true,
     earlyInputReferencesCleared:['before-discovery-stop','incomplete-discovery-stop','discovery-read-timeout','canonical-deny-before-factory','invalid-authority','consumed-authority'],budgetFactsUnchanged:true,
     preReadyWaitNoFactory:waits,rootPublicationChronology:chronology,realNetworkCalls:0,actualProcessLaunches:0,grantsOwnerGo:false};

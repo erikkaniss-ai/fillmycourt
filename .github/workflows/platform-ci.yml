@@ -42,6 +42,7 @@ jobs:
           node --test platform/tests/fill_uat_process_transport.test.mjs
           node --test platform/tests/fill_uat_checkpoint_bridge.test.mjs
           node --test platform/tests/fill_uat_foreground_controller.test.mjs platform/tests/fill_uat_foreground_lifetime.test.mjs
+          node --test platform/tests/fill_uat_journal_admission.test.mjs
           node --test platform/tests/fill_operator_demo_contract.test.mjs
           node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
   contract:
@@ -110,6 +111,8 @@ jobs:
         run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Verify actual public Fill controller and single awaited foreground lifetime
         run: node --test platform/tests/fill_uat_foreground_controller.test.mjs platform/tests/fill_uat_foreground_lifetime.test.mjs
+      - name: Verify concrete private journal admission with public injected DB
+        run: node --test platform/tests/fill_uat_journal_admission.test.mjs
       - name: Bootstrap Supabase auth contract
         run: |
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 <<'SQL'
