@@ -41,7 +41,7 @@ const unavailable=error=>{
   return {status:"unavailable",code,error:errors[code],version:VERSION};
 };
 const sourceAllowed=value=>{
-  try {const u=new URL(value);return u.origin==="https://playtomic.com"&&/^\/clubs\/[a-z0-9-]+$/.test(u.pathname)&&!u.search&&!u.hash;}
+  try {const u=new URL(value);return u.origin==="https://playtomic.com"&&/^\/clubs\/[a-z0-9-]+$/.test(u.pathname)&&!u.username&&!u.password&&!u.port&&!u.search&&!u.hash;}
   catch{return false;}
 };
 // Additional player-visible web origins. A supported public route is NOT
@@ -233,8 +233,8 @@ async function disconnect(){
 }
 async function approve(){
   const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+  if(!sourceAllowed(tab?.url))fail("CLUB_PAGE_REQUIRED");
   const u=new URL(tab?.url||"about:blank"),source=u.origin+u.pathname;
-  if(!sourceAllowed(source))fail("CLUB_PAGE_REQUIRED");
   generation++;
   return consentOperation(async()=>{
     await clearConsent();

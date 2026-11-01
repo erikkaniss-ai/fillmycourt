@@ -13,7 +13,7 @@ const getPage='https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.ht
 const sender={id:'reader',url:getPage,frameId:0,tab:{id:9,url:getPage}};
 const query={date:new Date().toISOString().slice(0,10),sport:'Padel',from:'08:00',to:'23:00',durationMinutes:90};
 
-function fixture({approvedSource=source,grant=true,previousSession={},extraSources=null,multiClub=false}={}){
+function fixture({approvedSource=source,activeSource=source,grant=true,previousSession={},extraSources=null,multiClub=false}={}){
   const local={...(approvedSource?{approvedSource}:{}),...(extraSources?{approvedExtraSources:extraSources}:{})},session={...previousSession};
   const handlers={},created=[],windows=[],permissionChecks=[],operations=[];let searchCount=0,newWindow=false;
   const store=data=>({
@@ -26,7 +26,7 @@ function fixture({approvedSource=source,grant=true,previousSession={},extraSourc
     storage:{local:store(local),session:store(session)},
     permissions:{contains:async options=>{operations.push('permission');permissionChecks.push(...options.origins);return grant;}},
     tabs:{
-      query:async()=>{operations.push('tab-query');return [{id:1,windowId:5,url:source}];},
+      query:async()=>{operations.push('tab-query');return [{id:1,windowId:5,url:activeSource}];},
       get:async id=>{operations.push('tab-get');return id===2?{id:2,windowId:newWindow?6:5,url:created.at(-1)?.url||source,status:'complete'}:
         {id:1,windowId:5,url:source,status:'complete'};},
       create:async data=>{operations.push('tab-create');created.push(data);return {id:2};},
@@ -60,6 +60,95 @@ function fixture({approvedSource=source,grant=true,previousSession={},extraSourc
   const call=(message,from=sender)=>new Promise(resolve=>handlers.internal(message,from,resolve));
   return {call,session,local,created,windows,permissionChecks,operations,get searchCount(){return searchCount;}};
 }
+
+// Exercise both packaged entry points with Chrome/DOM spies only. URL strings
+// are fictional fixtures; no provider browser, Reader or network is activated.
+const admissionRoutes=[
+  ['playtomic',source,'https://playtomic.com/*'],
+  ['tiesports','https://clubs.tiesports.com/pt/lisboa/FictionalClub','https://clubs.tiesports.com/*'],
+  ['racket_id','https://racket.id/booking','https://racket.id/*'],
+  ['smashpro','https://smashpro.pt/pt/c/fictional-club','https://smashpro.pt/*'],
+  ['matchi','https://www.matchi.se/facilities/fictional-club','https://www.matchi.se/*']
+];
+const popupSender={id:'reader',url:'chrome-extension://reader/popup.html'};
+function rejectedAdmissionUrls(route,provider){
+  return [
+    route.replace('https://','https://fixture-user@'),
+    route.replace('https://','https://:fixture-password@'),
+    route.replace('https://','https://fixture-user:fixture-password@'),
+    route.replace(new URL(route).host,new URL(route).host+':444'),
+    route+'#fixture-fragment',route+'?token=fixture',route+'?lang=en&token=fixture',
+    route+'?Lang=en',route+'?%74oken=fixture',
+    ...(provider==='matchi'?[]:[route+'?lang=en'])
+  ];
+}
+async function popupAdmission(activeSource){
+  const listeners={},permissions=[],messages=[];
+  const elements=Object.fromEntries(['approve','open','enableComparisonBridge','revoke','status']
+    .map(id=>[id,{disabled:false,textContent:'',addEventListener(name,fn){listeners[id+':'+name]=fn;}}]));
+  const context=vm.createContext({URL,document:{getElementById:id=>elements[id]},chrome:{
+    tabs:{query:async()=>[{url:activeSource}]},
+    permissions:{request:async value=>{permissions.push(value);return true;}},
+    runtime:{sendMessage:async value=>{messages.push(value);return {status:'connected'};}}
+  }});
+  vm.runInContext(readFileSync(new URL('popup.js',base),'utf8'),context);
+  await Promise.resolve();
+  await listeners['approve:click']();
+  return {permissions,messages,status:elements.status.textContent};
+}
+
+test('background approval rejects credentialed or decorated routes before saving consent or doing provider work',async()=>{
+  for(const [provider,route] of admissionRoutes)for(const url of rejectedAdmissionUrls(route,provider)){
+    const f=fixture({activeSource:url,approvedSource:null});
+    const action=provider==='playtomic'?'approve':'approveAdditional';
+    const response=await f.call({action},popupSender);
+    assert.equal(response.code,'CLUB_PAGE_REQUIRED',provider+' must reject '+url);
+    assert.deepEqual(f.local,{});assert.deepEqual(f.session,{});
+    assert.deepEqual(f.permissionChecks,[]);assert.deepEqual(f.created,[]);
+    assert.deepEqual(f.operations,['tab-query']);assert.equal(f.searchCount,0);
+  }
+});
+
+test('persisted credentialed or decorated Playtomic URLs never become configured or start provider work',async()=>{
+  for(const url of rejectedAdmissionUrls(source,'playtomic')){
+    const f=fixture({approvedSource:url});
+    const status=await f.call({action:'autoStatus'});
+    assert.equal(status.status,'not_configured','stored URL must reject '+url);
+    assert.equal(status.sourceUrl,null);
+    const result=await f.call({action:'autoSearchFromGet',query});
+    assert.equal(result.code,'CONNECT_REQUIRED');
+    assert.deepEqual(f.created,[]);assert.equal(f.searchCount,0);
+    assert.deepEqual(f.session,{});assert.equal(f.local.approvedSource,url);
+  }
+});
+
+test('popup rejects the same unsafe provider routes without permission prompts or approval messages',async()=>{
+  for(const [provider,route] of admissionRoutes)for(const url of rejectedAdmissionUrls(route,provider)){
+    const p=await popupAdmission(url);
+    assert.deepEqual(p.permissions,[],provider+' must reject '+url);
+    assert.deepEqual(p.messages,[]);
+  }
+});
+
+test('both entry points accept official routes and only MATCHi lang queries; saved routes are origin plus pathname',async()=>{
+  for(const [provider,route,origin] of admissionRoutes){
+    const inputs=[route,route.replace(new URL(route).host,new URL(route).host.toUpperCase()+':443'),
+      ...(provider==='matchi'?[route+'?lang=en',route+'?lang=pt&lang=en',route+'?%6cang=pt']:[])];
+    for(const url of inputs){
+      const f=fixture({activeSource:url,approvedSource:null});
+      const action=provider==='playtomic'?'approve':'approveAdditional';
+      const response=await f.call({action},popupSender);
+      assert.equal(response.status,'connected',provider+' must admit '+url);
+      assert.equal(response.sourceUrl,route);
+      assert.deepEqual(JSON.parse(JSON.stringify(f.local)),provider==='playtomic'?{approvedSource:route}:{approvedExtraSources:{[provider]:route}});
+      assert.equal(f.searchCount,0);
+      assert.equal(f.created.filter(t=>!t.url.startsWith('chrome-extension://')).length,0);
+      const p=await popupAdmission(url);
+      assert.deepEqual(JSON.parse(JSON.stringify(p.permissions)),[{origins:[origin]}]);
+      assert.deepEqual(JSON.parse(JSON.stringify(p.messages)),[{action}]);
+    }
+  }
+});
 
 test('without one-time site permission personal Get search fails closed, with zero provider UI work',async()=>{
   const f=fixture({grant:false});
