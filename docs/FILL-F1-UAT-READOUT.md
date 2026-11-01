@@ -677,3 +677,208 @@ and applicable new owner authority with actual guard evidence, NOT another
 invented protocol redesign. This batch makes no activation/quota/GO request and
 changes no hosted approval marker. Production/public/paid/provider/customer/
 booking/hold/payment/outreach remain excluded. `PUBLIC_GO=false`.
+
+## Owned process transport preparation — RUNTIME-PREP-06, 1 November 2026
+
+Batch `FILL-F1-RUNTIME-PREP-06-20261101` starts at accepted
+`e576d75c6387615199a8171413ac338f6d6a1f4e`, same PR #8 / Issue #9. Only the new
+process transport, fixed public child, their test file, this document and one
+new test invocation in each CI job are leased. Collector/reducer/parser/models
+and frozen Python helper are unchanged. There is no import-time subprocess or
+CLI in the transport module. No REAL helper invocation, network/Auth/account
+operation, actual credential input, deploy, restart or config write occurred.
+
+### Fixed targets and future-only real launch
+
+`fill_uat_process_transport.mjs` exports `launchReviewedLiveCollector()` for
+**future separately reviewed use**, not current activation. Its only arguments
+are config, binding and a required external `checkCurrentPermit` function. A
+boolean permit/default GO, arbitrary executable/helper path/argv/environment/
+shell, or fallback interpreter is not accepted. The wrapper uses real wall and
+monotonic clocks and the unchanged `HelperCollector` for actual configuration
+validation and serialization. It returns only collector + safe processEvidence;
+the underlying child/raw pipe handles are not returned by either factory.
+
+The exact existing Python/helper locations were derived read-only from local
+file inventory and the existing pyvenv.cfg; neither interpreter nor helper was
+executed. Paths are fixed to this existing executor checkout, with no guessing,
+installation or relocation search. Before any possible real spawn, the factory
+checks an external permit, verifies fixed files, then checks the permit again.
+It requires Windows, ordinary files/no file symlink, matching real paths and:
+
+Fixed-file hashing streams64KiB chunks, caps each input at32MiB and closes the
+stream on success/error; it does not buffer an arbitrary changed file in RAM.
+
+| Fixed file | SHA256 from read-only inventory / accepted source |
+| --- | --- |
+| `.work/f1-readonly-validator.py` | `6ca033af474c21180652652c21ee6d4d4dafd16d379a4c11eb646d9ac9e53548` |
+| `.work/f1-auth-admin-venv/Scripts/python.exe` | `9f29b8965d6bf169315bbc20946f33b23c9dacb4587c3cccaf1f536b844b2dc2` |
+| `.work/f1-auth-admin-venv/pyvenv.cfg` | `fb495c656cb2605b9acdaa9e32df46ba855ea4470a0568a25ec962dcb79d1a31` |
+| Existing base Python executable | `f8b45d63047da9d9adf09892e4cc4317b859e86a93a478cc9616bc69d3b176e5` |
+| Accepted collector | `4751a40941ddb9379e6d7efc96f6b8e207fc3aa7d45d9e1965c623cb891cad04` |
+| Accepted reducer | `a63c49bba0a97304820dec05cd5a00ae197065b084e573e7bf938857c4e223da` |
+| Accepted strict parser | `f4dd8fef0f3088eceb4043b0ddbaa48e08fd2508c6200aea7c41fe5f0281cb5a` |
+
+pyvenv.cfg identifies Python3.12.14 at
+`C:/Users/Thinkpad X1 Gen7/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe`.
+The future fixed invocation is the existing venv interpreter with
+`-I -B <fixed-helper> --hosted-owner-approved`, shell=false/windowsHide=true,
+stdio pipes, fixed helper working directory and empty environment except
+noncredential Windows SystemRoot. These Python flags/dependency/runtime
+compatibility have NOT been exercised here. The permit also must bind the
+reviewed transport module's SHA256, independently supplied by the checker.
+
+These snapshots do not authenticate the whole venv/dependency tree, attest the
+machine or eliminate filesystem TOCTOU between verification and execution. They
+assume the trusted existing executor/filesystem and protected immutable files.
+This is a practical review boundary, not a new requirement to reinstall, invent
+cryptography or redesign the accepted stdio protocol. CI never invokes the live
+factory with a valid permit or depends on local untracked Python resources.
+
+### Trusted current checkpoint and latency — PREPARED, not operational
+
+The external checker is a **trusted caller dependency**. Source strings,
+structured DTO fields or booleans cannot authenticate it. Its record must bind
+exact run/authorization/candidate/helper/service pins/T0/identities/history and
+applicable owner authority, original expiry, current revocation epoch, guard
+health, zero unknown creates/nonces and the exact narrow protected-staging/
+frozen-helper/stdin-credential scopes. Known consumed IDs reject. No function
+here mints a permit, refreshes owner authority or queries a provider/secret API.
+
+The checker is consulted before hashes, immediately before launch, before every
+stdin write and while idle. Epoch rollback, revocation, stale/missing facts,
+timeout or original expiry stop the owned process. The real deadline is fixed
+at the earliest originalDBT0+1800 / authority / initial permit expiry; new cached
+records cannot extend it. There is no default activation, hidden switch or CLI.
+
+The current engineering assumptions are10 s maximum checkpoint age,2 s maximum
+checker callback and1 s idle polling. They are NOT owner/Decision requirements
+or a measured production SLA. Ten seconds allows several-second canonical
+readbacks more room than the rejected1 s assumption; the approximate worst idle
+stale-detection+stop bound is10+1+2+2=15 s, always capped by original expiry.
+This is not instantaneous revocation. The independent Operations guard and its
+actual account/lease limits remain authoritative regardless of client timing.
+
+A concrete future integration would have the existing sole authorized executor
+obtain canonical owner/guard readbacks outside Node REPL callbacks, verify them,
+and update one typed in-memory checkpoint in the already-owned session. A small
+checker closure would only read/validate that cached checkpoint, without MCP or
+network access inside the callback. Facts retain their ORIGINAL observed
+timestamp: receiving/reading the cache or continuing a chat must never re-stamp
+them as fresh. An upstream readback taking3–5 s leaves only5–7 s of the proposed
+age budget; update cadence/latency and revocation delivery need measurement
+before live readiness, with no new accounts merely to discover latency failure.
+Failure to maintain the cache closes the process; no retry/lease/quota renewal.
+
+**No such authenticated checkpoint publisher/checker bridge is implemented or
+operationally verified in this batch.** MCP reads cannot run automatically inside
+the Node callback. The wrapper is therefore PREPARED source, not an executable
+live plan or secret-channel approval. A future approved integration must also
+deliver revocation/abort and independently validate cleanup. No extra automation,
+resource, direct secret/API shortcut or fabricated freshness is authorized here.
+
+### Pipe ownership, secret handling and failure closure
+
+`OwnedStdioTransport` is a bounded stream adapter; its injected-child interface
+is used by offline stream fixtures and cannot choose/launch a target. Only the
+two fixed factories create processes. An error observer (which discards the
+exception) AND independent close observer attach immediately after spawn,
+before constructors/awaits. Any later setup failure stops and observes that child
+even when the transport constructor did not return. Deferred stop cannot claim
+true merely because an engine is absent after spawn. A deterministic native
+setup_failure fixture and asynchronous fake-owned error regression cover this.
+Spawn attempted, actual PID, error observation, stdout EOF, process exit and
+close are distinct; a kill return or stream EOF alone is never close proof.
+
+The accepted collector owns configuration and passes it only memory→owned stdin.
+No password/key goes to argv, environment, temporary file, stderr, snapshot,
+receipt or debug method. Writes cap at16KiB, serialize one at a time and require
+both completion callback and drain when backpressured. Abort/error/timeout
+removes pending listeners, discards local references, destroys stdin on forced
+stop, and waits at most2 s for observed close. Node/OS buffers and caller-owned
+objects are not physically erased; a future channel still needs explicit owner
+acceptance of its actual retention/logging. No current secrets are discovered.
+
+Stdout is bounded by64KiB total ingress,64KiB queued bytes and256 chunks; high-bit
+bytes reject before decoding. Stderr is drained without retaining text. Unknown
+stdout/echo/CSI is handled by the frozen strict collector/parser, not stripped
+or searched for nested JSON. Receipts expose counters/fixed codes/owned PID only,
+with no raw chunk or upstream exception. Read/write concurrency and errors fence
+the process. Closed pipes report zero/nonzero exit only after the actual child
+close event; exit and stdout-end observations are tracked separately. Stop is
+idempotent; unconfirmed close is never success.
+
+Native child kill/EOF is **not account ban, logout, revocation or cleanup**.
+Collector cleanup intent remains set and processEvidence.accountCleanupVerified
+remains false. Parent timers do not survive parent/kernel death; the public child
+has its own20 s watchdog, while the frozen real helper has its own configuration/
+original-deadline watchdogs. Actual account cleanup still belongs exclusively to
+the independent existing Operations guard, including after executor death/expiry.
+
+### Fixed public child and actual two-call proof
+
+`fill_uat_synthetic_wire_child.mjs` has no network/live-helper import. It accepts
+ONLY exact canonical public predetermined configure/command DTOs; passwords/key/
+run/user substitutions, duplicate-key JSON, URLs and arbitrary input reject.
+Values are public SYNTHETIC_SENTINEL/zero UUID fixtures. Replies use the genuine
+plain six-key JSONL wire, without invented FMC frames/nonces. Nineteen finite
+scenarios cover normal/fragmented/CRLF/SGR, faults and deterministic setup error.
+Its CLI is inert on import and its independent watchdog is20 s.
+
+`createSentinelCollector()` fixes this child/path/executable and provides only
+the accepted collector, a safe process snapshot and finite forward MODEL-age
+advancement. It has an immutable REAL monotonic lifetime of at most18 s, separate
+from the collector's fixed2030 fictional T0/expiry. It accepts no arbitrary
+credential/config/path/executable/environment override. The public child does
+not supply a real canary/CTO verdict or open the collector's independent gate.
+
+Actual persistent Node REPL proof, ONE child across TWO separate tool calls:
+2026-11-01 **03:50:36.488–03:50:40.731 UTC /4,243 ms**, same PID20716. Call1
+read ready/configure/canary login/own_today/foreign_today (five records,
+ordinals1..5). Call2 advanced only MODEL ages130/131, read retained/fresh denial
+(two records, ordinals6..7), then closed stdin. All responses remained
+RESPONSE_COMPLETE_UNFENCED with boundaryVerified=false/grantsOwnerGo=false.
+The REAL deadline18252.5484 stayed unchanged; MODEL original expiry remained
+2030-01-01T00:30:00.000Z. Separate close returned
+PROCESS_CLOSED_UNAUTHENTICATED; stdoutEOF/exit/close were observed, exit0,
+stopConfirmed=true, queue0/writeInFlight=false. accountCleanupVerified=false,
+actualHelperLaunched=false, hostedAcceptance=false. Only safe metadata printed.
+
+Probe-bound source SHA256 (scripts unchanged after proof):
+
+- Transport: `831b3e2d460390cb194e956499e2e3567c0185f2fe6a2e7ecc7c1926abd504cf`.
+- Public child: `a41f6cc6b99e75d12d91bf4be144185dfe91e87606e0c861fd8cb9f80a3644d8`.
+- Frozen collector: `4751a40941ddb9379e6d7efc96f6b8e207fc3aa7d45d9e1965c623cb891cad04`.
+
+Earlier interim transport6fbb1dce… had a6,601 ms Work probe and an independent
+314 ms CTO probe, both successfully closed. A subsequent cold future-launch
+change bounded fixed-file hashing, so those remain interim evidence. After32
+affected tests passed, the documented reset cleared the closed REPL/module cache
+and the final two-call probe above bound the final831b3e2d… bytes. No real helper,
+current secret, account or unchanged-source retry was involved.
+
+The32 new tests pass locally, including all finite native scenarios/observed
+teardown, backpressure, buffers, callbacks, early setup errors, deadlines, idle
+revocation/expiry, missing/stale/consumed permits, cached timestamps and no live
+factory invocation. Twelve existing deploy/CI gates also passed in the affected
+checks. Both existing CI jobs explicitly run the new suite on the exact head.
+These are transport/code checks; the REAL path remains uninvoked/unverified.
+
+### Remaining activation prerequisites
+
+CTO must review this exact transport/hash, actual cached-checkpoint integration
+and measured latency/revocation behavior, trusted host/dependency assumptions,
+private stdin/log retention, and real interpreter/helper compatibility before
+calling the future live factory. Separately applicable owner authority must
+cover exact environment/candidate/helper/transport, secret handling and a new
+fictional identity budget; the original budget remains CONSUMED and all13
+historical identities preserved banned. This batch requests no GO/quota.
+
+Future execution still requires current protected preview/Operations/Core/
+Supabase pins, independently healthy sole cleanup guard, known identities/counts
+and settled nonces, immutable originalDBT0/expiry and canary proof before the
+independent CTO verdict/operators. Missing proof/revocation/ambiguity aborts;
+account cleanup/readback continues independently even after expiry, preserving
+timing FAIL separately from eventual cleanup PASS. Nothing here is hosted F1 or
+MVP/pilot acceptance. No production/public/provider/customer/booking/hold/pay/
+paid/outreach action or new infrastructure is authorized. `PUBLIC_GO=false`.
