@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { SyntheticSessionReadout, createSyntheticSession, MAX_SESSION_BYTES } from '../scripts/fill_uat_session_transport.mjs';
 import { EVENTS, PHASES, SCENARIOS, WATCHDOG_MS, frame } from '../scripts/fill_uat_synthetic_session.mjs';
 
@@ -268,7 +269,9 @@ test('source boundaries and frozen protocol hashes remain explicit; both CI jobs
     assert.doesNotMatch(source, /from ['"](?:node:)?(?:https?|net|tls|dns)|fetch\s*\(|\.work\/|service_role|FILL_UAT_ADMIN_KEY|clipboard|CDP/);
   }
   assert.match(transport, /shell: false, windowsHide: true/);
-  assert.match(transport, /env: process\.platform === 'win32'.*SystemRoot/);
+  assert.match(transport, /env: typeof process !== 'undefined' && process\.platform === 'win32'.*SystemRoot/);
+  assert.match(transport, /const executable = typeof process !== 'undefined' \? process\.execPath : 'node';/);
+  assert.match(producer, /if \(typeof process !== 'undefined' && process\.argv\[1\]/);
   assert.equal(WATCHDOG_MS, 20_000); assert.equal(SCENARIOS.length, 16);
   const hashes = { 'fill_uat_safe_events.mjs': 'f4dd8fef0f3088eceb4043b0ddbaa48e08fd2508c6200aea7c41fe5f0281cb5a',
     'fill_uat_transport.mjs': '5f9d17745e17fa5fee4c38a8e631525a93784eceaf184607151b2c4dc464a844' };
@@ -278,4 +281,20 @@ test('source boundaries and frozen protocol hashes remain explicit; both CI jobs
   const workflow = await readFile(new URL('../../.github/workflows/platform-ci.yml', import.meta.url), 'utf8');
   assert.equal(workflow.split('node --test platform/tests/fill_uat_session_transport_contract.test.mjs').length - 1, 2);
   assert.equal(workflow.split('ref: ${{ github.event.pull_request.head.sha || github.sha }}').length - 1, 2);
+});
+
+test('both modules import inertly when global process is absent, without launching a child', async () => {
+  // Fixed source-only import driver, not a second transport/executable variant.
+  const source = `globalThis.process = undefined;
+    const m = await import(${JSON.stringify(new URL('../scripts/fill_uat_session_transport.mjs', import.meta.url).href)});
+    if (typeof m.createSyntheticSession !== 'function') throw Error('IMPORT_FAILED');`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+    shell: false, windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'],
+    env: process.platform === 'win32' && process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {},
+  });
+  const code = await new Promise(resolve => {
+    const timer = setTimeout(() => { child.kill(); }, 2000);
+    child.once('close', value => { clearTimeout(timer); resolve(value); });
+  });
+  assert.equal(code, 0);
 });

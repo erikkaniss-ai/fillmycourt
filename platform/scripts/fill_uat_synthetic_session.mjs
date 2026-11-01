@@ -81,7 +81,7 @@ async function producer(scenario) {
 }
 
 const self = fileURLToPath(import.meta.url);
-if (process.argv[1] && resolve(process.argv[1]) === self) {
+if (typeof process !== 'undefined' && process.argv[1] && resolve(process.argv[1]) === self) {
   if (process.argv.length === 3 && SCENARIOS.includes(process.argv[2])) await producer(process.argv[2]);
   else process.exitCode = 64;
 }

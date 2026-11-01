@@ -184,9 +184,12 @@ export function createSyntheticSession(scenario = 'normal', options) {
   if (options !== undefined && (!options || Object.getPrototypeOf(options) !== Object.prototype ||
       Object.keys(options).some(key => !['lifetimeMs', 'phaseMs', 'stopMs'].includes(key)))) reject('INVALID_OPTIONS');
   timings(options?.lifetimeMs ?? 16_000, options?.phaseMs ?? 3_000, options?.stopMs ?? 1_000);
-  const child = spawn(process.execPath, [fileURLToPath(new URL('./fill_uat_synthetic_session.mjs', import.meta.url)), scenario], {
+  // The persistent tool has no global process. CTO-approved fallback is ONLY
+  // the fixed executable name, never a guessed path or caller-provided command.
+  const executable = typeof process !== 'undefined' ? process.execPath : 'node';
+  const child = spawn(executable, [fileURLToPath(new URL('./fill_uat_synthetic_session.mjs', import.meta.url)), scenario], {
     shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-    env: process.platform === 'win32' && process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {},
+    env: typeof process !== 'undefined' && process.platform === 'win32' && process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {},
   });
   let closed = false, stopping = false, pending, bytes = 0, fatalObserver, outputObserver, exitObserver;
   const queue = []; let resolveClose;

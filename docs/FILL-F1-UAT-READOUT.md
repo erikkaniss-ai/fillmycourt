@@ -195,7 +195,11 @@ It accepts no executable, path, URL, environment, user/run configuration or
 arbitrary command override. The factory accepts only bounded integer timing
 options. It uses documented Node `child_process.spawn` pipes, `shell:false`,
 `windowsHide:true`, and no parent environment except noncredential Windows
-`SystemRoot`. Stderr is drained without retaining text and immediately aborts
+`SystemRoot` when an ordinary Node global process exists. Otherwise the factory
+uses only the CTO-approved fixed executable name `node` and empty environment;
+the inert producer import guards its CLI entry against an absent global process.
+There is no process import, derived executable path or caller command override.
+Stderr is drained without retaining text and immediately aborts
 the session. PID is exposed only as synthetic process-identity evidence.
 
 One child serves the fixed sequence `configure`, `positive`, `negative`,
@@ -254,7 +258,7 @@ phase receipt, and that receipt never asserts session/authenticated closure.
 
 ### Tests and actual-tool compatibility boundary
 
-The new suite has 32 tests. A normal native child completes all five phases with
+The new suite has 33 tests. A normal native child completes all five phases with
 the same PID/correlation ID and no echoed input accepted. Fifteen fixed fault
 scenarios cover echo, stderr, wrong correlation/phase, duplicate records, early
 EOF, nonzero exit, missing end, overflow, replay, unverified outcome, forbidden
@@ -272,9 +276,10 @@ node --test platform/tests/fill_uat_session_transport_contract.test.mjs
 
 The new suite runs explicitly in both existing Platform CI jobs, preserving the
 exact-head checkout settings. Local affected suites plus frozen parser/one-shot
-and deployment/CI gate regressions passed **78/78**, with no skips. Only the
-new suite needs repetition after a new session-test change; full required CI is
-run once on the final source candidate.
+and deployment/CI gate regressions initially passed **78/78**, with no skips.
+After the CTO-approved portability correction, the affected suite passed 33/33,
+including a new inert-import test with global process absent. The other 46
+regressions remain unchanged; the final full CI tests all required gates once.
 
 Actual persistent-tool probe on 1 November 2026:
 
@@ -282,21 +287,45 @@ Actual persistent-tool probe on 1 November 2026:
    dynamic imports of `node:fs/promises`, `node:url` and `node:child_process`
    succeeded. Documentation explicitly says `node:process` import is unavailable;
    the absence of a global `process` was observed in the next step.
-2. The first session probe failed while dynamically importing the source module:
+2. The initial candidate `35818bc628f48c36afa79a68f2c44f5377165358` failed
+   its first session probe while dynamically importing the source module:
    **`process is not defined`** at its producer's main-entry guard. Import did
    not complete; `createSyntheticSession()` was never called, no child was
    launched and no phase command was sent. This is the tool's observed error,
    not an automatic approval rejection or proof that a spawn was attempted.
-3. Per the CTO plan, that probe was stopped. No alternate process import,
-   executable derivation, terminal/security setting, hidden bridge, installation
-   or permission workaround was attempted. No raw producer output existed.
+3. That initial probe was stopped and reported. CTO reviewed the source and
+   identified an ordinary portability bug before the advertised spawn API was
+   reached, not a capability denial. CTO expressly authorized only the guarded
+   CLI entry and fixed `node` / empty-environment fallback described above, plus
+   one revised synthetic probe after tests/hash binding. No process import,
+   guessed executable path, hidden API, terminal/security change, installation
+   or permission workaround was used. The documented REPL reset cleared the
+   initial failed-import cache before the revised import.
+4. **One revised child successfully spanned two separate persistent Node REPL
+   tool calls**, 2026-11-01 02:49:13.064–02:49:18.472 UTC (5,409 ms).
+   The same PID `632` and synthetic correlation ID
+   `f11776bc92a863932f7860261a14f28d` appeared throughout; the original absolute
+   deadline stayed unchanged. Call 1 completed configure (2 records) and positive
+   (3) while the child remained open. Call 2 completed negative (2), operator
+   simulation (4) and close (1). The first four phases were complete/OK. Close
+   was complete/UNVERIFIED_EVENTS, not OK, because the frozen terminal event is
+   intentionally false; explicit zero exit/EOF and observed process closure plus
+   stop confirmation established teardown. Only safe metadata was printed, never
+   raw chunks or producer input echo. The strict full-stream parser accepted
+   records/boundaries without unknown input echo.
 
-Therefore **two-call persistent-tool no-echo acceptance is NOT ESTABLISHED**.
-Ordinary Node child PIPE tests establish only their own source contract. Prior
-direct execution-tool PIPE and TTY observations remain separate and unchanged;
-none proves this persistent tool or compatibility with the frozen hosted helper.
+The successful revised probe is bound to these unchanged source SHA256 values:
+
+- Session transport: `b109240103236948afb57e43be2707bd0010b1f126337b178c65fbce4c9e54b0`.
+- Fixed producer: `bc1da8a5afb2aeda3ecd9bb5b48fa63a364790424cba6c3510a09eee842ada40`.
+- Frozen parser: `f4dd8fef0f3088eceb4043b0ddbaa48e08fd2508c6200aea7c41fe5f0281cb5a`.
+
+This establishes only the **synthetic multi-phase no-echo channel contract on
+this persistent tool surface**. Ordinary Node child PIPE tests, earlier direct
+execution-tool PIPE and TTY observations remain distinct. No result establishes
+compatibility with the frozen hosted helper, safe secret transfer, authenticated
+closure, hosted F1 acceptance or pilot readiness. A separate reviewed live
+adapter/authority would still be needed; none is implemented or requested here.
 The historical run cause stays UNKNOWN and its authority stays consumed, with
 all thirteen prior identities blocked. No Auth/staging/helper/account/credential
-operation or new UAT/quota request belongs to SESSION-03. The remaining gate is
-a documented, supported actual-tool capability reviewed by CTO; this batch does
-not implement a substitute credential transport. `PUBLIC_GO=false`.
+operation or new UAT/quota request belongs to SESSION-03. `PUBLIC_GO=false`.
