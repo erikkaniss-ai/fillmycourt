@@ -11,4 +11,6 @@ test('actual public controller: guarded startup, both operator activations, term
   assert.equal(r.budgetFactsUnchanged, true);
   assert.equal(r.bindingReceiptTiming[0].result,'BIND_WITH_ORIGINAL_ACTION_WINDOWS');
   assert.equal(r.bindingReceiptTiming.filter(x=>x.result==='DENY_NO_FACTORY').length,4);
+  assert.deepEqual(r.clockWaitCases.map(x=>x.result),['REAL_WAIT_ORIGINAL_TIMESTAMP','REAL_WAIT_ORIGINAL_TIMESTAMP','DENY_NO_FACTORY','DENY_NO_FACTORY','DENY_NO_FACTORY','DENY_NO_FACTORY']);
+  assert.ok(r.clockWaitCases.every(x=>x.originalTimestampUnchanged));
 });

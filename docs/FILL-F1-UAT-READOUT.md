@@ -1308,3 +1308,45 @@ fence. These are synthetic source/control proofs, not real SQL/hosted UAT.
 Fresh exact-head CI and superseding flow hashes are recorded in the canonical
 handback pair; no unchanged a54a46f workflow is rerun. New runtime authority
 remains unspent throughout this source-only correction.
+
+### Measured pre-account clock finding and bounded real-time wait
+
+Root accepted source ee2cf21 in PR8 comment6555027303. The ONE permitted
+CLOSED no-authority known16/old4c query4114ab3e... then ran once: transport
+PASS, SQL4503ms, DB observation2026-11-01T07:37:11.368524Z, cleanupPASS/all16
+long-banned/active0/unknown0/unsettled0. Host/cache closed, owned timers0 and
+RPCpending0; no private input, intent, T0, Auth or helper. This is CLOSED
+transport/cleanup evidence, not an active permit or F1 acceptance.
+
+The actual decoder wall was about54.5ms behind that original DB observation.
+The strict mapper therefore included STALE_DB_OBSERVATION among its expected
+CLOSED DENY reasons. A finite V8-to-Node bracket measured Node time within
+[-39,+17]ms relative to the request endpoints; no clock was shifted. New
+private input was held. No second SQL probe or timestamp restamp was used.
+
+Before active controller validation, a future stamp of at most200ms may wait
+ceil(gap)+2ms in the actual verifier. The SAME original observed_at is used
+after time genuinely advances. Both postconditions are mandatory: the verifier
+wall is now at or past that original stamp, and measured real monotonic wait
+is at most250ms. The wait must already fit the remaining original6s read
+budget; start times are never reset. It consumes at most250ms of the unchanged
+2s active RPC; transport/processing must still fit the remainder. Neither
+DB10s freshness, guard45s, first-receipt72s, backend60s actions, positives120s,
+denials180s nor the original30min run is extended. No future-time tolerance
+or ALLOW is added to the mapper/cache; code still rejects a future timestamp.
+
+Public actual-controller cases cover discovery and typed checkpoint+55ms
+stamps becoming genuinely past with the original checked_at retained, future
+201ms rejected, insufficient remaining read budget rejected without waiting,
+a clock that does not advance rejected, and stop during the wait rejected
+without creating a new binding/cache/factory. Diagnostic host code and the
+already-consumed closed SQL read are not retried. Root review of the affected
+source/caller bytes plus new exact-head CI is required before private input;
+the one-attempt/max3 authority remains unconsumed during this correction.
+
+Unaffected actual readiness: Chrome's existing protected ed0 alias displayed
+the anonymous operator sign-in form and Netlify Private status; its visible
+preview-build.json contained the exact ed0 full SHA/siteid/PR8/fixture-only
+manifest. An independent no-cookie HTTPS GET returned401. Existing helper,
+venv interpreter/config and base-interpreter hashes matched their frozen pins.
+No old account was logged in/unbanned; no admin/service-role value was read.

@@ -37,7 +37,7 @@ export async function installFillNode(scope, offline) {
   let binding, authority, owner, plan, relay, cache, child, task, receipt, lastSnapshot, checkpoint, proof, cleanupRelay;
   let phase = 'DISCOVERY', stopped = false, launched = false, currentCommand, next = 0, canarySent = false, cleanupRequested = false;
   historical.push('70e38a5b-a980-4b1a-8a62-e7478fcb8b08','9e30235b-9ddf-4a7f-83dc-1aa95bd56c0b','b3ab3f9d-b94c-456c-84f0-35181e0ec224');
-  let cutoff = wall() + 300000, startWall, startMono, closedProof = null, outcome='PENDING', childAbortTask, positiveReady=false,controlFailure=null,operatorAdmissionWaiting=false,operatorsReady=false,rootAccepted=null;
+  let cutoff = wall() + 300000, startWall, startMono, closedProof = null, outcome='PENDING', childAbortTask, positiveReady=false,controlFailure=null,operatorAdmissionWaiting=false,operatorsReady=false,rootAccepted=null,clockWait=null;
   const observations = [], canary = [
     { op: 'login', label: 'canary' }, { op: 'get', label: 'canary', route: 'own_today' }, { op: 'get', label: 'canary', route: 'foreign_today' }
   ];
@@ -201,6 +201,17 @@ export async function installFillNode(scope, offline) {
     async complete(ticket, raw) {
       try {
         must(monotonic()-startMono<=6000 && Math.abs((wall()-startWall)-(monotonic()-startMono))<=2000);
+        const originalObservedAt=b.decodeReadback(raw).observed_at,observed=v.instant(originalObservedAt),gap=observed-wall();
+        if(gap>0){
+          const requestedMs=Math.ceil(gap)+2,remaining=6000-(monotonic()-startMono);
+          clockWait={originalObservedAt,requestedMs,elapsedMs:0,code:gap>200?'FUTURE_WAIT_LIMIT':requestedMs>remaining?'READ_BUDGET':'WAITING'};
+          must(gap<=200&&requestedMs<=remaining);
+          const started=monotonic();await new Promise(resolve=>setTimeout(resolve,requestedMs));clockWait.elapsedMs=monotonic()-started;
+          clockWait.code='CLOCK_NOT_CONFIRMED';
+          must(clockWait.elapsedMs>=0&&clockWait.elapsedMs<=250&&wall()>=observed&&monotonic()-startMono<=6000&&Math.abs((wall()-startWall)-(monotonic()-startMono))<=2000);
+          clockWait.code='PAST_VERIFIED';
+        }
+        must(!stopped||ticket.cleanupOnly===true);
         if(ticket.discovery) adopt(raw);
         else {
           lastSnapshot=b.validateSnapshot(raw,plan);
@@ -234,7 +245,7 @@ export async function installFillNode(scope, offline) {
       } catch { controlFailure={stage:'ROOT_RECEIPT',code:'ROOT_GATE_REJECTED'};kill(); }
       return this.status();
     },
-    status() { return {phase,outcome,cutoff,positiveReady,operatorsReady,operatorAdmissionWaiting,lastPermitDbObservedAt:cache?.snapshot.lastDbObservedAt??null,controlFailure,offlinePublicData:offline!==undefined,grantsOwnerGo:false,discovery:!binding,stopped,taskPending:!!task&&!receipt,canaryRequest:phase==='WAIT_CTO'&&proof&&!canarySent?(canarySent=true,{proof,lease_digest:owner.lease_digest}):null,
+    status() { return {phase,outcome,cutoff,positiveReady,operatorsReady,operatorAdmissionWaiting,lastPermitDbObservedAt:cache?.snapshot.lastDbObservedAt??null,clockWait,controlFailure,offlinePublicData:offline!==undefined,grantsOwnerGo:false,discovery:!binding,stopped,taskPending:!!task&&!receipt,canaryRequest:phase==='WAIT_CTO'&&proof&&!canarySent?(canarySent=true,{proof,lease_digest:owner.lease_digest}):null,
       rootEvidenceRef:phase==='WAIT_CTO'&&checkpoint?.operatorGateEligible?lastSnapshot.intent.verdict_evidence_ref:null,
       cleanupRequest:stopped&&!cleanupRequested?(cleanupRequested=true,{run_id:scope.run_id,authorization_id:scope.authorization_id}):null,
       cleanup:checkpoint?.cleanup??'UNKNOWN',lastDbObservedAt:checkpoint?.dbObservedAt??null,knownBanCount:checkpoint?.knownBanCount??null,observations,closedProof}; },
@@ -302,6 +313,22 @@ export async function validatePublicTransitions() {
   const waiting=await incomplete.driver.complete(incomplete.driver.begin(),[{snapshot:incomplete.discovery}]);assert.equal(waiting.phase,'DISCOVERY');assert.equal(waiting.stopped,false);assert.equal(incomplete.counts().launches,0);await incomplete.driver.stop();assert.equal(incomplete.inputsCleared(),true);assert.equal(incomplete.unspentFactsPreserved(),true);
   const beforeDiscovery=await model();await beforeDiscovery.driver.stop();assert.equal(beforeDiscovery.inputsCleared(),true);assert.equal(beforeDiscovery.unspentFactsPreserved(),true);assert.equal(beforeDiscovery.counts().launches,0);
   const timedDiscovery=await model(),timedTicket=timedDiscovery.driver.begin();timedDiscovery.advance(37);const timedStatus=await timedDiscovery.driver.complete(timedTicket,[{snapshot:timedDiscovery.discovery}]);assert.equal(timedStatus.stopped,true);assert.equal(timedDiscovery.inputsCleared(),true);assert.equal(timedDiscovery.unspentFactsPreserved(),true);assert.equal(timedDiscovery.counts().launches,0);await timedDiscovery.driver.stop();
+  const clockWaitCases=[];
+  for(const kind of ['discovery-future55','typed-future55','future201','read-budget','clock-not-advancing','stopped-during-wait']){
+    const m=await model();let ticket,s;
+    if(kind==='typed-future55')ticket=await m.adopt();else ticket=m.driver.begin();
+    s=kind==='typed-future55'?m.snapshot(ticket):structuredClone(m.discovery);
+    s.observed_at=at(kind==='future201'?30.201:kind==='read-budget'?36.035:30.055);
+    const originalObservedAt=s.observed_at;if(kind==='read-budget')m.advance(35.98);
+    let timer;if(['discovery-future55','typed-future55','stopped-during-wait'].includes(kind))timer=setTimeout(()=>{m.advance(30.06);if(kind==='stopped-during-wait')m.driver.requestStop();},55);
+    let result;try{result=await m.driver.complete(ticket,[{snapshot:s}]);}finally{clearTimeout(timer);}
+    assert.equal(s.observed_at,originalObservedAt);
+    if(['discovery-future55','typed-future55'].includes(kind)){
+      assert.equal(result.stopped,false);assert.equal(result.clockWait.code,'PAST_VERIFIED');assert.equal(result.clockWait.originalObservedAt,originalObservedAt);assert.equal(result.clockWait.requestedMs,57);
+      if(kind==='typed-future55'){assert.equal(result.lastDbObservedAt,originalObservedAt);m.driver.requestStop();m.release();}
+    }else{assert.equal(result.stopped,true);assert.equal(m.counts().launches,0);if(kind!=='stopped-during-wait')assert.notEqual(result.clockWait.code,'PAST_VERIFIED');}
+    await m.driver.stop();clockWaitCases.push({kind,result:kind==='discovery-future55'||kind==='typed-future55'?'REAL_WAIT_ORIGINAL_TIMESTAMP':'DENY_NO_FACTORY',originalTimestampUnchanged:true});
+  }
   const bindingReceiptTiming=[];
   for(const kind of ['ontime-observed-after60','late-action','late-discovery','late-full-read','pending-after60']){
     const m=await model();m.advance(kind==='late-discovery'?73:61);
@@ -373,7 +400,7 @@ export async function validatePublicTransitions() {
     for(let age=201;age<=285;age+=3){m.advance(age);t=m.driver.begin();s=await m.driver.complete(t,[{snapshot:passSnapshot(t)}]);await new Promise(r=>setTimeout(r,0));if(s.stopped)break;}
     assert.equal(m.gateCount(),1);assert.deepEqual(m.operatorLogins(),{a:1,b:1});assert.equal(s.outcome,'READS_COMPLETE');await m.driver.stop();operatorReadiness.push({scenario,result:'ONE_GATE_ONE_LOGIN_EACH',missingAndPendingNoEarlyUse:true,originalWindowPreserved:true});
   }
-  return{actualControllerOffline:'PASS',modelDate:'2030-01-01',discoveryToFirstCanonical:'PASS',noLaunchBeforeSnapshot:true,firstCanonicalDenyNoLaunch:true,operatorReadiness,bindingReceiptTiming,
+  return{actualControllerOffline:'PASS',modelDate:'2030-01-01',discoveryToFirstCanonical:'PASS',noLaunchBeforeSnapshot:true,firstCanonicalDenyNoLaunch:true,operatorReadiness,bindingReceiptTiming,clockWaitCases,
     stopDuringFactory:'PASS',factoryAfterFinalStop:'PASS',lateFakeChildrenAborted:2,lateReadyCalls:0,lateCloseObserved:2,incompleteDiscoveryNoLaunch:true,missingRealGoRejected:true,consumedAuthorityRejected:true,
     earlyInputReferencesCleared:['before-discovery-stop','incomplete-discovery-stop','discovery-read-timeout','canonical-deny-before-factory','invalid-authority','consumed-authority'],budgetFactsUnchanged:true,
     preReadyWaitNoFactory:waits,rootPublicationChronology:chronology,realNetworkCalls:0,actualProcessLaunches:0,grantsOwnerGo:false};
