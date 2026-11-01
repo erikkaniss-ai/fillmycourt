@@ -56,5 +56,9 @@ export function eventDemoFixtures(day){
       counts:{capacity:8,confirmed:8,remaining:0,unit:'teams',sourceProven:true},
       price:{amountMinor:6000,currency:'EUR',unit:'team',feesStatus:'additional'}})
   ];
-  return {records,now:clock};
+  const sources=[
+    {provider:'demo-alpha',state:'examples'}, {provider:'demo-beta',state:'examples'},
+    {provider:'demo-gamma',state:'offline'}, {provider:'demo-delta',state:'empty'}
+  ].map(source=>({...source,fictional:true,accessScope:'public',checkedAt:updated}));
+  return {records,sources,now:clock};
 }

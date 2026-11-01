@@ -38,6 +38,9 @@ def test_event_intents_are_explicit_demo_only_with_one_shared_map_and_safe_cta(b
     assert page.evaluate('window.eventProviderCalls')==[]
     page.get_by_role('button',name='Explore demo',exact=True).click()
     expect(page.locator('#offers .event-card')).to_have_count(10)
+    expect(page.locator('#sourceStatus .source')).to_have_count(4)
+    expect(page.locator('#sourceStatus')).to_contain_text('Offline fictional example')
+    expect(page.locator('#sourceStatus')).to_contain_text('Empty fictional response')
     expect(page.locator('[data-event-kind="start_open_match"]')).to_contain_text('0 / 4 people')
     expect(page.locator('[data-event-kind="start_open_match"]')).to_contain_text('€48.00 / event')
     expect(page.locator('[data-event-kind="player_needed"]')).to_contain_text('Time unconfirmed')

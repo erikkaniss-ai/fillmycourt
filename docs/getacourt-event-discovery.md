@@ -6,7 +6,7 @@ This source slice adds three discovery intentions to the existing `find.html`: c
 
 The default mode is Your sessions. Live event read/display rights are unverified, so event intentions display no real event data and make no provider request. Explore demo is an explicit opt-in. Every event card, marker and detail is labelled fictional; all event handoff buttons are focusable but `aria-disabled`, with no navigation, application, registration or payment effect. Demo source URLs use reserved `.invalid` hosts. No real event feed, provider session, roster, source grant or registration outcome is claimed.
 
-`event-discovery.mjs` is a pure, PII-free projection. It only admits fictional records from the two named demo sources. REAL mode fails closed even if an input claims verified rights. Personal-scope fixtures require the matching opaque viewer scope; private and revoked records are not projected. No scope identifier or roster data is returned. Revocation and version selection precede projection so older records cannot resurrect a withdrawn event.
+`event-discovery.mjs` is a pure, PII-free projection. Event rows use two named demo sources; separate source-state fixtures demonstrate examples, offline and empty responses without hiding other sources. REAL mode fails closed even if an input claims verified rights. Personal-scope event fixtures require the matching opaque viewer scope; private and revoked records are not projected. Source-state fixtures admit public fictional scope only. No scope identifier or roster data is returned. Revocation and version selection precede event projection so older records cannot resurrect a withdrawn event.
 
 ## Semantics
 

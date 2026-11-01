@@ -3,7 +3,7 @@ import {validateQuery,localDay} from './federated-search.mjs';
 import './personal-source-observation.js';
 import {normalizePersonalObservation} from './personal-observation-bridge.mjs';
 import {createPlayerSearchView,demoOffers} from './player-search-view.mjs';
-import {projectEvents} from './event-discovery.mjs';
+import {projectEvents,projectEventSources} from './event-discovery.mjs';
 import {eventDemoFixtures} from './event-demo-fixtures.mjs';
 const byId=id=>document.getElementById(id);
 const form=byId('search'),status=byId('searchStatus'),personalStatus=byId('personalStatus');
@@ -14,7 +14,7 @@ date.max=new Date(Date.parse(today+'T00:00:00Z')+14*86400000).toISOString().slic
 let query=null,revision=0,pendingBridge=null,pendingAuto=null,autoAckTimer=null,autoResultTimer=null,timer=null,additionalPending=null,additionalTimer=null;
 const additionalStates=new Map();
 const observations=new Map();
-let mode='real',demoRows=[],intent='courts',eventRows=[],eventQuery=null;
+let mode='real',demoRows=[],intent='courts',eventRows=[],eventSourceRows=[],eventQuery=null;
 const make=(tag,label,cls)=>{const el=document.createElement(tag);if(label!==undefined)el.textContent=String(label);if(cls)el.className=cls;return el;};
 const allowed=()=>intent==='courts'&&mode==='real'&&Boolean(query);
 const view=createPlayerSearchView({onFilterChange:()=>paint()});
@@ -233,7 +233,7 @@ window.addEventListener('gac:additional-sources-response',event=>{
 
 function clearOffers(message){
   revision++;clearPending();cancelAuto();cancelAdditional();additionalStates.clear();clearTimeout(timer);timer=null;
-  observations.clear();demoRows=[];eventRows=[];eventQuery=null;payload.value='';
+  observations.clear();demoRows=[];eventRows=[];eventSourceRows=[];eventQuery=null;payload.value='';
   if(intent==='courts')view.render([],{mode});else view.renderEvents([],{mode,intent});
   personalStatus.textContent=message||'No personal offers imported.';
   renderSources();
@@ -250,6 +250,14 @@ function minute(value){
 }
 function renderSources(){
   sourcesHost.replaceChildren();
+  if(intent!=='courts'&&mode==='demo'){
+    for(const source of eventSourceRows){
+      const card=make('article',undefined,'source');
+      card.append(make('strong','FICTIONAL · '+source.name),make('small',source.message),
+        make('small','Scenario check: '+(source.checkedAt||'unknown')));sourcesHost.append(card);
+    }
+    return;
+  }
   const has=id=>[...observations.values()].some(record=>record.sourceId===id);
   const text=(id,initial)=>intent!=='courts'?(mode==='demo'?'Fictional event examples only · no live event source queried':
     'Live event read/display access unverified · no event request made'):mode==='demo'?'DEMO · No provider search; fictional examples only':has(id)?'Player-visible offer loaded · partial · expires shortly':
@@ -379,6 +387,7 @@ form.addEventListener('submit',event=>{
     eventQuery=next;
     if(mode==='demo'){
       const fixture=eventDemoFixtures(next.date);eventRows=projectEvents(fixture.records,{mode:'demo',now:fixture.now});
+      eventSourceRows=projectEventSources(fixture.sources,{mode:'demo'});
       const rating=byId('eventRating'),selected=rating.value,options=new Map();
       for(const row of eventRows)if(row.rating){const key=JSON.stringify([row.provider,row.rating.scheme,row.rating.level]);
         options.set(key,row.sourceName+' · '+row.rating.scheme+' · '+row.rating.level);}

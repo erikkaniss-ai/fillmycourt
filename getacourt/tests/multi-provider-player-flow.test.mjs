@@ -7,7 +7,7 @@ import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {normalizePersonalObservation} from "../assets/personal-observation-bridge.mjs";
 import {demoOffers,displayRows,distanceKm,originFor,TRUSTED_POSITION} from '../assets/player-search-view.mjs';
-import {projectEvents,filterEvents,groupEventVenues,eventPriceLabel,kindLabel} from '../assets/event-discovery.mjs';
+import {projectEvents,projectEventSources,filterEvents,groupEventVenues,eventPriceLabel,kindLabel} from '../assets/event-discovery.mjs';
 import {eventDemoFixtures} from '../assets/event-demo-fixtures.mjs';
 import {renderEventCards,eventTimeLabel} from '../assets/event-discovery-view.mjs';
 const require=createRequire(import.meta.url);
@@ -301,7 +301,7 @@ function pageRig(){
   node('budgetFilter').value=node('radiusFilter').value='any';node('offerSort').value='time';
   const context=vm.createContext({Date,URL,Intl,TextEncoder,Uint8Array,JSON,
     normalizePersonalObservation,validateQuery:value=>value,localDay:()=>date,
-    projectEvents,filterEvents,groupEventVenues,eventPriceLabel,kindLabel,eventDemoFixtures,renderEventCards,eventTimeLabel,
+    projectEvents,projectEventSources,filterEvents,groupEventVenues,eventPriceLabel,kindLabel,eventDemoFixtures,renderEventCards,eventTimeLabel,
     FormData:class extends Map {constructor(){super(Object.entries(pageQuery));}},
     crypto:{getRandomValues:array=>array.fill(++nonceByte)},
     setTimeout:(fn,delay)=>{timers.set(++nextTimer,{fn,delay});return nextTimer;},

@@ -2,7 +2,9 @@
 // A provider product feature is never an event read/display/join grant.
 export const DEMO_PROVIDERS=Object.freeze({
   'demo-alpha':Object.freeze({name:'Demo Source A',origin:'https://source-a.invalid'}),
-  'demo-beta':Object.freeze({name:'Demo Source B',origin:'https://source-b.invalid'})
+  'demo-beta':Object.freeze({name:'Demo Source B',origin:'https://source-b.invalid'}),
+  'demo-gamma':Object.freeze({name:'Demo Source C',origin:'https://source-c.invalid'}),
+  'demo-delta':Object.freeze({name:'Demo Source D',origin:'https://source-d.invalid'})
 });
 export const EVENT_KINDS=Object.freeze(['open_match','start_open_match','player_needed','tournament','mini_tournament']);
 const kinds=new Set(EVENT_KINDS), units=new Set(['person','pair','team','event']);
@@ -124,6 +126,28 @@ export function projectEvents(records,{mode='real',viewerScope=null,now=Date.now
   }
   // Dedupe/tombstones precede access projection: an older visible row cannot resurface after revocation.
   return [...latest.values()].map(raw=>normalize(raw,{viewerScope,now})).filter(Boolean);
+}
+export function projectEventSources(records,{mode='real'}={}){
+  if(mode!=='demo'||!Array.isArray(records))return [];
+  const latest=new Map(),sources=[];
+  const sourceRank=raw=>raw?.revoked===true||raw?.private===true||raw?.accessScope!=='public'?3:raw?.state==='offline'?2:raw?.state==='empty'?1:0;
+  for(const raw of records.slice(0,16)){
+    if(!raw||!Object.hasOwn(DEMO_PROVIDERS,raw.provider))continue;
+    const previous=latest.get(raw.provider);
+    const stamp=instant(raw.checkedAt)??-Infinity,previousStamp=instant(previous?.checkedAt)??-Infinity;
+    if(!previous||stamp>previousStamp||(stamp===previousStamp&&sourceRank(raw)>sourceRank(previous)))latest.set(raw.provider,raw);
+  }
+  for(const raw of latest.values()){
+    if(raw.fictional!==true||raw.accessScope!=='public'||raw.private===true||raw.revoked===true)continue;
+    const state=choice(raw.state,['examples','offline','empty'],'unknown');
+    const row=Object.freeze({provider:raw.provider,name:DEMO_PROVIDERS[raw.provider].name,state,
+      checkedAt:iso(raw.checkedAt),fictional:true,
+      message:state==='offline'?'Offline fictional example — other sources may still have events':
+        state==='empty'?'Empty fictional response — not a provider-wide sold-out claim':
+        state==='examples'?'Local fictional event examples — no live source was queried':'Fictional source state unknown'});
+    sources.push(row);
+  }
+  return sources;
 }
 const minute=t=>typeof t==='string'&&/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(t)?Number(t.slice(0,2))*60+Number(t.slice(3)):null;
 export function filterEvents(events,{intent='games',location='',sport='padel',date='',from='00:00',to='23:59',

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {projectEvents,filterEvents,groupEventVenues,safeEventUrl,localEventTime,validLocalDay,eventPriceLabel,eventActivity} from '../assets/event-discovery.mjs';
+import {projectEvents,projectEventSources,filterEvents,groupEventVenues,safeEventUrl,localEventTime,validLocalDay,eventPriceLabel,eventActivity} from '../assets/event-discovery.mjs';
 import {eventDemoFixtures} from '../assets/event-demo-fixtures.mjs';
 import {eventTimeLabel,eventCountLabel} from '../assets/event-discovery-view.mjs';
 const fixture=eventDemoFixtures('2026-11-01'),ctx={mode:'demo',now:fixture.now};
@@ -12,6 +12,20 @@ test('REAL event projection is closed even with claimed verified rights',()=>{
   assert.deepEqual(projectEvents(fixture.records,{mode:'real',now:fixture.now}),[]);
   assert.deepEqual(projectEvents([{...base,fictional:false}],ctx),[]);
   assert.deepEqual(project([{...base,provider:'playtomic',rights:{eventRead:'verified',redisplay:'verified'}}]),[]);
+});
+test('offline and empty fictional source states stay independent and cannot become a real feed',()=>{
+  const sources=projectEventSources(fixture.sources,{mode:'demo'});
+  assert.equal(sources.length,4);
+  assert.equal(sources.find(s=>s.provider==='demo-gamma').state,'offline');
+  assert.match(sources.find(s=>s.provider==='demo-gamma').message,/other sources may still have events/);
+  assert.match(sources.find(s=>s.provider==='demo-delta').message,/not a provider-wide sold-out/);
+  assert.equal(project(fixture.records).length,13);
+  assert.deepEqual(projectEventSources(fixture.sources,{mode:'real'}),[]);
+  assert.deepEqual(projectEventSources([{...fixture.sources[0],accessScope:'personal',viewerScope:'OTHER-USER'}],{mode:'demo'}),[]);
+  assert.deepEqual(projectEventSources([fixture.sources[0],{...fixture.sources[0],revoked:true,checkedAt:'2026-11-01T08:00:00Z'}],{mode:'demo'}),[]);
+  assert.deepEqual(projectEventSources([{...fixture.sources[0],revoked:true},{...fixture.sources[0],state:'offline'}],{mode:'demo'}),[]);
+  const sanitized=projectEventSources([{...fixture.sources[0],error:'SECRET',token:'SECRET'}],{mode:'demo'});
+  assert.doesNotMatch(JSON.stringify(sanitized),/SECRET|token|error/);
 });
 test('games, empty candidates and notices are different kinds with truthful uncertainty',()=>{
   const rows=project(fixture.records);
