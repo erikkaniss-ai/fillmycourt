@@ -69,6 +69,23 @@ loopback, database `fmc_test`, no URL query overrides and explicit fixture
 opt-in. Local runs use `FILL_SERVER_SNAPSHOT_FIXTURES=ci-local-only`; the
 existing GitHub `contract` job opts in for its disposable PostgreSQL service.
 
+The Today reader is also prepared as a source-only optimization. Its existing
+authenticated-role transaction setup remains three statements. Role and club
+metadata share one result statement; metrics, sellable windows, empty windows
+and organization finance share a second statement with common bucket CTEs.
+This reduces nine explicit successful-route SQL executions to five, excluding
+connection protocol, pool checks, Auth and fixture-guard work. It is not a
+measured hosted latency result or an explanation of a prior request timeout.
+The data statement also requires current membership under the same RLS scope;
+removed membership fails closed. Entry and final Auth/guard revalidation and
+buffered fixture delivery are unchanged. No successful-Auth/role cache exists.
+
+Complete responses/errors are compared with a frozen test-only accepted Today
+reference over identical synthetic data, including independent finance totals,
+split windows, rate priority, active courts without rates, DST and two-club RLS.
+No reference path is executed at runtime. New local PostgreSQL fixtures use
+`FILL_TODAY_SNAPSHOT_FIXTURES=ci-local-only` and the same strict target guard.
+
 A dedicated bounded read thread and separate stop thread avoid exhausting the
 guard's executor. They are threads inside the existing process, not services or
 OS child processes. Timeouts do not mean cancellation. Late jobs remain owned,
