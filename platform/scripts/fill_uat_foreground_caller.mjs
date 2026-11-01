@@ -193,4 +193,3 @@ export async function runFillForeground(tools, scope, prepared, io={wall:Date.no
   }
   return{state,failure,journalStop,rpc:await rpc.drain(500)};
 }
-
