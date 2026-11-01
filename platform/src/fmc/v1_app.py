@@ -26,6 +26,7 @@ from .provider_provenance_review import review_provider_provenance
 from .provider_provenance_preflight import operations_provenance_preflight
 from .fill_uat_guard import DeliveryGuard, from_environment as fill_guard_from_environment
 from .fill_today_read import read_today
+from .fill_import_preview import parse_people_csv
 
 
 ROLE_ADMIN = {"owner", "admin"}
@@ -1110,30 +1111,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
         def stage_import(org: str, body: ImportIn, request: Request):
             a = who(request)
             raw = body.csv
-            reader = csv.DictReader(io.StringIO(raw))
-            allowed = {"external_id", "name", "email", "phone", "marketing_consent"}
-            if not reader.fieldnames or not set(reader.fieldnames).issubset(allowed):
-                raise DomainError("CSV_HEADERS", "Use external_id,name,email,phone,marketing_consent headers.", 422)
-            staged, errors = [], []
-            seen = set()
-            for line, item in enumerate(reader, start=2):
-                row = {k: (v or "").strip() for k, v in item.items()}
-                if not any(row.values()):
-                    continue
-                key = row.get("external_id") or row.get("email").lower() or row.get("phone")
-                if not key:
-                    errors.append({"line": line, "error": "missing_identity"})
-                    continue
-                if key in seen:
-                    errors.append({"line": line, "error": "duplicate_in_file"})
-                    continue
-                seen.add(key)
-                consent = row.get("marketing_consent", "").lower()
-                if consent not in ("", "true", "false", "unknown"):
-                    errors.append({"line": line, "error": "invalid_marketing_consent"})
-                    continue
-                row["marketing_consent"] = None if consent in ("", "unknown") else consent == "true"
-                staged.append(row)
+            staged, errors = parse_people_csv(raw)
             fingerprint = hashlib.sha256(raw.encode()).hexdigest()
             with db.user(a.id) as c:
                 role(c, org, a, ROLE_MANAGER)
