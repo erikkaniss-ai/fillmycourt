@@ -1350,3 +1350,9 @@ preview-build.json contained the exact ed0 full SHA/siteid/PR8/fixture-only
 manifest. An independent no-cookie HTTPS GET returned401. Existing helper,
 venv interpreter/config and base-interpreter hashes matched their frozen pins.
 No old account was logged in/unbanned; no admin/service-role value was read.
+
+The actual Node REPL public probe also exposed a fixture-realm issue: its
+structuredClone object was rejected by the unchanged strict DTO prototype
+boundary before clock validation. Public discovery fixtures now use the same
+JSON roundtrip as the official connector; all six clock cases pass in that
+actual REPL. The DTO/prototype guard was preserved rather than relaxed.

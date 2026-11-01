@@ -317,13 +317,16 @@ export async function validatePublicTransitions() {
   for(const kind of ['discovery-future55','typed-future55','future201','read-budget','clock-not-advancing','stopped-during-wait']){
     const m=await model();let ticket,s;
     if(kind==='typed-future55')ticket=await m.adopt();else ticket=m.driver.begin();
-    s=kind==='typed-future55'?m.snapshot(ticket):structuredClone(m.discovery);
+    // Match the actual connector's JSON DTO boundary, including in Node REPL
+    // where structuredClone may return a different realm's Object prototype.
+    s=kind==='typed-future55'?m.snapshot(ticket):JSON.parse(JSON.stringify(m.discovery));
     s.observed_at=at(kind==='future201'?30.201:kind==='read-budget'?36.035:30.055);
     const originalObservedAt=s.observed_at;if(kind==='read-budget')m.advance(35.98);
     let timer;if(['discovery-future55','typed-future55','stopped-during-wait'].includes(kind))timer=setTimeout(()=>{m.advance(30.06);if(kind==='stopped-during-wait')m.driver.requestStop();},55);
     let result;try{result=await m.driver.complete(ticket,[{snapshot:s}]);}finally{clearTimeout(timer);}
     assert.equal(s.observed_at,originalObservedAt);
     if(['discovery-future55','typed-future55'].includes(kind)){
+      if(result.stopped){const e=Error('PUBLIC_CLOCK_WAIT_FAILED');e.publicClockCase=kind;e.publicClockCode=result.clockWait?.code;e.publicClockElapsed=result.clockWait?.elapsedMs;e.publicClockFailure=result.controlFailure?.code;throw e;}
       assert.equal(result.stopped,false);assert.equal(result.clockWait.code,'PAST_VERIFIED');assert.equal(result.clockWait.originalObservedAt,originalObservedAt);assert.equal(result.clockWait.requestedMs,57);
       if(kind==='typed-future55'){assert.equal(result.lastDbObservedAt,originalObservedAt);m.driver.requestStop();m.release();}
     }else{assert.equal(result.stopped,true);assert.equal(m.counts().launches,0);if(kind!=='stopped-during-wait')assert.notEqual(result.clockWait.code,'PAST_VERIFIED');}
