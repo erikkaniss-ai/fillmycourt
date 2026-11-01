@@ -163,8 +163,16 @@ launcher, secret handoff or live adaptation is implemented by this proposal.
 ## CI and publication boundary
 
 The two new test files are invoked explicitly in `Platform CI` fast-contracts
-(Node 22) and contract (runner-provided Node; no version claim). No trigger,
+(Node 22) and contract (runner-provided Node; no version claim). Both checkouts
+select `github.event.pull_request.head.sha || github.sha`, rather than the
+default PR merge-ref. A contract test covers both checkout settings. No trigger,
 permission, environment, secret, setup action or deployment step is changed.
+
+The initial source candidate `fdecb12e2652cc149e54011f908dc249da60e843` had a
+green Platform CI run 41265281660, but its default checkouts tested the PR merge
+commit (2504f04...), not that exact head. That result is historical merge-ref
+evidence only. The checkout correction requires a new final candidate and one
+full CI run whose decoded checkout logs match the actual final head in both jobs.
 
 Before any source push, verify unchanged exact-SHA deployment pins, Netlify
 repository/CD state, `[skip netlify]` title, and the existing private preview

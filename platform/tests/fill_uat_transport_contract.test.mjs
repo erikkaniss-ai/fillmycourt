@@ -161,3 +161,12 @@ test('source boundary: no network/helper launch or credential environment forwar
   assert.doesNotMatch(source, /fetch\s*\(|node:(?:https?|net|tls)|httpx|f1-readonly-validator|--hosted-owner-approved/);
   assert.doesNotMatch(source, /\.\.\.process\.env|env:\s*process\.env|console\.(?:log|error)\(.*(?:chunk|output|command)/);
 });
+
+test('both Platform CI checkouts test the actual PR head, with a push SHA fallback', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/platform-ci.yml', import.meta.url), 'utf8');
+  const checkouts = [...workflow.matchAll(/uses: actions\/checkout@v4([^]*?)(?=\n\s*- |$)/g)];
+  assert.equal(checkouts.length, 2);
+  for (const [, configuration] of checkouts) {
+    assert.match(configuration, /with:\s*\n\s*ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  }
+});
