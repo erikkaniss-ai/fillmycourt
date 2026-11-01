@@ -73,7 +73,7 @@ def test_event_intents_are_explicit_demo_only_with_one_shared_map_and_safe_cta(b
     expect(page.locator('[data-event-kind="player_needed"]')).to_have_count(0)
     page.locator('#eventUnscheduled').check()
     expect(page.locator('[data-event-kind="player_needed"]')).to_have_count(1)
-    page.locator('#offersHeading').scroll_into_view_if_needed()
+    page.locator('#offersHeading').evaluate('el => el.scrollIntoView({block:"start"})')
     page.screenshot(path=str(ARTIFACTS/f'event-games-{width}-FICTIONAL.png'),full_page=False)
     page.get_by_role('button',name='Tournaments & mini-tournaments',exact=True).click()
     expect(page.locator('#offers .event-card')).to_have_count(3)
@@ -81,7 +81,7 @@ def test_event_intents_are_explicit_demo_only_with_one_shared_map_and_safe_cta(b
     expect(page.locator('#offers')).to_contain_text('€30.00 / pair')
     assert page.get_by_role('heading',name='The friendly pairs cup',exact=True).count()==1
     assert_event_map_parity(page)
-    page.locator('#offersHeading').scroll_into_view_if_needed()
+    page.locator('#offersHeading').evaluate('el => el.scrollIntoView({block:"start"})')
     page.screenshot(path=str(ARTIFACTS/f'event-tournaments-{width}-FICTIONAL.png'),full_page=False)
     page.locator('[data-result-pin]').first.focus()
     page.keyboard.press('Enter')
@@ -126,7 +126,7 @@ def test_event_text_url_and_privacy_attack_fixture_cannot_create_links_markup_or
 def test_late_court_reader_reply_cannot_cross_into_an_event_intention(browser_page,fixture_url):
     page,context,forbidden,_=browser_page
     page.goto(fixture_url+'/find.html')
-    page.evaluate("""() => window.addEventListener('gac:auto-search-request',e=>window.oldCourtNonce=e.detail.nonce)""")
+    page.add_init_script("""window.addEventListener('gac:auto-search-request',e=>window.oldCourtNonce=e.detail.nonce)""")
     record=ready(page,context,fixture_url)
     nonce=page.evaluate('window.oldCourtNonce')
     assert nonce

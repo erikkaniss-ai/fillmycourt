@@ -7,6 +7,9 @@ import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {normalizePersonalObservation} from "../assets/personal-observation-bridge.mjs";
 import {demoOffers,displayRows,distanceKm,originFor,TRUSTED_POSITION} from '../assets/player-search-view.mjs';
+import {projectEvents,filterEvents,groupEventVenues,eventPriceLabel,kindLabel} from '../assets/event-discovery.mjs';
+import {eventDemoFixtures} from '../assets/event-demo-fixtures.mjs';
+import {renderEventCards,eventTimeLabel} from '../assets/event-discovery-view.mjs';
 const require=createRequire(import.meta.url);
 const validate=require("../assets/personal-source-observation.js").validateObservation;
 const base=new URL("../browser-companion/",import.meta.url);
@@ -279,24 +282,31 @@ test("no provider is searched without an explicit Get Find gesture, no repeated 
 // failed live path without accessing a real provider, extension or session.
 function pageRig(){
   const pageQuery={...q,location:'Cascais'},handlers={},posted=[],nodes=new Map(),timers=new Map();
+  const pageDocument={};
   let nextTimer=0,nonceByte=0;
-  const element=()=>({children:[],events:{},dataset:{},attributes:{},value:'',textContent:'',
+  const element=()=>({children:[],options:[],events:{},dataset:{},attributes:{},value:'',textContent:'',ownerDocument:pageDocument,
     classList:{toggle(){},add(){}},focus(){},scrollIntoView(){},
     setAttribute(name,value){this.attributes[name]=value;},
     append(...items){this.children.push(...items);},
-    replaceChildren(...items){this.children=items;},
+    replaceChildren(...items){this.children=items;this.options=[...items];},
+    add(item){this.options.push(item);this.children.push(item);},
+    querySelector:selector=>node('query:'+selector),
     addEventListener(name,fn){this.events[name]=fn;}});
   const node=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
+  Object.assign(pageDocument,{getElementById:node,createElement:element,
+    createTextNode:text=>({...element(),textContent:text}),documentElement:{dataset:{}},
+    querySelector:selector=>node('document:'+selector),addEventListener(){}});
   node('search').elements={namedItem:()=>node('date')};
   node('search').requestSubmit=()=>node('search').events.submit({preventDefault(){}});
   node('budgetFilter').value=node('radiusFilter').value='any';node('offerSort').value='time';
   const context=vm.createContext({Date,URL,Intl,TextEncoder,Uint8Array,JSON,
     normalizePersonalObservation,validateQuery:value=>value,localDay:()=>date,
+    projectEvents,filterEvents,groupEventVenues,eventPriceLabel,kindLabel,eventDemoFixtures,renderEventCards,eventTimeLabel,
     FormData:class extends Map {constructor(){super(Object.entries(pageQuery));}},
     crypto:{getRandomValues:array=>array.fill(++nonceByte)},
     setTimeout:(fn,delay)=>{timers.set(++nextTimer,{fn,delay});return nextTimer;},
     clearTimeout:id=>timers.delete(id),
-    document:{getElementById:node,createElement:element,createTextNode:text=>({...element(),textContent:text}),documentElement:{dataset:{}},addEventListener(){}},
+    document:pageDocument,
     Option:class{constructor(text,value){Object.assign(this,element(),{textContent:text,value});}},
     window:{addEventListener:(name,fn)=>handlers[name]=fn,dispatchEvent:event=>posted.push(event)},
     CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}},
@@ -304,7 +314,7 @@ function pageRig(){
   });
   const page=readFileSync(new URL('../assets/court-search-page.mjs',import.meta.url),'utf8');
   const view=readFileSync(new URL('../assets/player-search-view.mjs',import.meta.url),'utf8');
-  vm.runInContext(view.replace(/^export /gm,''),context);
+  vm.runInContext(view.replace(/^import .*;\r?$/gm,'').replace(/^export /gm,''),context);
   vm.runInContext(page.replace(/^import .*;\r?$/gm,''),context);
   const find=()=>{
     node('search').events.submit({preventDefault(){}});
@@ -332,6 +342,22 @@ test('demo mode cancels real nonces, dispatches no provider search and cannot ac
   p.respond(nonce,{status:'observed',version:'0.4.2',observation:pageObservation('playtomic')},'gac:auto-search-response');
   assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
   assert.equal(p.node('requestPersonalBridge').disabled,true);
+});
+
+test('event intention cancels court protocol state and remains source-free in REAL and DEMO',()=>{
+  const p=pageRig(),nonce=p.find(),before=p.posted.length;
+  p.node('intentGames').events.click();
+  assert.match(p.text('offers'),/Games are not connected yet/);
+  p.respond(nonce,{status:'observed',version:'0.4.2',observation:pageObservation('playtomic')},'gac:auto-search-response');
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  p.node('demoMode').events.click();
+  assert.match(p.text('offers'),/FICTIONAL DEMO/);
+  assert.match(p.text('offers'),/Start an open game/);
+  assert.equal(p.posted.length,before);
+  p.node('realMode').events.click();
+  assert.match(p.text('offers'),/Games are not connected yet/);
+  assert.doesNotMatch(p.text('offers'),/After-work|FICTIONAL compatible court/);
+  assert.equal(p.posted.length,before);
 });
 
 test('display model isolates fictional data, expires real rows, deduplicates and maps only reviewed venue/source pairs',()=>{

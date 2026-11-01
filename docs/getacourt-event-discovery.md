@@ -48,3 +48,5 @@ node getacourt/tests/browser-accessibility.mjs
 ```
 
 The existing federated CI run block includes the new event contracts and syntax checks. Existing browser/a11y entry points include event states; all external/provider requests are denied, and map background tiles are fulfilled with deterministic local images. Screenshots are actual local Chromium renders of fictional data, not live provider acceptance. No deploy, protected-preview placement, new-SHA approval marker or public release is authorized by these checks.
+
+The Get-specific federated, accessibility and offline-privacy workflows check out the exact pull-request head. Platform CI remains supplementary and may use its configured merge ref; its result is not relabelled as exact-head execution. Existing private-preview approval gates, workflow permissions and hosting configuration are unchanged.
