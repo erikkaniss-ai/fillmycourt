@@ -37,6 +37,8 @@ jobs:
           node --test platform/tests/fill_uat_safe_events.test.mjs platform/tests/fill_uat_transport_contract.test.mjs
           node --test platform/tests/fill_uat_session_transport_contract.test.mjs
           node --test platform/tests/fill_uat_helper_contract.test.mjs
+          node --test platform/tests/fill_uat_helper_collector.test.mjs
+          node --test platform/tests/fill_uat_evidence_verdict.test.mjs
           node --test platform/tests/fill_operator_demo_contract.test.mjs
           node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
   contract:
@@ -93,6 +95,10 @@ jobs:
         run: node --test platform/tests/fill_uat_session_transport_contract.test.mjs
       - name: Verify plain-wire synthetic helper contract (no live helper)
         run: node --test platform/tests/fill_uat_helper_contract.test.mjs
+      - name: Verify pure real-helper collector using injected fictional transports
+        run: node --test platform/tests/fill_uat_helper_collector.test.mjs
+      - name: Verify trusted-input evidence reduction and independent cleanup
+        run: node --test platform/tests/fill_uat_evidence_verdict.test.mjs
       - name: GetAcourt Netlify boundary contracts (no network / no writes)
         run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract

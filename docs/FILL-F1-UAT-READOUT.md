@@ -487,3 +487,193 @@ uninvoked frozen helper remain separate evidence classes.
    original absolute deadline, abort on missing proof, and report actual cleanup
    separately from F1 functionality. Production/public/provider/customer actions
    remain excluded. No future outcome is claimed here. `PUBLIC_GO=false`.
+
+## Real-helper collector preparation — COLLECTOR-05, 1 November 2026
+
+Batch `FILL-F1-COLLECTOR-05-20261101` starts at accepted
+`915bf0655e839e442f785cf239e0b7e543ed674f`, same PR #8 / Issue #9. All prior
+parser, transport, mock/model and helper files remain frozen. Only two new pure
+modules, their two test files, this document and two test invocations in each
+existing CI job are leased. Frozen helper SHA256 was checked read-only as
+`6ca033af474c21180652652c21ee6d4d4dafd16d379a4c11eb646d9ac9e53548`.
+It was never imported/launched; no launcher, real secret transport, Auth/network
+client, CLI, credential discovery, staging write or account operation is added.
+
+### Collector contract, configuration and secret lifetime
+
+`fill_uat_helper_collector.mjs` exports `HelperCollector`, constructed with an
+object containing `config`, `binding`, `authority`, an injected `transport`,
+injected numeric-millisecond `wall` / `monotonic` functions, and optional bounded
+response/stop limits. Its methods are `ready()`, `configure()`, `command(dto)`,
+`authorizeOperators(evidence,{trustedInput:true})`, `close()`, `abort()` and
+`clearSecrets()`. It is not a process launcher or a tool adapter.
+
+Unlike ADAPTER-04's intentionally invalid fixture factory, this collector checks
+and serializes the **actual supported configuration shape** for the frozen6ca
+helper: exact configure/plan/principal fields, approved helper hash, ed0 candidate,
+run/authorization/originalT0/identity binding, valid UTC calendar range, a
+publishable-key format, and three distinct40..128-character printable passwords.
+Service/preview/Supabase identities and source pins must match the reviewed
+binding. Historical13 identities and frozen excluded identities cannot be reused;
+known consumed run/authority IDs reject. Static lists are defense in depth,
+never current owner/guard verification. Tests use exclusively public strings
+marked SYNTHETIC_SENTINEL; no real key/password/configuration is read or supplied.
+
+The input boundary is a trusted **plain object DTO**, not raw JSON text. Deep
+descriptor copying rejects accessors, toJSON, custom prototypes, symbols, unknown
+fields, excessive depth/nodes/strings, and unsafe field values before transport
+use. It never executes an input serializer; its own JSON.stringify escapes
+password quotes/backslashes. A raw JSON string, including duplicate keys, is
+rejected. If an upstream caller already parsed duplicate JSON keys away, this
+module cannot recover that lost information: a future caller must construct the
+typed DTO directly or validate raw JSON duplicates before parsing. JS proxies
+cannot be authenticated; the caller must supply trusted plain data, not hostile
+proxy objects. These modules are not an RPC/authentication boundary.
+
+Configuration lives only in private state and is cleared at the configure write,
+on abort/error, or explicit clear. No public configuration/serialization getter
+exists. Receipts, snapshots and fixed-code errors contain no publishable key,
+password, raw input, upstream body/exception or session token. Only the injected
+write callback receives the serialized configuration; future approval must cover
+that exact channel's retention/logging. The callback must not log/cache it and
+must honor abort. Logical reference clearing cannot erase caller-owned objects,
+transport buffers, JS heap copies or tool logs; no physical zeroization is
+claimed. The collector never stores/exports/refreshes an access/refresh token.
+
+`binding` is exact run_id/authorization_id/candidate_sha/helper_sha256/pins/t0/
+identities/historical_ids. Pins include Operations/Core service IDs and SHAs,
+preview site ID/SHA and Supabase project ref. `authority` separately binds the
+same context, owner_go_verified, consumed=false, max_new_accounts=3, issued_at,
+expires_at and public_go=false. These are **trusted caller attestations**, not
+proof authenticated by pure JavaScript. Constructor validation is contract
+readiness, never a new owner GO. Current real authority remains consumed.
+
+### Fixed lifetime, actual wire, observations and independent gate
+
+The one effective expiry is the earlier of originalDBT0+1800 s and the verified
+authority expiry. Configure, commands, continuation and gate cannot renew it.
+Startup/configure additionally have a300 s input bound; responses cap at5 s,
+stop confirmation at2 s, each read loop at1,024 reads, total ingress at64KiB and
+commands at64. Wall and monotonic elapsed time must agree within2 s; reversal,
+nonfinite clocks, original expiry or slow positive-window crossings abort.
+Original T0 text is retained exactly for correlation, including fractional UTC
+seconds. JS numeric clocks are millisecond based; canonical runtime/DB timing
+must still be independently verified by the future executor/guard.
+
+Only exact login/denied_login/get/denied_get ops, three labels and the frozen
+seven routes exist. The parent consumes a slot **before** write/read ambiguity,
+permits one inflight request and never retries/replays after failure. It applies
+the helper's canary120 s, operator-login600 s and positive-GET1200 s windows,
+post-ban120/1200 s thresholds, login prerequisites and specific positive/denial
+semantics. It rechecks windows after potentially slow responses.
+
+The unchanged strict parser handles expected safe records and fatal closed/
+deadline controls. There are no invented frames/nonces. Records are atomically
+released as RESPONSE_COMPLETE_UNFENCED with parent binding/ordinal and safe
+observations (label, configured user_id, route, status, verified, denied, at).
+The mapped user_id itself is parent context, not a newly authenticated child
+claim; the owned helper's verified semantics and independent provenance remain
+prerequisites. Delayed matching records cannot be cryptographically identified
+by this wire. The accepted owned serialized-stdio convention is explicit, with
+no new mandatory nonce/fence requirement. Unexpected/late/duplicate/echo/schema/
+terminal/EOF/nonzero/overflow/stderr outcomes abort and clear pending state.
+
+`authorizeOperators()` requires the separate reducer's current independent gate
+decision AND exact equality of its five canary observations to THIS collector's
+retained safe receipts: login/own_today/foreign_today, retained-token GET denial
+and verified fresh-login denial. Canonical guard ban/readback and budget proof
+must be independent, as must current CTO verdict/lease/digest/reference. A helper
+operator_gate success alone cannot establish any of these. Only after validation
+does the collector encode the actual operator_gate schema. It rechecks lease
+expiry after response; operator logins also require a still-current lease.
+
+Configured EOF follows the real helper's silent clean-exit contract. Zero exit+
+EOF plus observed stop closure yields PROCESS_CLOSED_UNAUTHENTICATED, separately
+from response completeness/functionality. Abort and original-expiry timers keep
+cleanup intent in collector state even if a caller stops awaiting. This is not
+durable process-death storage, a guard, an account ban or cleanup verification.
+The existing independent Operations guard remains the sole cleanup controller.
+No pure code can stop an injected callback that ignores abort or certify its
+claimed close event; a future trusted adapter must observe the real close.
+
+### Independent evidence reduction and eventual cleanup
+
+`fill_uat_evidence_verdict.mjs` exports `reduceEvidence(binding,evidence,{at,
+trustedInput})`. Without explicit trustedInput=true it returns UNKNOWN and no
+operator eligibility. Even with it, `grantsOwnerGo=false` always. A caller can
+forge a DTO: provenance/owner permission/current runtime truth must be verified
+externally. Fixtures are not runtime receipts. The reduction's scope is the
+guarded F1 read-route/lifecycle checklist below, not complete browser/mobile,
+logout/revoke/membership removal/expiry/race or onboarding/MVP acceptance.
+
+The evidence object has separately scoped binding/authority/budget/canary/
+independent/operators/cleanup sections. Canary proof needs login200, own200,
+foreign403, independent canonical ban+readback before original180 s, retained
+GET401/403 and fresh-login400/401/403 with independently verified user_banned
+semantics. HTTP400 alone is not an Auth ban proof. Known-created IDs must be
+exactly the three authorized identities, unknown creates0, current active and
+pending activation counts0 and unresolved nonces0. Gate requires current
+independent CTO pass and lease in180..599 s. Wrong IDs/pins/run/authority/T0,
+missing/late/unverified observations or pending counts yield UNKNOWN/FAIL and
+operator NOT ELIGIBLE.
+
+The user_banned attestation may come from a verified denied_login event tied to
+the reviewed6ca helper semantics/hash; it does not require another Auth request,
+raw response retention or an extra retry.
+
+Functionality additionally needs BOTH A/B login, me/organizations, own Today and
+Calendar200, foreign Today and Calendar403, and provenance A200/B403, with exact
+identities and ordered windows. Cleanup is separate: independent guard readback,
+all known three banned, all historical13 preserved banned, unknown creates0,
+current active/pending activation counts0 and unresolved nonces0. These are
+current-state counts, not erasure of historical activation audit totals.
+
+Missing/failed canary, absent budget, consumed/rejected authority or a mismatched
+outer envelope do not hide an independently scoped valid cleanup readback when
+the expected binding itself is valid. Eventual cleanup AFTER original expiry
+can still be cleanup=PASS, but cleanupLate/deadlineBreached=true and overall
+f1=FAIL. Cleanup must continue after expiry: it never renews authority or makes
+operators eligible. A late review of an on-time cleanup is not itself a breach.
+Unknown functionality remains UNKNOWN even with cleanup PASS; functionality PASS
+does not conceal missing/failed cleanup. No historical failure is reclassified.
+
+### Validation and reviewable execution plan
+
+All testing here uses injected **synthetic in-memory transports** only. No real
+helper, native mock child, service, account or secret-input tool call is run.
+The35 new tests (18collector,17reducer) and12 existing deploy/CI gate contracts
+passed locally47/47 with no skips. Coverage includes real-compatible shape and
+quote escaping, mutation isolation, duplicate-text/accessor/toJSON rejection,
+secret/error nonreflection (including forged typed exceptions), consumed IDs,
+pins, original/configuration/response deadlines, skew/reversal, gate lease and
+receipt correlation, all split SGR/CRLF/terminal records, serialization/one-shot
+ambiguity, positive-vs-denial semantics, callback hangs, idle abort, unconfirmed
+close and separate late cleanup. Full exact-head CI runs both new files in both
+existing jobs. The earlier actual PIPE/TTY/multi-tool mock receipts remain
+distinct; this batch claims no new native/live execution evidence.
+
+```text
+node --test platform/tests/fill_uat_helper_collector.test.mjs
+node --test platform/tests/fill_uat_evidence_verdict.test.mjs
+```
+
+Before any real execution, CTO must review the final collector/reducer source
+and a specific private transport wrapper with observed process ownership/close
+and bounded raw-buffer retention. Owner authority must separately cover the
+exact candidate/helper/environment, new fictional identity budget, channel and
+possible secret/tool-log retention; current consumed scope is not renewed here.
+Verify actual protected preview/Operations/Core/Supabase pins, all historical13
+blocked, current independent guard/cleanup health, zero unknown creates/nonces,
+and capture immutable original DBT0/expiry and current revocation conditions.
+Use supported Auth Admin only under such authority. Canary positive/ban/Auth
+proof and independent current CTO verdict/lease precede any operator activation.
+Missing proof/revocation/ambiguity triggers collector abort plus independent
+guard cleanup/readback; cleanup continues past expiry if necessary and timing
+failure remains recorded. A future wrapper must respond to revocation explicitly;
+the pure collector cannot poll or authenticate external revocation state.
+
+The concrete remaining gate is independently reviewed runtime/secret handling
+and applicable new owner authority with actual guard evidence, NOT another
+invented protocol redesign. This batch makes no activation/quota/GO request and
+changes no hosted approval marker. Production/public/paid/provider/customer/
+booking/hold/payment/outreach remain excluded. `PUBLIC_GO=false`.
