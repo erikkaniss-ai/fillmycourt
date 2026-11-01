@@ -2,12 +2,148 @@
 No provider requests, credentials, Core availability, or club-owned feed.
 """
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect
 from test_federated_browser import browser_page, fixture_url, ROOT
+ARTIFACTS=Path(os.environ.get('GAC_INTEGRATION_ARTIFACT_DIR',str(ROOT/'test-artifacts')))
+
+
+def assert_event_map_parity(page):
+    parity=page.evaluate("""() => ({
+      list:[...document.querySelectorAll('#offers [data-event-mapped="true"]')].map(e=>e.dataset.eventKey).sort(),
+      map:[...document.querySelectorAll('[data-event-keys]')].flatMap(e=>JSON.parse(e.dataset.eventKeys)).sort()
+    })""")
+    assert parity['list']==parity['map']
+
+
+@pytest.mark.parametrize('width',[320,390,1440])
+def test_event_intents_are_explicit_demo_only_with_one_shared_map_and_safe_cta(browser_page,fixture_url,width):
+    page,context,forbidden,_=browser_page
+    context.request.get(fixture_url+'/__fixture?mode=direct')
+    page.set_viewport_size({'width':width,'height':1000})
+    page.goto(fixture_url+'/find.html')
+    page.evaluate("""() => {window.eventProviderCalls=[];
+      for(const type of ['gac:auto-search-request','gac:additional-sources-request'])
+        window.addEventListener(type,()=>window.eventProviderCalls.push(type));} """)
+    page.get_by_role('button',name='Join a game',exact=True).click()
+    expect(page.locator('#realMode')).to_have_attribute('aria-pressed','true')
+    expect(page.locator('#demoBanner')).to_be_hidden()
+    expect(page.locator('#offers .event-card')).to_have_count(0)
+    expect(page.locator('#offers')).to_contain_text('Games are not connected yet')
+    page.get_by_role('button',name='Find games',exact=True).click()
+    assert page.evaluate('window.eventProviderCalls')==[]
+    page.get_by_role('button',name='Explore demo',exact=True).click()
+    expect(page.locator('#offers .event-card')).to_have_count(10)
+    expect(page.locator('[data-event-kind="start_open_match"]')).to_contain_text('0 / 4 people')
+    expect(page.locator('[data-event-kind="start_open_match"]')).to_contain_text('€48.00 / event')
+    expect(page.locator('[data-event-kind="player_needed"]')).to_contain_text('Time unconfirmed')
+    expect(page.locator('[data-event-kind="player_needed"]')).to_have_attribute('data-event-mapped','false')
+    expect(page.locator('[data-result-pin]')).to_have_count(3)
+    ARTIFACTS.mkdir(parents=True,exist_ok=True)
+    page.evaluate('() => { document.activeElement?.blur(); window.scrollTo(0,0); }')
+    page.screenshot(path=str(ARTIFACTS/f'event-intents-{width}-FICTIONAL.png'),full_page=False)
+    assert_event_map_parity(page)
+    assert page.locator('#offers a').count()==0
+    assert page.locator('[data-offer-kind="real"]').count()==0
+    assert page.locator('.leaflet-container').count()==1
+    for badge in page.locator('#offers .badge').all():
+        expect(badge).to_contain_text('FICTIONAL DEMO')
+    # A focusable disabled handoff explains itself; Enter must not create registration.
+    page.locator('#offers .event-cta').first.focus()
+    page.keyboard.press('Enter')
+    expect(page.locator('#mapSelection')).to_contain_text('No registration, application or payment was made')
+    expect(page.locator('#offers .event-cta').first).to_have_attribute('aria-disabled','true')
+    assert page.url==fixture_url+'/find.html'
+    page.locator('#eventEntry').select_option('pair')
+    expect(page.locator('#offers .event-card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('€26.00 / pair')
+    expect(page.locator('#offers')).to_contain_text('Additional fees apply')
+    assert_event_map_parity(page)
+    page.locator('#eventEntry').select_option('any')
+    page.locator('#eventSpace').select_option('waitlist')
+    expect(page.locator('#offers .event-card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('Waitlist')
+    assert_event_map_parity(page)
+    page.locator('#eventSpace').select_option('any')
+    page.locator('#eventUnscheduled').uncheck()
+    expect(page.locator('[data-event-kind="player_needed"]')).to_have_count(0)
+    page.locator('#eventUnscheduled').check()
+    expect(page.locator('[data-event-kind="player_needed"]')).to_have_count(1)
+    page.locator('#offersHeading').scroll_into_view_if_needed()
+    page.screenshot(path=str(ARTIFACTS/f'event-games-{width}-FICTIONAL.png'),full_page=False)
+    page.get_by_role('button',name='Tournaments & mini-tournaments',exact=True).click()
+    expect(page.locator('#offers .event-card')).to_have_count(3)
+    expect(page.locator('#offers')).to_contain_text('4 / 8 pairs')
+    expect(page.locator('#offers')).to_contain_text('€30.00 / pair')
+    assert page.get_by_role('heading',name='The friendly pairs cup',exact=True).count()==1
+    assert_event_map_parity(page)
+    page.locator('#offersHeading').scroll_into_view_if_needed()
+    page.screenshot(path=str(ARTIFACTS/f'event-tournaments-{width}-FICTIONAL.png'),full_page=False)
+    page.locator('[data-result-pin]').first.focus()
+    page.keyboard.press('Enter')
+    expect(page.locator('#offers .card:focus')).to_have_count(1)
+    expect(page.locator('#offers .card:focus details')).to_have_attribute('open','')
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+    page.get_by_role('button',name='Your sessions',exact=True).click()
+    expect(page.locator('#offers .event-card')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#offers')).to_contain_text('Tournaments are not connected yet')
+    expect(page.locator('#resultCount')).to_contain_text('Live event availability unverified')
+    assert page.evaluate('window.eventProviderCalls')==[]
+    assert page.evaluate('localStorage.length+sessionStorage.length')==0
+    assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]
+
+
+def test_event_text_url_and_privacy_attack_fixture_cannot_create_links_markup_or_join(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    page.goto(fixture_url+'/find.html')
+    page.evaluate("""async() => {
+      const {eventDemoFixtures}=await import('/assets/event-demo-fixtures.mjs');
+      const {projectEvents}=await import('/assets/event-discovery.mjs');
+      const {renderEventCards}=await import('/assets/event-discovery-view.mjs');
+      const f=eventDemoFixtures('2026-11-01'),raw={...f.records[0],
+        title:'<img src=x onerror=alert(1)><script>alert(1)</script>',
+        organizer:'<svg onload=alert(1)>',sourceUrl:'javascript:alert(1)',
+        roster:[{name:'DO-NOT-RENDER',email:'DO-NOT-RENDER@example.invalid'}],token:'DO-NOT-RENDER'};
+      renderEventCards(document.querySelector('#offers'),projectEvents([raw],{mode:'demo',now:f.now}));
+    }""")
+    expect(page.locator('#offers h3')).to_have_text('<img src=x onerror=alert(1)><script>alert(1)</script>')
+    assert page.locator('#offers img,#offers script,#offers svg,#offers a').count()==0
+    expect(page.locator('#offers')).not_to_contain_text('DO-NOT-RENDER')
+    expect(page.locator('#offers .event-cta')).to_have_attribute('aria-disabled','true')
+    page.locator('#offers .event-cta').focus()
+    page.keyboard.press('Enter')
+    assert page.url==fixture_url+'/find.html'
+    assert page.evaluate('localStorage.length+sessionStorage.length')==0
+    assert forbidden==[]
+
+
+def test_late_court_reader_reply_cannot_cross_into_an_event_intention(browser_page,fixture_url):
+    page,context,forbidden,_=browser_page
+    page.goto(fixture_url+'/find.html')
+    page.evaluate("""() => window.addEventListener('gac:auto-search-request',e=>window.oldCourtNonce=e.detail.nonce)""")
+    record=ready(page,context,fixture_url)
+    nonce=page.evaluate('window.oldCourtNonce')
+    assert nonce
+    page.get_by_role('button',name='Join a game',exact=True).click()
+    page.evaluate("""({nonce,observation}) => {
+      window.dispatchEvent(new CustomEvent('gac:auto-search-response',{detail:{nonce,
+        result:{version:'0.4.2',status:'observed',observation}}}));
+    }""",{'nonce':nonce,'observation':record})
+    expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('#offers')).not_to_contain_text('FICTIONAL COURT 1')
+    expect(page.locator('#offers')).to_contain_text('Games are not connected yet')
+    page.get_by_role('button',name='Explore demo',exact=True).click()
+    expect(page.locator('#offers .event-card')).to_have_count(10)
+    expect(page.locator('#offers')).not_to_contain_text('FICTIONAL COURT 1')
+    assert page.locator('[data-offer-kind="real"]').count()==0
+    assert page.evaluate('localStorage.length+sessionStorage.length')==0
+    assert forbidden==[]
 
 
 def sample(page, *, patch=None):
@@ -58,8 +194,8 @@ def test_player_observation_produces_a_real_client_only_result_and_official_hand
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
     assert forbidden==[]
-    Path(ROOT/'test-artifacts').mkdir(exist_ok=True)
-    page.screenshot(path=str(ROOT/f'test-artifacts/player-search-{width}-FICTIONAL.png'),full_page=True)
+    ARTIFACTS.mkdir(parents=True,exist_ok=True)
+    page.screenshot(path=str(ARTIFACTS/f'player-search-{width}-FICTIONAL.png'),full_page=True)
 
 
 @pytest.mark.parametrize('width',[320,390,768,1440])
@@ -113,12 +249,12 @@ def test_unified_demo_map_list_keyboard_and_display_filters_without_provider_rea
     assert page.evaluate('localStorage.length + sessionStorage.length')==0
     assert context.request.get(fixture_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
     assert forbidden==[]
-    Path(ROOT/'test-artifacts').mkdir(exist_ok=True)
+    ARTIFACTS.mkdir(parents=True,exist_ok=True)
     # Full-page capture must start at the entry scroll position; otherwise a
     # fixed offscreen skip link can be composited into the middle of the image.
     page.evaluate('() => { document.activeElement?.blur(); window.scrollTo(0,0); }')
     page.evaluate('() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))')
-    page.screenshot(path=str(ROOT/f'test-artifacts/unified-map-demo-{width}-FICTIONAL.png'),full_page=True)
+    page.screenshot(path=str(ARTIFACTS/f'unified-map-demo-{width}-FICTIONAL.png'),full_page=True)
     page.get_by_role('button',name='Your sessions',exact=True).click()
     expect(page.locator('#offers .card')).to_have_count(0)
     expect(page.locator('[data-result-pin]')).to_have_count(0)

@@ -3,6 +3,8 @@ import {validateQuery,localDay} from './federated-search.mjs';
 import './personal-source-observation.js';
 import {normalizePersonalObservation} from './personal-observation-bridge.mjs';
 import {createPlayerSearchView,demoOffers} from './player-search-view.mjs';
+import {projectEvents} from './event-discovery.mjs';
+import {eventDemoFixtures} from './event-demo-fixtures.mjs';
 const byId=id=>document.getElementById(id);
 const form=byId('search'),status=byId('searchStatus'),personalStatus=byId('personalStatus');
 const offersHost=byId('offers'),sourcesHost=byId('sourceStatus'),payload=byId('personalPayload');
@@ -12,9 +14,9 @@ date.max=new Date(Date.parse(today+'T00:00:00Z')+14*86400000).toISOString().slic
 let query=null,revision=0,pendingBridge=null,pendingAuto=null,autoAckTimer=null,autoResultTimer=null,timer=null,additionalPending=null,additionalTimer=null;
 const additionalStates=new Map();
 const observations=new Map();
-let mode='real',demoRows=[];
+let mode='real',demoRows=[],intent='courts',eventRows=[],eventQuery=null;
 const make=(tag,label,cls)=>{const el=document.createElement(tag);if(label!==undefined)el.textContent=String(label);if(cls)el.className=cls;return el;};
-const allowed=()=>mode==='real'&&Boolean(query);
+const allowed=()=>intent==='courts'&&mode==='real'&&Boolean(query);
 const view=createPlayerSearchView({onFilterChange:()=>paint()});
 function clearPending(){
   pendingBridge=null;
@@ -83,7 +85,7 @@ function autoError(result){
   })[code]||'This provider search could not be verified ('+readerCode(result)+'). Check the Playtomic page or connection.';
 }
 function startAutomaticSearch(){
-  if(!query||mode!=='real')return;
+  if(!query||mode!=='real'||intent!=='courts')return;
   const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
   const incompatible=new Map(); // At most three versions across BOTH groups.
   const request={nonce,query,revision,acked:false,incompatible,group:'playtomic',unsupported:false};
@@ -231,8 +233,8 @@ window.addEventListener('gac:additional-sources-response',event=>{
 
 function clearOffers(message){
   revision++;clearPending();cancelAuto();cancelAdditional();additionalStates.clear();clearTimeout(timer);timer=null;
-  observations.clear();demoRows=[];payload.value='';
-  view.render([],{mode});
+  observations.clear();demoRows=[];eventRows=[];eventQuery=null;payload.value='';
+  if(intent==='courts')view.render([],{mode});else view.renderEvents([],{mode,intent});
   personalStatus.textContent=message||'No personal offers imported.';
   renderSources();
 }
@@ -249,7 +251,8 @@ function minute(value){
 function renderSources(){
   sourcesHost.replaceChildren();
   const has=id=>[...observations.values()].some(record=>record.sourceId===id);
-  const text=(id,initial)=>mode==='demo'?'DEMO · No provider search; fictional examples only':has(id)?'Player-visible offer loaded · partial · expires shortly':
+  const text=(id,initial)=>intent!=='courts'?(mode==='demo'?'Fictional event examples only · no live event source queried':
+    'Live event read/display access unverified · no event request made'):mode==='demo'?'DEMO · No provider search; fictional examples only':has(id)?'Player-visible offer loaded · partial · expires shortly':
     additionalStates.get(id)||(id!=='playtomic'&&additionalStates.get('additional'))||initial;
   const names=[
     ['Playtomic',text('playtomic','One login for up to four reviewed Cascais-area clubs per Find; additional areas are not verified')],
@@ -266,6 +269,12 @@ function renderSources(){
 }
 function paint(){
   clearTimeout(timer);
+  if(intent!=='courts'){
+    view.renderEvents(mode==='demo'?eventRows:[],{mode,intent,filters:eventQuery||{}});
+    personalStatus.textContent=mode==='demo'?'FICTIONAL DEMO · Scenario snapshot at 08:00 UTC on the chosen day. No live event session was read.':
+      'No live event source is verified. Court source access does not grant event access.';
+    renderSources();return;
+  }
   const now=Date.now();
   for(const [key,v] of observations)if(Date.parse(v.expiresAt)<=now)observations.delete(key);
   const rows=mode==='demo'?demoRows:[...observations.values()].flatMap(v=>v.offers.map(o=>({o,captured:v.capturedAt,expires:v.expiresAt})))
@@ -306,6 +315,42 @@ function importPersonal(raw,expectedQuery,expectedRevision){
 }
 renderSources();
 view.render([],{mode});
+function syncIntentCopy(){
+  const events=intent!=='courts';
+  for(const [id,value] of [['intentCourts','courts'],['intentGames','games'],['intentTournaments','tournaments']])
+    byId(id).setAttribute('aria-pressed',String(intent===value));
+  byId('intentNotice').textContent=!events?'Court offers come from your own connected player sessions.':
+    'Discover '+(intent==='games'?'games and player-needed notices':'tournaments and mini-tournaments')+'. Live event access is not verified. Explore demo is explicitly fictional.';
+  byId('eventFilters').hidden=!events;byId('eventBudgetNote').hidden=!events;byId('courtDuration').hidden=events;
+  form.classList.toggle('event-search',events);
+  byId('budgetLabel').textContent=events?'Entry budget':'Court budget';
+  byId('offerSort').querySelector('[value="price"]').textContent=events?'Price by entry unit':'Lowest price';
+  form.querySelector('button[type="submit"]').textContent=!events?'Find courts':intent==='games'?'Find games':'Find tournaments';
+  byId('offersHeading').textContent=!events?'Find your next court.':intent==='games'?'Find your next game.':'A little friendly competition.';
+  byId('courtMap').setAttribute('aria-label',events?'Event results map':'Court results map');
+  byId('coverageHeading').textContent=events?'Event source access':'Your booking sources';
+  document.querySelector('.diagnostics').hidden=events;
+  document.querySelector('.results-footnote').textContent=events?
+    'Entry units, fees, source rating and remaining places are independent. Fictional examples cannot be joined or booked.':
+    'Prices are displayed court totals. Provider freshness and time zone may be unknown. Always recheck on the official platform.';
+  byId('demoBanner').querySelector('strong').textContent=events?'DEMO · All games, notices, tournaments, prices and map positions are fictional.':
+    'DEMO · Fictional clubs, map positions, times and prices.';
+  byId('demoBanner').querySelector('span').textContent=events?'No registration, applications, joining or payments.':'Explore the experience. Nothing here can be booked.';
+  if(events)byId('modeNotice').textContent=mode==='demo'?'DEMO · Fictional event scenarios. No live feed or event registration.':
+    'REAL · Event access unverified. No live events are requested or displayed.';
+}
+function changeIntent(next){
+  if(next===intent)return;
+  intent=next;reset('Discovery intention changed. Previous private observations cleared.');
+  view.setMode(mode);
+  for(const id of ['eventEntry','eventFormat','eventRating','eventSpace','eventPriceUnit'])byId(id).value='any';
+  byId('eventUnscheduled').checked=true;
+  syncIntentCopy();
+  if(mode==='demo')form.requestSubmit();else paint();
+}
+for(const [id,value] of [['intentCourts','courts'],['intentGames','games'],['intentTournaments','tournaments']])
+  byId(id).addEventListener('click',()=>changeIntent(value));
+syncIntentCopy();
 function changeMode(next){
   if(next===mode)return;
   mode=next;
@@ -313,7 +358,9 @@ function changeMode(next){
   // their pending nonce/revision before any fictional example is rendered.
   reset(mode==='demo'?'Preparing fictional demo examples…':'Your sessions selected. Press Find courts for a new personal search.');
   view.setMode(mode);
+  syncIntentCopy();
   if(mode==='demo')form.requestSubmit();
+  else if(intent!=='courts')paint();
 }
 byId('realMode').addEventListener('click',()=>changeMode('real'));
 byId('demoMode').addEventListener('click',()=>changeMode('demo'));
@@ -327,6 +374,20 @@ form.addEventListener('submit',event=>{
     if(next.date>date.max)throw Error('OUT_OF_READER_RANGE');
   }catch{
     status.textContent='Select a location, day within 14 days, sport, and valid start-time range.';return;
+  }
+  if(intent!=='courts'){
+    eventQuery=next;
+    if(mode==='demo'){
+      const fixture=eventDemoFixtures(next.date);eventRows=projectEvents(fixture.records,{mode:'demo',now:fixture.now});
+      const rating=byId('eventRating'),selected=rating.value,options=new Map();
+      for(const row of eventRows)if(row.rating){const key=JSON.stringify([row.provider,row.rating.scheme,row.rating.level]);
+        options.set(key,row.sourceName+' · '+row.rating.scheme+' · '+row.rating.level);}
+      rating.replaceChildren(new Option('Any source rating','any'));
+      for(const [key,label] of options)rating.add(new Option(label,key));
+      rating.value=options.has(selected)?selected:'any';
+      status.textContent='FICTIONAL DEMO · Event examples only. No provider search, registration or payment.';
+    }else status.textContent='Live event sources are not verified. Explore demo shows fictional examples only.';
+    paint();return;
   }
   query=next;
   if(mode==='demo'){

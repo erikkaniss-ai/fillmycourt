@@ -1,4 +1,6 @@
 // Display only. Never reads a provider, requests location or persists observations.
+import {filterEvents,groupEventVenues,eventPriceLabel,kindLabel} from './event-discovery.mjs';
+import {renderEventCards,eventTimeLabel} from './event-discovery-view.mjs';
 export const MAP_TILES='https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 export const PROVIDER_NAMES=Object.freeze({playtomic:'Playtomic',tiesports:'TiePlayer / TieSports',
   racket_id:'Racket ID',smashpro:'Smashpro',matchi:'MATCHi'});
@@ -73,11 +75,14 @@ export function displayRows(rows,{mode='real',origin=null,budget='any',radius='a
 export function createPlayerSearchView({onFilterChange=()=>{}}={}){
   const doc=document,by=id=>doc.getElementById(id),host=by('offers');
   const make=(tag,text,cls)=>{const el=doc.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;};
-  let mode='real',rows=[],selected=null,map=null,layer=null,markers=new Map(),cards=new Map(),mapError=false;
+  let mode='real',rows=[],selected=null,map=null,layer=null,markers=new Map(),cards=new Map(),mapError=false,content='courts';
   const filterState=()=>({mode,origin:originFor(mode,by('searchOrigin').value),
     budget:by('budgetFilter').value,radius:by('radiusFilter').value,sort:by('offerSort').value});
-  const selectedMapLabel=()=>mode==='demo'?'DEMO · Fictional availability':'REAL · Verified offers only';
-  const selectionText=row=>row?(row.demo?'DEMO · ':'')+row.o.clubName+', '+row.o.courtName+', '+row.o.startLabel+', '+money(row.o.priceMinor):'';
+  const venueKey=row=>content==='events'?row.venue?.key:JSON.stringify([row.o.sourceUrl,row.o.clubName]);
+  const selectedMapLabel=()=>content==='events'?(mode==='demo'?'DEMO · Fictional events':'REAL · Event access unverified'):
+    mode==='demo'?'DEMO · Fictional availability':'REAL · Verified offers only';
+  const selectionText=row=>!row?'':content==='events'?'FICTIONAL DEMO · '+row.title+', '+eventTimeLabel(row)+', '+eventPriceLabel(row.price):
+    (row.demo?'DEMO · ':'')+row.o.clubName+', '+row.o.courtName+', '+row.o.startLabel+', '+money(row.o.priceMinor);
   function changeView(view){
     by('resultsWorkspace').dataset.view=view;
     for(const [id,value] of [['listView','list'],['mapView','map'],['splitView','both']])
@@ -87,16 +92,17 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
   function select(row,{fromMap=false}={}){
     selected=row.key;
     for(const [id,card] of cards)card.classList.toggle('selected',id===selected);
-    for(const [id,marker] of markers)marker.getElement()?.classList.toggle('selected',id===JSON.stringify([row.o.sourceUrl,row.o.clubName]));
+    for(const [id,marker] of markers)marker.getElement()?.classList.toggle('selected',id===venueKey(row));
     const target=cards.get(row.key);
     by('mapSelection').textContent=selectionText(row);
     if(fromMap){
       if(by('resultsWorkspace').dataset.view==='map')changeView('both');
       target?.focus({preventScroll:true});target?.scrollIntoView({behavior:'auto',block:'nearest'});
+      if(content==='events'&&target?.querySelector('details'))target.querySelector('details').open=true;
     }else if(row.position&&map){
       if(by('resultsWorkspace').dataset.view==='list')changeView('both');
       map.panTo([row.position.lat,row.position.lon],{animate:false});
-      markers.get(JSON.stringify([row.o.sourceUrl,row.o.clubName]))?.openPopup();
+      markers.get(venueKey(row))?.openPopup();
     }
   }
   function ensureMap(){
@@ -111,20 +117,41 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
   }
   function renderMap(){
     ensureMap();markers.clear();layer?.clearLayers();
-    const groups=new Map();
-    for(const row of rows){
+    const groups=content==='events'?groupEventVenues(rows):new Map();
+    if(content!=='events')for(const row of rows){
       if(!row.position)continue;
       const id=JSON.stringify([row.o.sourceUrl,row.o.clubName]);
       if(!groups.has(id))groups.set(id,[]);groups.get(id).push(row);
     }
-    by('mappedCount').textContent=groups.size+' mapped club'+(groups.size===1?'':'s');
+    by('mappedCount').textContent=groups.size+' mapped '+(content==='events'?'event venue':'club')+(groups.size===1?'':'s');
     by('mapModeLabel').textContent=selectedMapLabel();
-    if(!mapError)by('mapNote').textContent=mode==='demo'
+    if(!mapError)by('mapNote').textContent=content==='events'?
+      mode==='demo'?'FICTIONAL DEMO · Pins group the same filtered events by venue. Unconfirmed venues stay in the list.':
+        'Live event access is unverified. No event pins or availability claims.':mode==='demo'
       ?'DEMO · All club positions and availability are fictional. Map tiles are geographic background only.'
       :rows.length?'Pins use reviewed public club positions. Unknown positions stay in the list; no user location is assumed.'
       :'No available pins until fresh offers arrive. The map is an area overview, not availability.';
     if(!map){by('mapNote').textContent='Map unavailable. Use the list to inspect the same results.';return;}
     for(const [id,group] of groups){
+      if(content==='events'){
+        const row=group[0],pin=make('span',undefined,'pin-label demo');pin.append(make('small','DEMO'),doc.createTextNode(group.length+' event'+(group.length===1?'':'s')));
+        const marker=globalThis.L.marker([row.position.lat,row.position.lon],{
+          icon:globalThis.L.divIcon({html:pin,className:'price-pin event-pin',iconSize:[94,49],iconAnchor:[47,20]}),
+          keyboard:true,title:'FICTIONAL DEMO · '+row.venue.name+' · '+group.length+' events'
+        }).addTo(layer);
+        const popup=make('div');popup.append(make('span','FICTIONAL DEMO · No registration','popup-demo'),make('strong',row.venue.name),
+          make('div',group.length+' filtered event(s)','event-popup-count'));
+        for(const item of group){
+          const entry=make('div',undefined,'event-popup-entry');
+          entry.append(make('div',kindLabel(item.kind)+' · '+item.title),make('div',eventPriceLabel(item.price)));
+          const action=make('button','View event details');action.type='button';action.addEventListener('click',()=>select(item,{fromMap:true}));entry.append(action);popup.append(entry);
+        }
+        marker.bindPopup(popup);marker.on('click',()=>select(row,{fromMap:true}));
+        marker.on('keypress',event=>{if(event.originalEvent?.key==='Enter')select(row,{fromMap:true});});
+        const el=marker.getElement();el.dataset.resultPin=String([...groups.keys()].indexOf(id));
+        el.dataset.eventKeys=JSON.stringify(group.map(e=>e.key));el.classList.toggle('selected',group.some(e=>e.key===selected));
+        markers.set(id,marker);continue;
+      }
       const row=group[0],lowest=Math.min(...group.map(v=>v.o.priceMinor));
       const pin=make('span',undefined,'pin-label'+(row.demo?' demo':''));
       if(row.demo)pin.append(make('small','DEMO'));
@@ -154,7 +181,7 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
       map.fitBounds(points,{padding:[45,45],maxZoom:14,animate:false});}
   }
   function render(nextRows,{mode:nextMode=mode}={}){
-    mode=nextMode;rows=displayRows(nextRows,filterState());cards.clear();host.replaceChildren();
+    content='courts';mode=nextMode;rows=displayRows(nextRows,filterState());cards.clear();host.replaceChildren();
     const selectedRow=rows.find(row=>row.key===selected);
     if(!selectedRow)selected=null;
     // Screen-reader live regions are private result state too. TTL, filtering,
@@ -195,6 +222,31 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
     renderMap();
     if(selected&&cards.has(selected))cards.get(selected).classList.add('selected');
   }
+  function renderEvents(nextRows,{mode:nextMode=mode,intent='games',filters={}}={}){
+    content='events';mode=nextMode;
+    rows=filterEvents(nextRows,{...filters,...filterState(),intent,
+      entry:by('eventEntry').value,format:by('eventFormat').value,rating:by('eventRating').value,
+      space:by('eventSpace').value,priceUnit:by('eventPriceUnit').value,
+      includeUnscheduled:by('eventUnscheduled').checked,distance:distanceKm});
+    if(!rows.some(row=>row.key===selected))selected=null;
+    cards=renderEventCards(host,rows,{onSelect:select,onUnavailable:()=>{
+      by('mapSelection').textContent='Fictional demo only. No registration, application or payment was made.';
+    }});
+    if(selected&&cards.has(selected))cards.get(selected).classList.add('selected');
+    by('mapSelection').textContent=selectionText(rows.find(row=>row.key===selected));
+    const origin=filterState().origin;by('radiusFilter').disabled=!origin;
+    by('originNote').textContent=origin?'DEMO · Fictional starting place. Straight-line distances; unknown venues excluded only by a radius filter.':
+      'Choose a starting place for straight-line distance. Notices without confirmed venues stay in the list.';
+    by('resultCount').textContent=mode==='demo'?rows.length+' fictional '+(intent==='games'?'game/notice':'tournament')+' example(s)':'Live event availability unverified';
+    if(!rows.length){
+      const empty=make('div',undefined,'empty event-empty');
+      empty.append(make('span','↗'),make('h3',mode==='demo'?'No fictional examples match.':intent==='games'?'Games are not connected yet.':'Tournaments are not connected yet.'),
+        make('p',mode==='demo'?'Try a wider time range or another event filter. All examples are fictional.':
+          'No live event source is verified. This does not mean no events exist. Choose Explore demo to see fictional examples.'));
+      host.append(empty);
+    }
+    renderMap();
+  }
   function setMode(next){
     mode=next==='demo'?'demo':'real';selected=null;
     by('mapSelection').textContent='';
@@ -207,7 +259,8 @@ export function createPlayerSearchView({onFilterChange=()=>{}}={}){
     render([],{mode});
   }
   for(const id of ['searchOrigin','radiusFilter','budgetFilter','offerSort'])by(id).addEventListener('change',onFilterChange);
+  for(const id of ['eventEntry','eventFormat','eventRating','eventSpace','eventPriceUnit','eventUnscheduled'])by(id).addEventListener('change',onFilterChange);
   for(const [id,view] of [['listView','list'],['mapView','map'],['splitView','both']])by(id).addEventListener('click',()=>changeView(view));
   window.addEventListener('load',()=>{if(!map)renderMap();});
-  return {render,setMode,changeView};
+  return {render,renderEvents,setMode,changeView};
 }

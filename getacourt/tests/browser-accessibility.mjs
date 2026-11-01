@@ -40,7 +40,7 @@ const server=createServer(async(req,res)=>{
   }
   const requested=url.pathname==="/"?"/index.html":url.pathname;
   const relative=requested.slice(1);
-  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|federated-search\.mjs|source-catalog\.mjs|personal-source-observation\.js|personal-observation-bridge\.mjs|federated-search\.css|player-search-view\.mjs|player-search\.css|leaflet-1\.9\.4\.(?:js|css)|leaflet-1\.9\.4-LICENSE\.txt))$/.test(relative)){
+  if(!/^(index\.html|find\.html|manifest\.webmanifest|assets\/(?:app\.js|styles\.css|auth-pkce\.js|commercial-signals\.js|personal-booking-import\.js|icon-(?:192|512)\.png|court-search-page\.mjs|event-(?:discovery|demo-fixtures|discovery-view)\.mjs|event-discovery\.css|federated-search\.mjs|source-catalog\.mjs|personal-source-observation\.js|personal-observation-bridge\.mjs|federated-search\.css|player-search-view\.mjs|player-search\.css|leaflet-1\.9\.4\.(?:js|css)|leaflet-1\.9\.4-LICENSE\.txt))$/.test(relative)){
     sendJson(res,404,{error:"NOT_FOUND"});return;
   }
   try{
@@ -198,6 +198,33 @@ try{
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
     assert.deepEqual(errors,[],width+' direct search JS errors');
     if(artifactDir)await page.screenshot({path:join(artifactDir,`get-direct-${width}-FIXTURE-ONLY.png`),fullPage:true});
+    // New intentions remain empty in REAL. Fictional event examples require opt-in.
+    await page.locator('#intentGames').click();
+    assert.equal(await page.locator('#offers .event-card').count(),0);
+    assert.match(await page.locator('#offers').innerText(),/not connected yet/);
+    assert.deepEqual(await evaluateAxe(),[],width+' real empty event WCAG audit');
+    await page.locator('#demoMode').click();
+    for(const intentId of ['intentGames','intentTournaments']){
+      await page.locator('#'+intentId).click();
+      assert.ok(await page.locator('#offers .event-card').count()>0);
+      assert.equal(await page.locator('#offers a').count(),0);
+      await page.locator('#offers details').first().locator('summary').click();
+      await page.locator('#offers .event-cta').first().focus();
+      await page.keyboard.press('Enter');
+      assert.match(await page.locator('#mapSelection').innerText(),/No registration/);
+      const v=await evaluateAxe();
+      if(v.length)console.error('AXE event '+intentId+' '+width+' '+JSON.stringify(v));
+      assert.deepEqual(v,[],width+' '+intentId+' event/detail WCAG audit');
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,width+' event layout');
+      assert.equal(await page.locator('.leaflet-container').count(),1,width+' one reused map');
+      if(artifactDir){
+        await page.locator('#results').scrollIntoViewIfNeeded();
+        await page.screenshot({path:join(artifactDir,`get-events-${intentId}-${width}-FICTIONAL.png`),fullPage:false});
+      }
+    }
+    await page.locator('#realMode').click();
+    assert.equal(await page.locator('#offers .event-card').count(),0);
+    assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length),0);
     // External CDN assets are deliberately denied; they are not part of source UAT.
     assert.ok(blocked.every(host=>host==="unpkg.com"),width+" unexpected external origins "+blocked);
     completed++;
