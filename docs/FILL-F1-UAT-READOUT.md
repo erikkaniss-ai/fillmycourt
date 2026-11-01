@@ -329,3 +329,154 @@ adapter/authority would still be needed; none is implemented or requested here.
 The historical run cause stays UNKNOWN and its authority stays consumed, with
 all thirteen prior identities blocked. No Auth/staging/helper/account/credential
 operation or new UAT/quota request belongs to SESSION-03. `PUBLIC_GO=false`.
+
+## Plain-wire helper compatibility model — ADAPTER-04, 1 November 2026
+
+Batch `FILL-F1-ADAPTER-04-20261101` starts at accepted
+`6d64e7d620c7da52f0e677106c5a9546812f0be4`, same PR #8 / Issue #9. All
+accepted parser/one-shot/session files are frozen. The local Python helper was
+read and its SHA256 independently checked as
+`6ca033af474c21180652652c21ee6d4d4dafd16d379a4c11eb646d9ac9e53548`;
+it was **not imported, invoked, changed, staged or copied into CI**. CI has no
+dependency on the untracked local file. Source inspection is not a hosted run.
+
+### Compatibility matrix against the frozen source
+
+| Invariant in reviewed 6ca source | New model / remaining limit |
+| --- | --- |
+| Startup emits one `ready` before configuration/client/HTTP; one configure input within 300 s | Explicit `ready` read precedes exactly one configuration. Mock lifetime is deliberately shorter, at most 20 s. |
+| Configure keys exactly `op, approved_helper_sha256, plan`; plan keys `candidate_sha, run_id, authorization_id, t0, date, calendar_start, calendar_end, publishable_key, principals` | Same DTO field shape; ONLY fixed public sentinel / zero-fixture values. Mock hash, candidate, key, passwords and evidence are intentionally invalid for live configuration. |
+| Principals exactly canary/a/b with id/password; distinct identities/passwords; specific excluded/used IDs | Fixed distinct zero UUIDs and public per-label sentinel strings. No account, real key/password or current run can enter this factory. Frozen static exclusions do not prove current DB state or the consumed run's authority. |
+| Each successful configuration/command emits ONE ordered six-key JSONL record: label, route, status, request_id, verified, denied | Frozen strict parser handles all records unchanged; there are NO `FMC_SYNTHETIC/1` frames in this model. A complete record is response completeness only. |
+| `login` / `denied_login`: exactly op,label; response label with route login / denied_login | Exact finite command DTOs. Positive expects verified200/not-denied; banned-login observation expects verified+denied400/401/403. Mock constant statuses are not real Auth results or cause evidence. |
+| `get` / `denied_get`: exactly op,label,route; route among me, organizations, own_today, foreign_today, own_calendar, foreign_calendar, provider_connections | Finite labels/routes only. Own positive expects200; foreign and B provenance expect403; post-ban GET expects401/403. GET401/403 cannot establish membership removal, immediate revocation, expiry or a race. |
+| One-shot `(label,operation)` slot consumed BEFORE HTTP, including ambiguous failures | Model consumes each named slot before write, no retry; all fatal failures fence the process. |
+| `get` and `denied_get` return the SAME label/route tuple | Parent rejects overlapping expected status/denied sets as AMBIGUOUS_RESPONSE_SLOT before write, e.g. foreign403 then denied-foreign401/403. Disjoint positive-me200 versus denied-me401/403 remains only serialized parent inference. |
+| No child command nonce, sequence, run/hash echo, acknowledgement fence or phase-end field; request_id is sanitized upstream HTTP metadata and may be empty | Parent-only ordinal/one-inflight ordering is explicit, never child-authenticated correlation. PID and source hash bind the owned mock process, not individual responses or a live helper. |
+| Canary positive before T0+120; operators need gate and login before600; operator positive GET before1200; denied observations at120/1200 | Fixture age models these thresholds only. No real 30-minute authority or T0 is created. |
+| Gate exact op/run_id/candidate_sha/decision/lease_digest/evidence_ref, one gate, age180..599; caller supplies independent receipt | Fixed synthetic gate only, parent model requires age180..599. The frozen helper validates field formats, not an independent current CTO verdict/guard lease; model gate never authorizes operators. |
+| Original DB T0+1800 absolute deadline, wall/monotonic agreement within2 s; no renewal from configure | Immutable fixture T0 plus monotonic model age / expiry test; distinct immutable18 s parent cap. Model has no DB clock, current lease, wall-clock attestation or authority. |
+| `closed` / `deadline` controls are verified=false; deadline watchdog emits then exits90 | Separate strict-parser candidates recognize terminal controls and abort. Mock deadline also sets exit90. Neither terminal event is proof of process close. |
+| Configured EOF exits silently after clearing sessions; no close command or success event | Adapter close sends stdin EOF, requires separate zero-exit+EOF metadata and observed closure. Result is PROCESS_CLOSED_UNAUTHENTICATED, never authenticated acceptance. |
+
+The frozen helper's candidate constant remains `ed0eeea…`; this source-only
+adapter candidate does not replace it or inherit old deployment/UAT permission.
+
+### New source boundary and failure semantics
+
+`fill_uat_helper_contract.mjs` is a pure adapter/model: no filesystem, process
+launcher, URL, HTTP, Auth or real target. `request(name)` accepts only finite
+static names and writes a fixed DTO, not caller data. The fixture DTOs preserve
+field shapes but deliberately use candidate/hash zeros, zero UUIDs, short public
+`SYNTHETIC_SENTINEL:<label>` passwords, a sentinel key and sentinel evidence.
+They cannot pass the real helper's hash/key/password/evidence validation.
+Unknown keys, modified fixtures, URLs, key/JWT-shaped substitutes and arbitrary
+commands are rejected by the fixed mock's canonical DTO allowlist. A safe
+record's denial is additionally checked against the specific expected operation;
+a valid401 safe denial cannot satisfy a positive own-club200 expectation.
+
+The adapter serializes requests and increments a parent-only ordinal. Three
+bounded unchanged-parser instances evaluate the expected record and the two
+fatal terminal controls; no arbitrary text is searched or stripped. Records are
+released atomically only after the complete expected response, with
+`code=RESPONSE_COMPLETE_UNFENCED`, `boundaryVerified=false`,
+`childCorrelation=false`, `authenticatedClosure=false`, `liveReady=false`.
+There is no phase completion flag. Empty reads, quiet or count alone establish
+neither a boundary nor process closure. An identical malicious/delayed response
+arriving inside the next matching expectation cannot be distinguished by this
+wire: the one-response-per-serialized-command convention remains an assumption,
+not an authentication mechanism. A returned complete response cannot be
+retroactively revoked by a later OS chunk; later unsolicited output fences the
+session immediately and prevents further requests.
+
+`fill_uat_synthetic_helper.mjs` launches only itself with a finite scenario using
+documented pipes, fixed execPath or CTO-approved literal `node`, shell=false,
+windowsHide=true, and empty environment except noncredential SystemRoot under
+ordinary Windows Node. No caller executable/path/environment or live mode exists.
+Its only input is the canonical finite DTO; a 4,096-character cap is stricter
+than the real helper's16KiB configuration limit. The mock has no network client,
+token, session credential or live helper import. It models login state as a set
+of fictional labels only. It never invokes a real account/guard/operator gate.
+
+One parent deadline is fixed at construction (default16 s/max18 s); response
+budget default3 s/max5 s and stop confirmation default1 s/max2 s cannot renew it.
+The parent idle timer is independent of a blocked caller; the mock's independent
+watchdog is20 s. Session ingress and queued output each cap at64KiB, including
+consumed bytes; loops cap at1,024 reads. `advanceFixtureAge()` permits only finite
+forward model ages60/130/190/1200/1800 and never writes a helper command, modifies
+fixture T0, extends the parent deadline or grants real authority. Original model
+age1800 fails closed; wall-clock/DB/lease evidence remains absent.
+
+Unexpected/late/duplicate/schema/echo/CSI/EOF/nonzero/deadline/overflow/stderr,
+unknown operation, expired windows, concurrent request and ambiguous response
+slots terminate and clear pending parser/tuple/login state. Stop must observe
+closure; unconfirmed teardown returns no events. Errors contain fixed codes,
+not input, upstream exception or raw chunks. Clearing is logical reference
+clearing, not guaranteed physical heap erasure.
+
+`readiness()` has no live-use switch and always returns
+LIVE_EXECUTION_NOT_AUTHORIZED / liveReady=false / authorityConsumed=true /
+newAccountQuota=0 / helperCompatibilityAccepted=false. Fixture success or a
+model operator-gate response cannot alter this. Prior hosted run remains CLOSED
+FAIL / cleanup accepted; all thirteen identities remain blocked.
+
+### Validation and actual persistent-tool evidence
+
+The new37-test suite covers the plain startup/configuration/op schemas, source
+readiness refusal, one configuration, unauthorized/premature operators, consumed
+slots, overlapping response signatures, positive/denial semantics, original-age
+expiry, nonrenewing/reversed clocks, every split of SGR/CRLF and terminal records,
+late/extra/echo/nested/unsupported bytes, partial/zero/nonzero EOF, read/write
+hangs, ingress/loop limits, idle watchdogs and failed teardown. Eighteen finite
+native mock scenarios include no echo, fragmented/CRLF/SGR and fourteen fault
+cases; all owned children require observed closure. Modified public-negative
+DTOs are rejected by the actual mock, not only the parent API. No real credential
+or untracked helper is needed. Both existing CI jobs explicitly run this suite
+with unchanged exact-head checkout settings.
+
+```text
+node --test platform/tests/fill_uat_helper_contract.test.mjs
+```
+
+One actual mock spanned TWO separate persistent `mcp__node_repl__js` calls,
+2026-11-01 03:04:04.004–03:04:07.206 UTC,3,202 ms. PID24360 and the original
+deadline stayed constant. Call1 read ready/configure/canary login/own_today/
+foreign_today (five records, ordinals1..5), leaving the process open. Call2
+explicitly advanced only MODEL fixture age130 then190 and read canary denied
+GET/login, model gate, A login/calendar and B login/today (seven records,
+ordinals6..12). Every response remained UNFENCED with childCorrelation=false and
+liveReady=false. Separate stdinEOF close returned PROCESS_CLOSED_UNAUTHENTICATED
+with observed zero exit/EOF and stopConfirmed/processClosedObserved=true.
+Only safe metadata was printed, never raw chunks or input echo.
+
+Successful probe source SHA256 (no subsequent changes to these scripts):
+
+- Pure contract: `ad79c4b8d3f9194f2f8cbad4f55838ccfef5421cb2e5b354a00d7032f1f7b8e5`.
+- Fixed mock: `fa5041bf8d1df856b4734672f66c8f25dcbf3b89ed91799597cd307dfe39e540`.
+- Frozen parser: `f4dd8fef0f3088eceb4043b0ddbaa48e08fd2508c6200aea7c41fe5f0281cb5a`.
+
+This is ordinary plain-wire MOCK transport evidence. SESSION-03's invented
+synthetic fences, older direct execution-tool PIPE/TTY observations, and the
+uninvoked frozen helper remain separate evidence classes.
+
+### CTO-reviewable future activation plan — NOT execution authority
+
+1. Review whether serialized unfenced response assurance suffices. If stronger
+   child/run/command correlation is required, separately lease/review a helper
+   change and its exact new hash; do not silently modify6ca or invent wire fields.
+2. Review a real adapter/secret-input design separately. Current static invalid
+   fixtures are deliberately unusable for live credentials. This batch approves
+   no secret channel, key transfer, real helper invocation or account creation.
+3. Before any future activation, independently verify the sole guard, current
+   immutable canary verdict, exact candidate/helper/service pins, original DB T0,
+   nonrenewing lease, current blocked identities and known/unknown create counts.
+   The frozen static replay lists or supplied evidence strings cannot substitute.
+4. Only separate applicable owner authority may define a new bounded fictional
+   account budget and exact runtime/secret-logging scope. Existing authority is
+   consumed; this document does not request or renew it. Canary PASS must be
+   independently confirmed before operators, with bounded cleanup/readback even
+   if chat/input dies. No hypothetical plan is an activation receipt.
+5. Run the approved canary/UAT only after those independent gates, preserve the
+   original absolute deadline, abort on missing proof, and report actual cleanup
+   separately from F1 functionality. Production/public/provider/customer actions
+   remain excluded. No future outcome is claimed here. `PUBLIC_GO=false`.
