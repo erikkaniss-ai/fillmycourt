@@ -90,6 +90,43 @@ test('explicit total-price guard and duplicate-price conflicts fail closed',()=>
     {text:'Campo 1 18:00 - 19:30 €40',action:'Book'}]});
   assert.equal(conflicting.readerError,'OFFER_FORMAT_CHANGED');
 });
+
+const hourlyRow={...row,text:'Campo 1 18:00 – 19:30 90 min €36,00 per hour'};
+test('explicit hourly rates cannot become full-slot prices in the row parser',()=>{
+  for(const qualifier of ['per hour','PER HOUR','per   hr','por hora','POR   HORA',
+    '/h','/ H','/hr','/ HR','/hour','/ HOUR','/hora','/ HORA']){
+    assert.equal(parseRow({...hourlyRow,text:'Campo 1 18:00 – 19:30 90 min €36,00 '+qualifier}),null,qualifier);
+  }
+});
+
+test('a sole hourly row yields no observation or accepted Get bridge offer',()=>{
+  const obs=buildObservation({...base,rows:[hourlyRow]});
+  assert.equal(obs.readerError,'NO_EXPANDED_OFFERS');
+  assert.equal(obs.offers,undefined);
+  assert.throws(()=>normalizePersonalObservation(JSON.stringify(obs),query,
+    {now:Date.now(),validator:validation}),/INVALID_OBSERVATION/);
+});
+
+test('an hourly row alongside a valid total retains only the explicit total',()=>{
+  const obs=buildObservation({...base,rows:[hourlyRow,{...row,text:'Campo 2 18:00 – 19:30 90 min €40,00'}]});
+  assert.equal(obs.readerError,undefined);
+  assert.equal(obs.offers.length,1);
+  const result=normalizePersonalObservation(JSON.stringify(obs),query,{now:Date.now(),validator:validation});
+  assert.equal(result.offers.length,1);
+  assert.equal(result.offers[0].courtName,'Court 2');
+  assert.equal(result.offers[0].duration,90);
+  assert.equal(result.offers[0].priceMinor,4000);
+});
+
+test('court H and ordinary hour labels do not disqualify an unqualified sole EUR total',()=>{
+  for(const text of [row.text,'Court H 18:00 - 19:30 90 min total €36,00',
+    'Court 1 hour 18:00 - 19:30 total €36,00','Campo 1 hora 18:00 - 19:30 total €36,00']){
+    const parsed=parseRow({...row,text});
+    assert.equal(parsed?.priceEur,36,text);
+    assert.equal(parsed.durationMinutes,90);
+  }
+});
+
 test('cannot use forged hosts, tracking query, foreign venue paths or credit card fields',()=>{
   for(const sourceUrl of [
     'https://clubs.tiesports.com.evil.invalid/en/lisboa/OeirasPadelAcademy',
