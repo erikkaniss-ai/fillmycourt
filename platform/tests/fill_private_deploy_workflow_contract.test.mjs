@@ -14,6 +14,30 @@ test("Staging deploy is narrow and requires exact SHA GO before credential/uploa
   assert.ok(y.indexOf("node platform/scripts/fill_ci_gate.mjs --check-owner-go") < y.indexOf("netlify deploy"));
 });
 
+test("Netlify token is bound only to the two late credential and upload steps",()=>{
+  const stepsAt=y.indexOf("    steps:");
+  assert.ok(stepsAt>0);
+  assert.doesNotMatch(y.slice(0,stepsAt),/NETLIFY_AUTH_TOKEN:/,
+    "Netlify token must not be bound at workflow or job scope");
+  const firstOwnerGo=y.indexOf("run: node platform/scripts/fill_ci_gate.mjs --check-owner-go");
+  assert.ok(firstOwnerGo>=stepsAt);
+  assert.doesNotMatch(y.slice(0,firstOwnerGo),/secrets\.(?:FILL_)?NETLIFY_AUTH_TOKEN/,
+    "No Netlify secret expression may precede the initial owner GO guard");
+  const bindings=[...y.matchAll(/^          NETLIFY_AUTH_TOKEN: (.+)$/gm)];
+  assert.equal(bindings.length,2);
+  assert.equal((y.match(/NETLIFY_AUTH_TOKEN:/g)||[]).length,2);
+  for(const binding of bindings){
+    assert.ok(firstOwnerGo<binding.index,"First owner GO must precede every Netlify token binding");
+    assert.equal(binding[1].trim(),"${{ secrets.FILL_NETLIFY_AUTH_TOKEN || secrets.NETLIFY_AUTH_TOKEN }}");
+  }
+  const tokenSteps=y.split(/^      - /m).slice(1).filter(step=>/NETLIFY_AUTH_TOKEN:/.test(step));
+  assert.deepEqual(tokenSteps.map(step=>step.match(/^name: ([^\r\n]+)/)?.[1]),[
+    "Check private preview credential",
+    "Upload DRAFT only to existing private Fill site"
+  ]);
+  for(const step of tokenSteps) assert.match(step,/^        env:\r?\n          NETLIFY_AUTH_TOKEN:/m);
+});
+
 test("Deployment workflow targets ONLY same-repo Fill PR8 and existing team-only site",()=>{
   assert.match(y,/number == 8/);
   assert.match(y,/head_ref == 'fill\/operator-mvp-readonly'/);
