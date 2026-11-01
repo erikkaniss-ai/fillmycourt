@@ -64,7 +64,7 @@ select jsonb_build_object(
    from (select label,operation,user_id,verified,settled,activation_nonce,reserved_at,first_ban_readback_at
      from fill_private.uat_bootstrap_attempts where run_id=q.run_id order by label,operation limit 7) a),'[]'::jsonb),
  'bans',coalesce((select jsonb_agg(jsonb_build_object('id',u.id,'banned_until',${sqlTime('u.banned_until')}) order by u.id)
-   from (select id,banned_until from auth.users where id=any(q.ids) order by id limit 20) u),'[]'::jsonb)
+   from (select id,banned_until from auth.users where id=any(q.ids) order by id limit 21) u),'[]'::jsonb)
 ) as snapshot
 from request q cross join moment t
 left join fill_private.uat_runs r on r.run_id=q.run_id

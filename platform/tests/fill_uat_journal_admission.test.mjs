@@ -51,8 +51,13 @@ test('SQL remains exactly existing journal schema/trigger control, no DDL or sec
   for(const field of ['request_expires_at','preflight_executor','reconciliation_required','released_at','settled_at','input_digest'])assert.ok(schema.includes(field));
   assert.ok(f.queries.every(q=>!q.includes('security definer')));assert.match(f.queries.at(-1),/stopped_run as \(update fill_private\.uat_runs/);assert.match(f.queries.at(-1),/from stopped_intent/);
 });
-test('journal accepts only the canonical old16, not any arbitrary16 or old run/authority',()=>{
+test('journal accepts only the canonical old17, not any arbitrary17 or old run/authority',()=>{
+  assert.equal(CANONICAL_HISTORICAL_IDS.length,17);assert.ok(CANONICAL_HISTORICAL_IDS.includes('cf5ec236-b8a8-4de2-a7c4-1a1ebe5a5d91'));
   const f=fixture();for(const mutate of [b=>{b.historical_ids[0]=id(9997);},b=>{b.run_id='4c0cdb3b-c138-479b-9b69-fef96420642b';},b=>{b.authorization_id='01a1958f-5bc5-7382-822d-27d4db023a3e';}]){const b=structuredClone(f.binding);mutate(b);assert.throws(()=>createJournalAdmission({binding:b,executeSql:async()=>{throw Error('MUST_NOT_CALL');}}));}
+});
+
+test('B11 c84 and its actual human authority cannot enter a future journal or issue SQL',()=>{
+  let calls=0;for(const key of ['run_id','authorization_id']){const b=structuredClone(fixture().binding);b[key]=key==='run_id'?'c84ce71e-da5d-4d35-80b8-03df361e90a4':'01a195d0-a2d3-7492-ada1-13093bfac556';assert.throws(()=>createJournalAdmission({binding:b,executeSql:async()=>{calls++;}}));}assert.equal(calls,0);
 });
 for(const mode of ['inflight-insert','inflight-release'])test(`uncancelled ${mode} is owned: stop, settle and final fence without release replay`,async()=>{
   const f=fixture(mode),r=await runFillLifetime(f.options),s=f.stats();assert.ok(r.failure);assert.equal(r.journalStop.confirmed,true);assert.equal(r.ownedPending,0);assert.equal(s.releases,0);assert.equal(s.foreground,0);assert.equal(s.stops,2);assert.equal(s.stopped,true);

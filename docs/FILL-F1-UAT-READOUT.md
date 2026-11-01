@@ -1356,3 +1356,68 @@ structuredClone object was rejected by the unchanged strict DTO prototype
 boundary before clock validation. Public discovery fixtures now use the same
 JSON roundtrip as the official connector; all six clock cases pass in that
 actual REPL. The DTO/prototype guard was preserved rather than relaxed.
+
+## FILL-F1-CONTROL-12: closed B11 evidence and source-only control repair
+
+B11 actually entered T0 `2026-11-01T08:26:21.841587Z` on Operations
+deployment `9d1c8b64-9a14-4410-98ce-836950832ade`, still build `ed0eeea`.
+It failed before a permit, helper, canary login or operator activation.
+The second COMPLETE timed out at 2002ms; controller DISCOVERY rejection was
+also reported. The native tool record has total duration2234ms and Node
+execution9ms. STOP's response completed before the late COMPLETE response.
+These old records do not contain Node entry timestamps, so they do not prove
+whether STOP preceded processing or only preceded response delivery. The
+original delay/rejection cause remains UNKNOWN; do not infer clock, CPU,
+transport, or chat-interruption causality from correlation.
+
+The immutable local actual-failure receipt and the original-timestamp public
+frame archive were preserved before resetting the closed kernel. The checked-in
+`fill_uat_control_frames.json` contains only two original discovery snapshots,
+finite native timing/provenance, and a separately labelled partial snapshot
+derived from the official readonly cleanup. No config, passwords, Admin key,
+JWT, input digest or raw exception is included. Test copies alone replace
+identities/times with the explicit PUBLIC2030 model. The open-partial test is
+counterfactual: the real partial cleanup snapshot is stopped/reconciliation.
+
+[Independent CTO partial cleanup](https://github.com/erikkaniss-ai/fillmycourt/pull/8#issuecomment-6555572605)
+verified all17 identities long-banned, old16 preserved, one verified NEW
+canary, unknown0/active0/activations0 and stopped/cleanup-complete partial run.
+Only one principal/receipt exists; standard full3 cleanup remains UNKNOWN,
+and F1 remains FAIL. Helper EOF/exit/close are N/A because it never spawned.
+The c84 run and its actual HUMAN authority are consumed independently in
+the reducer and journal. All17 are protected history; future-source binding
+requires exactly17 disjoint historical IDs plus the same3 labels, maximum20
+known IDs. This source preparation grants no future attempt/accounts.
+
+The actual caller is now tracked as `fill_uat_foreground_caller.mjs`, instead
+of depending on an untracked orchestration implementation. It still owns
+prepare/arm/lookup before intent, one foreground, durable stop, late jobs and
+close/drain. The retired one-shot closed diagnostic selector rejects before
+creating any query/host timer. Existing CI controller tests import this tracked
+caller directly; no workflow change or parallel runner was needed.
+
+COMPLETE's 2s critical payload now sends only its operation key; the Node
+host already owns the query/plan. The original official response is retained
+unchanged. Finite caller records distinguish dispatch/deadline/settlement,
+late response and available execution metadata. The controller records real
+Node entry/return/processing duration separately from its verification clock,
+and finite decode/adopt/cache-publication/tick substages. A completion entering
+after STOP rejects at ENTRY, before decoding, adopting, caching or publishing;
+it cannot be reported merely as a bad discovery frame. STOP's retained last
+COMPLETE trace is never labelled as a new STOP execution timestamp.
+
+Real functions/V8-to-Node PUBLIC replay exercised both neutralized original
+frames and the explicitly open partial test copy without SQL/HTTP/Auth/helper.
+Both original data frames are valid bounded discovery WAITs, not permits.
+A separately labelled injected2234ms dispatch delay reproduced a2s caller
+timeout, stop overtaking entry, owned late settlement, and terminal ENTRY
+denial with no fake factory call. This proves that race handling, not the
+unknown cause of the original live delay. Observed ordinary public calls
+can fit2s; they do not establish a reliable hosted latency guarantee.
+
+Active RPC/checker2s, total read6s, DB freshness10s, guard45s, backend actions60s,
+first binding receipt72s, positives120s, denials180s, operator admission600s and
+the original30min deadline are unchanged. No timed-out operation is claimed
+cancelled. A source/CI PASS is not a hosted repair proof or F1 acceptance.
+Future hosted verification needs its own exact scope/authority; current GO
+cannot be renewed by unused quota, a source fix, CI or this replay.

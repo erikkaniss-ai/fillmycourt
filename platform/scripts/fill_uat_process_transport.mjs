@@ -24,7 +24,7 @@ const FIXED_FILES = Object.freeze([
   ['venv_config', resolve(ROOT, '.work/f1-auth-admin-venv/pyvenv.cfg'), 'fb495c656cb2605b9acdaa9e32df46ba855ea4470a0568a25ec962dcb79d1a31'],
   ['base_python', 'C:/Users/Thinkpad X1 Gen7/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe', 'f8b45d63047da9d9adf09892e4cc4317b859e86a93a478cc9616bc69d3b176e5'],
   ['collector', fileURLToPath(new URL('./fill_uat_helper_collector.mjs', import.meta.url)), '4751a40941ddb9379e6d7efc96f6b8e207fc3aa7d45d9e1965c623cb891cad04'],
-  ['verdict', fileURLToPath(new URL('./fill_uat_evidence_verdict.mjs', import.meta.url)), '7537808996568eeef8f0b0943926120c9159f6197a5e06448ae04ff6776e6d69'],
+  ['verdict', fileURLToPath(new URL('./fill_uat_evidence_verdict.mjs', import.meta.url)), '315d564f0e03c89de31a58f088d9446c3828cca43ebb1b7cd30e66cdfb30256b'],
   ['parser', fileURLToPath(new URL('./fill_uat_safe_events.mjs', import.meta.url)), 'f4dd8fef0f3088eceb4043b0ddbaa48e08fd2508c6200aea7c41fe5f0281cb5a'],
 ]);
 const CODES = new Set(('INVALID_OPTIONS WRITE_REJECTED CONCURRENT_WRITE CONCURRENT_READ ABORTED READ_ABORTED WRITE_FAILED STDERR_PRESENT OUTPUT_LIMIT UNSUPPORTED_OUTPUT SPAWN_FAILED PROCESS_ERROR ORIGINAL_DEADLINE PERMIT_REQUIRED PERMIT_REJECTED PERMIT_STALE PERMIT_REVOKED PERMIT_FAILED PERMIT_TIMEOUT HASH_MISMATCH FILE_BINDING_REJECTED LIVE_PLATFORM_REJECTED WRITE_TIMEOUT STOP_UNCONFIRMED').split(' '));

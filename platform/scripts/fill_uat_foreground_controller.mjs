@@ -11,7 +11,7 @@ export async function installFillNode(scope, offline) {
   const v = await import(root + 'platform/scripts/fill_uat_evidence_verdict.mjs');
   const t = await import(root + 'platform/scripts/fill_uat_process_transport.mjs');
   const { performance } = await import('node:perf_hooks');
-  const hash = '694f67cdcd99b30ed2eefabd2e5a377890bd8bceeeecfd28c369176646e82894';
+  const hash = 'b644aef8e3f5a2c7f12018d26162de78c39d21dff168f738357b97412e1c557a';
   const must = ok => { if (!ok) throw Error('FILL09_REJECTED'); };
   v.exact(scope,['run_id','authorization_id']);
   // Only the offline exercise supplies argument2. The live foreground below
@@ -36,8 +36,12 @@ export async function installFillNode(scope, offline) {
   const historical = ['057375d4-0d8f-4879-babe-db842630c871','45ef3b07-f811-4e27-b41b-64fe5970d675','46b4b78b-de3c-4e98-a414-941baddd6c95','4d7bbd35-8dc8-42cf-96db-ecfb17d35ad9','4ff65a8d-3d3b-4fd7-a032-a81fd8f51fce','57666863-9cae-4a60-aec1-4db5976ff094','596af5cb-6f58-45cc-a966-cc0266bbafab','af2942da-fab9-419b-8d42-8ecb107c4cd9','b82a8774-839f-4b73-8c4d-5c76c10dd957','bc7a9bbf-ba3f-4e40-9a60-7fe0367c7dc3','c29ba3be-d7ae-4dff-b662-88d1b0504024','cab76dae-5368-4483-85b7-13640e1fd8db','ff7959bf-dd1a-491e-a8fc-49888f1122fc'];
   let binding, authority, owner, plan, relay, cache, child, task, receipt, lastSnapshot, checkpoint, proof, cleanupRelay;
   let phase = 'DISCOVERY', stopped = false, launched = false, currentCommand, next = 0, canarySent = false, cleanupRequested = false;
-  historical.push('70e38a5b-a980-4b1a-8a62-e7478fcb8b08','9e30235b-9ddf-4a7f-83dc-1aa95bd56c0b','b3ab3f9d-b94c-456c-84f0-35181e0ec224');
+  historical.push('70e38a5b-a980-4b1a-8a62-e7478fcb8b08','9e30235b-9ddf-4a7f-83dc-1aa95bd56c0b','b3ab3f9d-b94c-456c-84f0-35181e0ec224','cf5ec236-b8a8-4de2-a7c4-1a1ebe5a5d91');
   let cutoff = wall() + 300000, startWall, startMono, closedProof = null, outcome='PENDING', childAbortTask, positiveReady=false,controlFailure=null,operatorAdmissionWaiting=false,operatorsReady=false,rootAccepted=null,clockWait=null;
+  let readTrace=null,readSequence=0;
+  let nodeEntryMono=0;
+  const mark=stage=>{if(readTrace){const elapsed=monotonic()-startMono;readTrace.substage=stage;readTrace.elapsedMs=Number.isFinite(elapsed)&&elapsed>=0?elapsed:null;readTrace.nodeElapsedMs=performance.now()-nodeEntryMono;}};
+  const finishTrace=()=>{if(readTrace){readTrace.returnWall=wall();readTrace.nodeReturnAt=Date.now();readTrace.nodeElapsedMs=performance.now()-nodeEntryMono;}};
   const observations = [], canary = [
     { op: 'login', label: 'canary' }, { op: 'get', label: 'canary', route: 'own_today' }, { op: 'get', label: 'canary', route: 'foreign_today' }
   ];
@@ -55,6 +59,7 @@ export async function installFillNode(scope, offline) {
   function kill() {
     clearPrivateInputs();
     if (!stopped) {
+      if(readTrace)readTrace.stopWall=wall();
       stopped = true; phase = 'CLEANUP_ONLY'; cache?.stop();
       if(outcome==='PENDING')outcome='ABORTED';
       if(plan)cleanupRelay=new b.CheckpointRelay({plan,owner:null,publish:()=>{},wall,monotonic});
@@ -113,7 +118,7 @@ export async function installFillNode(scope, offline) {
     const obs = observations.filter(o => o.label === 'canary');
     const activation = lastSnapshot.attempts.find(a => a.label === 'canary' && a.operation === 'activate');
     const principal = lastSnapshot.principals.find(a => a.label === 'canary');
-    must(obs.length === 5 && activation?.first_ban_readback_at && principal.receipt === true && checkpoint.activeKnownCount === 0 && checkpoint.unknownCreates === 0 && checkpoint.unsettledActivations === 0 && checkpoint.knownBanCount === 19);
+    must(obs.length === 5 && activation?.first_ban_readback_at && principal.receipt === true && checkpoint.activeKnownCount === 0 && checkpoint.unknownCreates === 0 && checkpoint.unsettledActivations === 0 && checkpoint.knownBanCount === v.MAX_KNOWN_COUNT);
     proof = { binding, authority, budget: { binding, source:'guard_readback', independent:true, known_created_ids:Object.values(binding.identities), unknown_create_count:0, active_count:0, pending_activation_count:0, unresolved_nonce_count:0, at:lastSnapshot.observed_at },
       canary: { binding, positive:obs.slice(0,3), ban: { source:'guard_readback', independent:true, user_id:binding.identities.canary, banned:true, at:activation.first_ban_readback_at, readback_at:lastSnapshot.observed_at }, retained_denial:obs[3], auth_denial:obs[4], auth_user_banned_verified:obs[4].verified === true } };
     // Current canonical observation may be AFTER180; ban readback must retain
@@ -197,12 +202,20 @@ export async function installFillNode(scope, offline) {
     }
   }
   return {
-    begin() { must(wall()<cutoff); startWall=wall(); startMono=monotonic(); if(stopped){must(cleanupRelay);return {...cleanupRelay.begin(),cleanupOnly:true};} if(!relay) return {query:discovery,project_id:b.PROJECT,discovery:true}; return relay.begin(); },
+    begin() { must(wall()<cutoff); startWall=wall(); startMono=monotonic();readTrace={sequence:++readSequence,beginWall:startWall,entryWall:null,returnWall:null,elapsedMs:0,substage:'WAIT_READ'}; if(stopped){must(cleanupRelay);return {...cleanupRelay.begin(),cleanupOnly:true};} if(!relay) return {query:discovery,project_id:b.PROJECT,discovery:true}; return relay.begin(); },
     async complete(ticket, raw) {
+      let reason='VALIDATION_REJECTED';
       try {
+        nodeEntryMono=performance.now();mark('ENTRY');if(readTrace){readTrace.entryWall=wall();readTrace.nodeEntryAt=Date.now();}
+        // An uncancelled tool invocation can enter AFTER the caller's stop.
+        // Do not decode/adopt/cache it, and do not mislabel that as bad data.
+        reason='STOPPED_BEFORE_COMPLETE';must(!stopped||ticket.cleanupOnly===true);
+        reason='READ_TIME_REJECTED';mark('READ_BUDGET');
         must(monotonic()-startMono<=6000 && Math.abs((wall()-startWall)-(monotonic()-startMono))<=2000);
+        reason='READBACK_REJECTED';mark('DECODE');
         const originalObservedAt=b.decodeReadback(raw).observed_at,observed=v.instant(originalObservedAt),gap=observed-wall();
         if(gap>0){
+          mark('CLOCK_WAIT');reason='CLOCK_WAIT_REJECTED';
           const requestedMs=Math.ceil(gap)+2,remaining=6000-(monotonic()-startMono);
           clockWait={originalObservedAt,requestedMs,elapsedMs:0,code:gap>200?'FUTURE_WAIT_LIMIT':requestedMs>remaining?'READ_BUDGET':'WAITING'};
           must(gap<=200&&requestedMs<=remaining);
@@ -211,19 +224,21 @@ export async function installFillNode(scope, offline) {
           must(clockWait.elapsedMs>=0&&clockWait.elapsedMs<=250&&wall()>=observed&&monotonic()-startMono<=6000&&Math.abs((wall()-startWall)-(monotonic()-startMono))<=2000);
           clockWait.code='PAST_VERIFIED';
         }
-        must(!stopped||ticket.cleanupOnly===true);
-        if(ticket.discovery) adopt(raw);
+        reason='STOPPED_DURING_COMPLETE';must(!stopped||ticket.cleanupOnly===true);
+        if(ticket.discovery) {mark('DISCOVERY_ADOPT');reason='DISCOVERY_REJECTED';adopt(raw);}
         else {
+          mark('CANONICAL_VALIDATE');reason='CANONICAL_REJECTED';
           lastSnapshot=b.validateSnapshot(raw,plan);
           const activation=lastSnapshot.attempts.find(a=>a.operation==='activate'&&a.label==='canary'), health=lastSnapshot.run?.healthy_at;
           positiveReady=!!(activation?.verified&&activation.settled&&activation.user_id===binding.identities.canary&&lastSnapshot.run?.armed&&health&&wall()>=v.instant(health)&&wall()-v.instant(health)<=45000);
+          mark('CACHE_PUBLISH');reason='PUBLISH_REJECTED';
           const result=await (ticket.cleanupOnly?cleanupRelay:relay).complete(ticket.sequence,raw,{tool:b.TOOL,project_id:b.PROJECT,query_sha256:plan.query_sha256,trusted_readback:true});
           must(result); checkpoint=result.state; lastSnapshot=b.validateSnapshot(raw,plan);
           const ordinaryWait=operatorAdmissionWaiting||!launched&&!positiveReady&&wall()<v.instant(binding.t0)+60000&&checkpoint.reasons.every(r=>['GUARD_NOT_HEALTHY','UNSETTLED_ACTIVATION'].includes(r));
           if(!stopped&&checkpoint.decision==='DENY'&&!ordinaryWait)kill();
         }
-        tick(); return this.status();
-      } catch { controlFailure={stage:ticket.discovery?'DISCOVERY':'CANONICAL_READ',code:'CONTROL_REJECTED'};kill(); return this.status(); }
+        mark('TICK');reason='TICK_REJECTED';tick();mark('RETURN');finishTrace();return this.status();
+      } catch { controlFailure={stage:ticket.discovery?'DISCOVERY':'CANONICAL_READ',code:'CONTROL_REJECTED',substage:readTrace?.substage??'ENTRY',reason};kill();finishTrace();return this.status(); }
     },
     async acceptRootReceipt(rawComment) {
       // Root publishes the FINAL JSON and verifies its readback FIRST, then
@@ -245,7 +260,7 @@ export async function installFillNode(scope, offline) {
       } catch { controlFailure={stage:'ROOT_RECEIPT',code:'ROOT_GATE_REJECTED'};kill(); }
       return this.status();
     },
-    status() { return {phase,outcome,cutoff,positiveReady,operatorsReady,operatorAdmissionWaiting,lastPermitDbObservedAt:cache?.snapshot.lastDbObservedAt??null,clockWait,controlFailure,offlinePublicData:offline!==undefined,grantsOwnerGo:false,discovery:!binding,stopped,taskPending:!!task&&!receipt,canaryRequest:phase==='WAIT_CTO'&&proof&&!canarySent?(canarySent=true,{proof,lease_digest:owner.lease_digest}):null,
+    status() { return {phase,outcome,source_sha:p.source_sha,cutoff,positiveReady,operatorsReady,operatorAdmissionWaiting,lastPermitDbObservedAt:cache?.snapshot.lastDbObservedAt??null,clockWait,controlFailure,readTrace:readTrace?{...readTrace}:null,offlinePublicData:offline!==undefined,grantsOwnerGo:false,discovery:!binding,stopped,taskPending:!!task&&!receipt,canaryRequest:phase==='WAIT_CTO'&&proof&&!canarySent?(canarySent=true,{proof,lease_digest:owner.lease_digest}):null,
       rootEvidenceRef:phase==='WAIT_CTO'&&checkpoint?.operatorGateEligible?lastSnapshot.intent.verdict_evidence_ref:null,
       cleanupRequest:stopped&&!cleanupRequested?(cleanupRequested=true,{run_id:scope.run_id,authorization_id:scope.authorization_id}):null,
       cleanup:checkpoint?.cleanup??'UNKNOWN',lastDbObservedAt:checkpoint?.dbObservedAt??null,knownBanCount:checkpoint?.knownBanCount??null,observations,closedProof}; },

@@ -11,7 +11,7 @@ const T0 = Date.parse('2030-01-01T00:00:00Z');
 export function publicFixture() {
   const binding = { run_id: ID(9000), authorization_id: ID(9001), candidate_sha: CANDIDATE, helper_sha256: HELPER_HASH,
     t0: new Date(T0).toISOString(), identities: { canary: ID(9010), a: ID(9011), b: ID(9012) },
-    historical_ids: Array.from({ length: 16 }, (_, i) => ID(9100 + i)),
+    historical_ids: Array.from({ length: 17 }, (_, i) => ID(9100 + i)),
     pins: { operations_service_id: 'c0c6e5e2-0040-48e0-a0af-abfb1ec81b61', operations_sha: CANDIDATE,
       core_service_id: 'fc97f78f-d39e-4598-a615-b2413b9b3f76', core_sha: '0134f603445ea7f282ef0cb866d0f3591518cbb9',
       preview_site_id: 'd763b7a1-dccd-4638-8876-ac1670171698', preview_sha: CANDIDATE, supabase_project_ref: 'yclqnbcrchwieyzkyumx' } };

@@ -3,7 +3,7 @@
 // executor in the SAME awaited V8 lifetime. No callback may log query/binding.
 const PROJECT='yclqnbcrchwieyzkyumx',CANDIDATE='ed0eeea4ccde35ff54ee8331795326c15a49a5f9';
 const ORGS=['4484cf28-1947-41dd-9b41-14891ac93752','af24d8dd-813f-4919-bd6d-49a6d1169b25'];
-export const CANONICAL_HISTORICAL_IDS=Object.freeze(['057375d4-0d8f-4879-babe-db842630c871','45ef3b07-f811-4e27-b41b-64fe5970d675','46b4b78b-de3c-4e98-a414-941baddd6c95','4d7bbd35-8dc8-42cf-96db-ecfb17d35ad9','4ff65a8d-3d3b-4fd7-a032-a81fd8f51fce','57666863-9cae-4a60-aec1-4db5976ff094','596af5cb-6f58-45cc-a966-cc0266bbafab','af2942da-fab9-419b-8d42-8ecb107c4cd9','b82a8774-839f-4b73-8c4d-5c76c10dd957','bc7a9bbf-ba3f-4e40-9a60-7fe0367c7dc3','c29ba3be-d7ae-4dff-b662-88d1b0504024','cab76dae-5368-4483-85b7-13640e1fd8db','ff7959bf-dd1a-491e-a8fc-49888f1122fc','70e38a5b-a980-4b1a-8a62-e7478fcb8b08','9e30235b-9ddf-4a7f-83dc-1aa95bd56c0b','b3ab3f9d-b94c-456c-84f0-35181e0ec224']);
+export const CANONICAL_HISTORICAL_IDS=Object.freeze(['057375d4-0d8f-4879-babe-db842630c871','45ef3b07-f811-4e27-b41b-64fe5970d675','46b4b78b-de3c-4e98-a414-941baddd6c95','4d7bbd35-8dc8-42cf-96db-ecfb17d35ad9','4ff65a8d-3d3b-4fd7-a032-a81fd8f51fce','57666863-9cae-4a60-aec1-4db5976ff094','596af5cb-6f58-45cc-a966-cc0266bbafab','af2942da-fab9-419b-8d42-8ecb107c4cd9','b82a8774-839f-4b73-8c4d-5c76c10dd957','bc7a9bbf-ba3f-4e40-9a60-7fe0367c7dc3','c29ba3be-d7ae-4dff-b662-88d1b0504024','cab76dae-5368-4483-85b7-13640e1fd8db','ff7959bf-dd1a-491e-a8fc-49888f1122fc','70e38a5b-a980-4b1a-8a62-e7478fcb8b08','9e30235b-9ddf-4a7f-83dc-1aa95bd56c0b','b3ab3f9d-b94c-456c-84f0-35181e0ec224','cf5ec236-b8a8-4de2-a7c4-1a1ebe5a5d91']);
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ERRORS=new Set(['INVALID_BINDING','JOURNAL_CLOSED','JOURNAL_RPC_FAILED','JOURNAL_RPC_TIMEOUT','INVALID_READBACK','INTENT_NOT_CREATED','PREFLIGHT_REJECTED','RELEASE_UNCERTAIN','STOP_UNCONFIRMED']);
 export class AdmissionError extends Error{constructor(code){super('Fill journal admission rejected.');this.code=ERRORS.has(code)?code:'INVALID_BINDING';}}
@@ -36,15 +36,15 @@ export function decodeJournalReadback(input){
 export function createJournalAdmission({binding,executeSql,wall=Date.now,sleep=ms=>new Promise(r=>setTimeout(r,ms)),drainMs=11000}){
   must(binding&&Object.keys(binding).sort().join(',')==='authorization_id,candidate_sha,deployment_id,historical_ids,input_digest,project_ref,run_id,settled_at');
   must(UUID.test(binding.run_id)&&UUID.test(binding.authorization_id)&&UUID.test(binding.deployment_id)&&binding.candidate_sha===CANDIDATE&&binding.project_ref===PROJECT&&/^[0-9a-f]{64}$/.test(binding.input_digest));instant(binding.settled_at);
-  must(Array.isArray(binding.historical_ids)&&binding.historical_ids.length===16&&new Set(binding.historical_ids).size===16&&binding.historical_ids.every(x=>UUID.test(x)));
+  must(Array.isArray(binding.historical_ids)&&binding.historical_ids.length===17&&new Set(binding.historical_ids).size===17&&binding.historical_ids.every(x=>UUID.test(x)));
   must([...binding.historical_ids].sort().join(',')===[...CANONICAL_HISTORICAL_IDS].sort().join(','));
-  must(!['90d00651-5b01-418d-8769-51aef782b7b0','0c7664ff-6920-4a09-91b5-22a423187864','0e3a5a5a-fa68-4b3f-9a96-bdca500b1ab4','4c0cdb3b-c138-479b-9b69-fef96420642b'].includes(binding.run_id));
-  must(!['01a18fc1-08b7-76d2-b9ec-062882378ab8','01a18f95-f6ff-7642-9a6a-4cc95929f5aa','01a19021-4661-7770-af81-f1ee25bd0362','01a1958f-5bc5-7382-822d-27d4db023a3e'].includes(binding.authorization_id));
+  must(!['90d00651-5b01-418d-8769-51aef782b7b0','0c7664ff-6920-4a09-91b5-22a423187864','0e3a5a5a-fa68-4b3f-9a96-bdca500b1ab4','4c0cdb3b-c138-479b-9b69-fef96420642b','c84ce71e-da5d-4d35-80b8-03df361e90a4'].includes(binding.run_id));
+  must(!['01a18fc1-08b7-76d2-b9ec-062882378ab8','01a18f95-f6ff-7642-9a6a-4cc95929f5aa','01a19021-4661-7770-af81-f1ee25bd0362','01a1958f-5bc5-7382-822d-27d4db023a3e','01a195d0-a2d3-7492-ada1-13093bfac556'].includes(binding.authorization_id));
   must([executeSql,wall,sleep].every(x=>typeof x==='function')&&drainMs>0&&drainMs<=11000);
   const b=Object.freeze({...binding,historical_ids:Object.freeze([...binding.historical_ids])});
   const identity=`i.run_id='${b.run_id}'::uuid and i.authorization_id='${b.authorization_id}'::uuid and i.candidate_sha='${CANDIDATE}' and i.project_ref='${PROJECT}' and i.organization_ids='${JSON.stringify(ORGS)}'::jsonb and i.deployment_id='${b.deployment_id}'::uuid and i.settled_at='${b.settled_at}'::timestamptz and i.input_digest='${b.input_digest}'`;
   const oldIds=`array[${b.historical_ids.map(x=>`'${x}'::uuid`).join(',')}]`;
-  const oldBans=`(select count(*) from (select id from auth.users where id=any(${oldIds}) and banned_until>clock_timestamp()+interval '365 days' limit 17) old_bans)=16`;
+  const oldBans=`(select count(*) from (select id from auth.users where id=any(${oldIds}) and banned_until>clock_timestamp()+interval '365 days' limit 18) old_bans)=17`;
   const limits=`limits as materialized (select set_config('lock_timeout','500ms',true))`;
   const scopeResult=`'run_id','${b.run_id}','authorization_id','${b.authorization_id}','observed_at',${stamp('clock_timestamp()')}`;
   let control=null,fenced=false,intentAttempted=false,intentCreated=false,releaseAttempted=false,releaseOutcome='NOT_ATTEMPTED',stopTask=null;
