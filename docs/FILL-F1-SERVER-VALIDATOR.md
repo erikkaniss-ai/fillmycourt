@@ -46,6 +46,29 @@ Root/operator and total-run deadlines are retained. No critical per-command
 MCP acknowledgement is needed. There is no claim yet that live Auth/SQL/app
 latency meets these bounds.
 
+The validator's read port now obtains intent, attempts, lease digest, guard
+state, explicitly scoped bans/markers/memberships and the prior-identity check
+in one data SELECT. It uses the existing transaction's statement/lock timeout
+setup; those setup statements remain. It does not call bootstrap's separate
+read transaction first. PostgreSQL's [statement snapshot semantics](https://www.postgresql.org/docs/16/transaction-iso.html)
+keep these nested reads coherent even at the existing isolation level.
+Nested JSON timestamps/UUIDs are restored to the previous native payload
+types, and authority/input binding checks remain mandatory. No privilege,
+scope, role, nonce, freshness, proof or deadline condition is removed.
+
+Private timeout evidence names a fixed stage and elapsed milliseconds only.
+Late completion has a separate fixed outcome; it never turns a timeout into
+cancellation, retry authority or a successful cleanup receipt. Stage events
+contain no SQL, field values, identities, credentials, input digest or raw
+exceptions. Existing terminal/ownership evidence remains separate. This is
+a source optimization, not proof of a hosted fix or of the underlying cause
+of a previous timeout. Disposable PostgreSQL fixtures remain synthetic SQL
+contracts, not supported Auth provisioning or hosted acceptance.
+Their target is validated before engine/connection/fixture DDL: psycopg,
+loopback, database `fmc_test`, no URL query overrides and explicit fixture
+opt-in. Local runs use `FILL_SERVER_SNAPSHOT_FIXTURES=ci-local-only`; the
+existing GitHub `contract` job opts in for its disposable PostgreSQL service.
+
 A dedicated bounded read thread and separate stop thread avoid exhausting the
 guard's executor. They are threads inside the existing process, not services or
 OS child processes. Timeouts do not mean cancellation. Late jobs remain owned,

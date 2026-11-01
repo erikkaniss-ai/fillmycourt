@@ -1,15 +1,18 @@
 """Dummy IDs/times, mocked HTTP/journal/clock only. Never hosted acceptance."""
 import asyncio
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import threading
 from types import SimpleNamespace
 import uuid
 
 import httpx
 import pytest
+from sqlalchemy import create_engine, text
 
 from fmc import fill_uat_guard as g
 from fmc import fill_uat_bootstrap as b
@@ -281,6 +284,10 @@ def test_validator_hung_read_does_not_block_existing_guard_cleanup(e, monkeypatc
     asyncio.run(exercise())
     assert not e.runner.jobs and not e.http
     assert any(x["kind"] == "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED" for x in e.logs)
+    timeout = next(x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_STAGE_TIMEOUT")
+    late = next(x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_LATE_STAGE")
+    assert timeout["stage"] == late["stage"] == "admission_snapshot"
+    assert timeout["elapsed_ms"] >= 1900 and late["outcome"] == "complete"
 
 
 def test_late_auth_response_after_close_cannot_restore_session(e):
@@ -449,3 +456,254 @@ def test_runtime_origin_mismatch_quarantines_before_admission(e, monkeypatch):
     guard = SimpleNamespace(bootstrap=e.boot, clock=e.clock.wall, monotonic=e.clock.tick, is_fixture=lambda a: True, check=lambda *a: None)
     runner = s.from_environment(SimpleNamespace(environment="staging", supabase_publishable_key=PUBLIC_KEY), "operations", guard, None)
     assert isinstance(runner, s.RejectedValidator) and not e.boot.server_validator.admission_ready and not e.http
+
+
+def wire_snapshot(e):
+    """Public synthetic wire payload for the single-statement decoder."""
+    e.clock.seconds = 10
+    e.port.initial = False
+    data = e.port.read()
+    row = deepcopy(data["intent"])
+    row.update(input_digest=e.plan.digest, created_at=START, settled_at=START,
+               preflight_at=START, released_at=START)
+    row["verdict_at"] = None
+    def wire(value):
+        return json.loads(json.dumps(value, default=str))
+    row["_attempts"] = wire([dict(x, run_id=e.cfg.run_id) for x in row.pop("attempts")])
+    row["_run"] = wire(data["run"])
+    row["_bans"] = wire([{"id": k, "banned_until": v} for k, v in data["bans"].items()])
+    row["_markers"] = wire([dict(v, id=k) for k, v in data["markers"].items()])
+    row["_members"] = wire(data["members"])
+    row["_prior_unknown"] = data["prior_unknown"]
+    return row
+
+
+def query_port(e, payload):
+    calls = []
+    @contextmanager
+    def tx():
+        def execute(statement, params):
+            calls.append((statement, params))
+            return SimpleNamespace(mappings=lambda: SimpleNamespace(first=lambda: deepcopy(payload)))
+        yield SimpleNamespace(execute=execute)
+    e.boot.journal = SimpleNamespace(tx=tx, deployment=e.cfg.deployment_id)
+    return s.JournalPort(e.boot, e.cfg), calls
+
+
+def test_single_data_statement_and_native_nested_type_parity(e):
+    raw = wire_snapshot(e)
+    port, calls = query_port(e, raw)
+    got = port.read()
+    assert len(calls) == 1 and calls[0][0] is s.JournalPort.SNAPSHOT
+    assert calls[0][1] == {"run": e.cfg.run_id, "history": list(e.cfg.historical_ids)}
+    assert got["intent"]["db_now"] == e.clock.wall()
+    assert got["intent"]["input_digest"] == e.plan.digest
+    assert isinstance(got["intent"]["attempts"][0]["activation_nonce"], uuid.UUID)
+    assert isinstance(got["intent"]["attempts"][0]["run_id"], uuid.UUID)
+    assert isinstance(got["members"][0]["user_id"], uuid.UUID)
+    assert isinstance(got["markers"][e.ids["a"]]["id"], uuid.UUID)
+    assert got["run"]["healthy_at"] == e.clock.wall()
+    assert got["bans"][ID(1)] > START+timedelta(days=365)
+    assert "_bans" not in got["intent"] and got["prior_unknown"] is False
+
+
+def test_single_statement_no_intent_does_not_read_legacy_journal(e):
+    port, calls = query_port(e, None)
+    assert port.read() is None and len(calls) == 1
+
+
+@pytest.mark.parametrize("key,value", [
+    ("authorization_id", ID(999)), ("candidate_sha", "f"*40), ("project_ref", "foreign"),
+    ("deployment_id", ID(999)), ("input_digest", "f"*64), ("organization_ids", []),
+    ("db_now", START.isoformat()), ("db_now", None), ("db_now", START.replace(tzinfo=None)),
+    ("stopped", "false"), ("_prior_unknown", 0), ("_attempts", {}), ("_members", None),
+])
+def test_single_snapshot_rejects_authority_and_wire_type_corruption(e, key, value):
+    raw = wire_snapshot(e)
+    raw[key] = value
+    port, calls = query_port(e, raw)
+    with pytest.raises(s.Closed):
+        port.read()
+    assert len(calls) == 1 and not e.http
+
+
+@pytest.mark.parametrize("change", ["naive_date", "duplicate_ban", "bad_uuid", "attempt_bool", "foreign_attempt", "overflow"])
+def test_nested_json_does_not_coerce_or_hide_ambiguous_payload(e, change):
+    raw = wire_snapshot(e)
+    if change == "naive_date":
+        raw["_run"]["healthy_at"] = START.replace(tzinfo=None).isoformat()
+    elif change == "duplicate_ban":
+        raw["_bans"].append(raw["_bans"][0])
+    elif change == "bad_uuid":
+        raw["_members"][0]["user_id"] = "invalid"
+    elif change == "attempt_bool":
+        raw["_attempts"][0]["verified"] = "false"
+    elif change == "foreign_attempt":
+        raw["_attempts"][0]["run_id"] = ID(999)
+    else:
+        raw["_attempts"] = raw["_attempts"]*3
+    port, _ = query_port(e, raw)
+    with pytest.raises(s.Closed):
+        port.read()
+
+
+@pytest.mark.parametrize("fault", ["freshness", "history", "nonce", "role", "membership", "prior", "spec"])
+def test_decoded_snapshot_still_enforces_freshness_history_nonce_roles(e, fault):
+    raw = wire_snapshot(e)
+    port, _ = query_port(e, raw)
+    e.runner.port = port
+    e.runner.ready = True
+    if fault == "freshness":
+        raw["db_now"] = START-timedelta(seconds=11)
+    elif fault == "history":
+        raw["_bans"] = [x for x in raw["_bans"] if x["id"] != ID(1)]
+    elif fault == "nonce":
+        raw["_markers"][0]["nonce"] = ID(999)
+    elif fault == "role":
+        raw["_members"][0]["role"] = "manager"
+    elif fault == "membership":
+        raw["_members"][0]["organization_id"] = ID(999)
+    elif fault == "prior":
+        raw["_prior_unknown"] = True
+    else:
+        raw["_run"]["spec"]["candidate_sha"] = "f"*40
+    asyncio.run(e.runner.run())
+    assert e.runner.failed and not e.http
+
+
+def test_late_stop_does_not_block_client_closure_or_claim_cleanup(e):
+    release = threading.Event()
+    e.fault = "foreign-user"
+    def stop():
+        release.wait(5)
+        e.port.stopped = True
+        return True
+    e.port.stop = stop
+    async def exercise():
+        try:
+            await asyncio.wait_for(e.runner.run(), 4)
+            final = next(x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_TASK_STOPPED")
+            assert not final["durable_stop"] and final["client_closed"] and final["owned_pending"] == 1
+            assert final["cleanup"]["status"] == "UNKNOWN"
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    timeouts = [x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_STAGE_TIMEOUT"]
+    late = [x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_LATE_STAGE"]
+    assert timeouts[0]["stage"] == late[0]["stage"] == "durable_stop"
+    assert timeouts[0]["elapsed_ms"] >= 1900 and late[0]["outcome"] == "complete"
+    assert all(set(x) <= {"kind", "stage", "elapsed_ms", "outcome"} for x in timeouts+late)
+    assert e.port.stopped and not e.runner.jobs and not e.runner.operator_gate
+    for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, e.plan.digest):
+        assert sentinel not in s.canonical(timeouts+late)
+
+
+def snapshot_fixture_engine(url, opt_in):
+    from test_fill_provenance_uat import fixture_database
+    # Validation happens before create_engine or connection/fixture DDL. Reuse
+    # the existing driver/loopback/fmc_test/no-query/explicit-opt-in boundary.
+    return create_engine(fixture_database(url, opt_in))
+
+
+@pytest.mark.parametrize("url,opt_in", [
+    ("postgresql+psycopg://fixture:NEVER_PRINT@remote.invalid/fmc_test", "ci-local-only"),
+    ("postgresql+psycopg://fixture@localhost/production", "ci-local-only"),
+    ("postgresql+psycopg://fixture@localhost/fmc_test?host=remote.invalid", "ci-local-only"),
+    ("postgresql+psycopg://fixture@localhost/fmc_test", ""),
+    ("postgresql://fixture@localhost/fmc_test", "ci-local-only"),
+    ("not-a-url", "ci-local-only"), (None, "ci-local-only"),
+])
+def test_snapshot_fixture_rejects_unsafe_target_before_engine(url, opt_in, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("engine must not be constructed for rejected fixture target")
+    monkeypatch.setattr(f"{__name__}.create_engine", forbidden)
+    with pytest.raises(ValueError) as rejected:
+        snapshot_fixture_engine(url, opt_in)
+    assert "NEVER_PRINT" not in str(rejected.value)
+    assert not url or url not in str(rejected.value)
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="Disposable local/CI PostgreSQL only")
+def test_postgres_single_snapshot_matches_legacy_payload_and_privileges():
+    # Synthetic SQL contract only, never supported Auth provisioning/hosted UAT.
+    # All fixture schema/data changes roll back in the disposable CI database.
+    opt_in = os.environ.get("FILL_SERVER_SNAPSHOT_FIXTURES")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GITHUB_JOB") == "contract":
+        opt_in = "ci-local-only"  # existing disposable PostgreSQL job only
+    engine = snapshot_fixture_engine(os.environ["TEST_DATABASE_URL"], opt_in)
+    run, authority, deployment, executor = (str(uuid.uuid4()) for _ in range(4))
+    history = list(g.OLD_USERS) + [str(uuid.uuid4()) for _ in range(13)]
+    plan = b.Plan.parse({"run_id": run, "authorization_id": authority, "candidate_sha": "a"*40,
+                         "passwords": {k: PASSWORD+k for k in s.LABELS}})
+    with engine.connect() as c:
+        transaction = c.begin()
+        class ConnectionEngine:
+            @contextmanager
+            def begin(self):
+                yield c
+        journal = b.Journal(ConnectionEngine(), deployment=deployment)
+        boot = SimpleNamespace(plan=plan, journal=journal)
+        try:
+            c.execute(text("alter table auth.users add column if not exists banned_until timestamptz, "
+                           "add column if not exists created_at timestamptz, add column if not exists raw_app_meta_data jsonb"))
+            for uid in history:
+                c.execute(text("insert into auth.users(id,banned_until) values(cast(:id as uuid),clock_timestamp()+interval '100 years') "
+                               "on conflict(id) do update set banned_until=excluded.banned_until"), {"id": uid})
+            for org in sorted(g.ORGANIZATIONS):
+                c.execute(text("insert into public.organizations(id,slug,name) values(cast(:id as uuid),:slug,'FICTIONAL CI') "
+                               "on conflict(id) do nothing"), {"id": org, "slug": "snapshot-ci-"+org})
+            c.execute(text("insert into fill_private.uat_bootstrap_intents "
+                "(run_id,authorization_id,candidate_sha,project_ref,organization_ids,input_digest,deployment_id,settled_at,request_expires_at) "
+                "values(cast(:run as uuid),cast(:authority as uuid),:sha,:project,cast(:orgs as jsonb),:digest,cast(:deployment as uuid),"
+                "clock_timestamp(),clock_timestamp()+interval '4 minutes')"),
+                {"run": run, "authority": authority, "sha": plan.candidate_sha, "project": g.PROJECT,
+                 "orgs": json.dumps(sorted(g.ORGANIZATIONS)), "digest": plan.digest, "deployment": deployment})
+            cfg = SimpleNamespace(run_id=run, historical_ids=history)
+            port = s.JournalPort(boot, cfg)
+            before = port.read()
+            assert before["run"] is None and before["intent"]["attempts"] == [] and len(before["bans"]) == 17
+            journal.preflight(plan, executor)
+            c.execute(text("update fill_private.uat_bootstrap_intents set released_at=clock_timestamp() where run_id=cast(:run as uuid)"), {"run": run})
+            journal.claim(plan, executor)
+            for label in s.LABELS:
+                uid = str(uuid.uuid4())
+                journal.reserve(plan, executor, label, "create")
+                c.execute(text("insert into auth.users(id,banned_until,created_at,raw_app_meta_data) "
+                    "values(cast(:id as uuid),clock_timestamp()+interval '100 years',clock_timestamp(),cast(:meta as jsonb))"),
+                    {"id": uid, "meta": json.dumps({"fill_f1_run": run, "fictional": True})})
+                journal.record(plan, executor, label, "create", uid, verified=True)
+            legacy = journal.read(plan)
+            lease = b.lease_for(plan, legacy["starts_at"], legacy["attempts"])
+            journal.members(plan, lease)
+            journal.enroll(plan, lease, stopped=False)
+            g.SQLLedger(ConnectionEngine()).record(lease, {}, True)
+            nonce = journal.reserve(plan, executor, "canary", "activate")
+            principal = next(p for p in lease.principals if p.label == "canary")
+            c.execute(text("update auth.users set raw_app_meta_data=raw_app_meta_data||cast(:meta as jsonb) where id=cast(:id as uuid)"),
+                      {"id": principal.id, "meta": json.dumps({"fill_f1_activation_nonce": nonce})})
+            journal.record(plan, executor, "canary", "activate", principal.id, verified=True)
+            legacy = journal.read(plan)
+            expected = dict(legacy)
+            decoded = port.read()
+            # SQL clock is observed at each statement; all remaining native
+            # intent fields/attempt UUIDs/timestamps must remain exactly equal.
+            now = expected.pop("db_now")
+            got = dict(decoded["intent"])
+            assert abs((got.pop("db_now")-now).total_seconds()) < 10
+            assert got == expected
+            assert decoded["run"]["spec"] == json.loads(lease.document)
+            assert decoded["run"]["healthy_at"].tzinfo is not None
+            assert len(decoded["bans"]) == 20 and len(decoded["markers"]) == len(decoded["members"]) == 3
+            native_members = [dict(x) for x in c.execute(text("select user_id,organization_id,role::text "
+                "from public.organization_members where user_id=any(cast(:ids as uuid[]))"),
+                {"ids": [p.id for p in lease.principals]}).mappings()]
+            assert sorted(decoded["members"], key=lambda x: str(x["user_id"])) == sorted(native_members, key=lambda x: str(x["user_id"]))
+            for role in ("anon", "authenticated"):
+                with pytest.raises(Exception), c.begin_nested():
+                    c.execute(text("set local role "+role))
+                    port.read()  # no SECURITY DEFINER/elevated SQL or RLS bypass
+        finally:
+            transaction.rollback()
+    engine.dispose()

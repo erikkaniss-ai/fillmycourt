@@ -10,13 +10,14 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
 import os
 import re
 import time
+import uuid
 from urllib.parse import urlencode
 
 import httpx
@@ -88,30 +89,113 @@ class Binding:
 
 class JournalPort:
     """Narrow reads of existing objects; the only mutation is existing stop()."""
+    # One MVCC data statement, through the existing timeout-bounded transaction.
+    # Do not call Journal.read first: that would open a separate snapshot and
+    # repeat its round trips. No locks, new objects or credential columns.
+    SNAPSHOT = text("""
+        with attempts as materialized (
+          select * from fill_private.uat_bootstrap_attempts
+          where run_id=cast(:run as uuid) order by label,operation limit 7
+        ), created as materialized (
+          select user_id as id from attempts where operation='create' and user_id is not null
+        ), known as (
+          select unnest(cast(:history as uuid[])) as id union select id from created
+        )
+        select i.*,clock_timestamp() as db_now,
+          encode(sha256(convert_to(r.spec::text,'UTF8')),'hex') as lease_digest,
+          coalesce((select jsonb_agg(to_jsonb(a) order by label,operation) from attempts a),'[]'::jsonb) as _attempts,
+          case when r.run_id is null then null else jsonb_build_object(
+            'spec',r.spec,'armed',r.armed,'stopped',r.stopped,'healthy_at',r.healthy_at,
+            'receipts',r.receipts,'cleanup_complete',r.cleanup_complete) end as _run,
+          coalesce((select jsonb_agg(to_jsonb(b)) from (
+            select id,banned_until from auth.users where id in (select id from known) limit 21
+          ) b),'[]'::jsonb) as _bans,
+          coalesce((select jsonb_agg(to_jsonb(m)) from (
+            select id,created_at,raw_app_meta_data->>'fill_f1_run' as run_marker,
+              raw_app_meta_data->>'fictional' as fictional,raw_app_meta_data->>'fill_f1_activation_nonce' as nonce
+            from auth.users where id in (select id from created) limit 4
+          ) m),'[]'::jsonb) as _markers,
+          coalesce((select jsonb_agg(to_jsonb(m)) from (
+            select user_id,organization_id,role::text from public.organization_members
+            where user_id in (select id from created) limit 7
+          ) m),'[]'::jsonb) as _members,
+          exists(select 1 from fill_private.uat_bootstrap_attempts
+            where operation='create' and run_id<>cast(:run as uuid) and user_id is not null
+            and not(user_id=any(cast(:history as uuid[])))) as _prior_unknown
+        from fill_private.uat_bootstrap_intents i
+        left join fill_private.uat_runs r using(run_id)
+        where i.run_id=cast(:run as uuid)
+    """)
+
     def __init__(self, bootstrap, binding):
         self.bootstrap, self.binding = bootstrap, binding
 
     def read(self):
         boot, cfg = self.bootstrap, self.binding
-        row = boot.journal.read(boot.plan)
-        if row is None:
-            return None
+        require(boot.plan.run_id == cfg.run_id, "BINDING")
         with boot.journal.tx() as c:
-            run = c.execute(text("select spec,armed,stopped,healthy_at,receipts,cleanup_complete "
-                                 "from fill_private.uat_runs where run_id=cast(:run as uuid)"), {"run": cfg.run_id}).mappings().first()
-            ids = [a["user_id"] for a in row["attempts"] if a["operation"] == "create" and a["user_id"]]
-            known = list(cfg.historical_ids) + ids
-            bans = c.execute(text("select id,banned_until from auth.users where id=any(cast(:ids as uuid[])) limit 21"), {"ids": known}).mappings().all()
-            markers = c.execute(text("select id,created_at,raw_app_meta_data->>'fill_f1_run' as run_marker, "
-                "raw_app_meta_data->>'fictional' as fictional,raw_app_meta_data->>'fill_f1_activation_nonce' as nonce "
-                "from auth.users where id=any(cast(:ids as uuid[])) limit 4"), {"ids": ids}).mappings().all()
-            members = c.execute(text("select user_id,organization_id,role::text from public.organization_members "
-                                     "where user_id=any(cast(:ids as uuid[])) limit 7"), {"ids": ids}).mappings().all()
-            prior_unknown = c.execute(text("select exists(select 1 from fill_private.uat_bootstrap_attempts "
-                "where operation='create' and run_id<>cast(:run as uuid) and user_id is not null "
-                "and not(user_id=any(cast(:history as uuid[]))) limit 1)"), {"run": cfg.run_id, "history": list(cfg.historical_ids)}).scalar_one()
-        return {"intent": row, "run": dict(run) if run else None, "bans": {str(x["id"]): x["banned_until"] for x in bans},
-                "markers": {str(x["id"]): dict(x) for x in markers}, "members": [dict(x) for x in members], "prior_unknown": prior_unknown}
+            raw = c.execute(self.SNAPSHOT, {"run": cfg.run_id, "history": list(cfg.historical_ids)}).mappings().first()
+        if raw is None:
+            return None
+        try:
+            return self.decode(dict(raw))
+        except (KeyError, TypeError, ValueError):
+            raise Closed("BINDING") from None
+
+    def decode(self, row):
+        plan, journal = self.bootstrap.plan, self.bootstrap.journal
+        # Preserve every Journal.row authority/digest/order check. Native intent
+        # timestamps/JSON types are retained; only nested JSON timestamps decode.
+        require(str(row["run_id"]) == plan.run_id and str(row["authorization_id"]) == plan.authorization_id
+                and row["candidate_sha"] == plan.candidate_sha and row["project_ref"] == g.PROJECT
+                and row["organization_ids"] == sorted(g.ORGANIZATIONS) and row["input_digest"] == plan.digest
+                and (journal.deployment is None or str(row["deployment_id"]) == journal.deployment), "BINDING")
+        for key in ("db_now", "created_at", "settled_at", "request_expires_at", "preflight_at", "released_at", "starts_at", "verdict_at"):
+            value = row[key]
+            require((value is None and key not in {"db_now", "created_at", "settled_at", "request_expires_at"})
+                    or isinstance(value, datetime) and value.tzinfo is not None, "BINDING")
+        for key in ("stopped", "reconciliation_required", "_prior_unknown"):
+            require(type(row[key]) is bool, "BINDING")
+        def rows(key, maximum):
+            value = row.pop(key)
+            require(isinstance(value, list) and len(value) <= maximum and all(isinstance(x, dict) for x in value), "BINDING")
+            return [dict(x) for x in value]
+        def date_fields(value, keys):
+            for key in keys:
+                value[key] = g.timestamp(value[key]) if value[key] is not None else None
+            return value
+        attempts = rows("_attempts", 6)
+        for attempt in attempts:
+            require(type(attempt["verified"]) is bool and type(attempt["settled"]) is bool, "BINDING")
+            for key in ("run_id", "activation_nonce"):
+                attempt[key] = uuid.UUID(g.uid(attempt[key]))
+            require(str(attempt["run_id"]) == plan.run_id, "BINDING")
+            if attempt["user_id"] is not None:
+                g.uid(attempt["user_id"])
+            date_fields(attempt, ("reserved_at", "first_ban_readback_at"))
+        run = row.pop("_run")
+        if run is not None:
+            require(isinstance(run, dict) and isinstance(run["spec"], dict) and isinstance(run["receipts"], dict)
+                    and all(type(run[k]) is bool for k in ("armed", "stopped", "cleanup_complete")), "BINDING")
+            run = date_fields(dict(run), ("healthy_at",))
+        bans = rows("_bans", 21)
+        markers = rows("_markers", 4)
+        members = rows("_members", 7)
+        for ban in bans:
+            g.uid(ban["id"])
+            date_fields(ban, ("banned_until",))
+        for marker in markers:
+            marker["id"] = uuid.UUID(g.uid(marker["id"]))
+            date_fields(marker, ("created_at",))
+        for member in members:
+            member["user_id"] = uuid.UUID(g.uid(member["user_id"]))
+            member["organization_id"] = uuid.UUID(g.uid(member["organization_id"]))
+            require(isinstance(member["role"], str), "BINDING")
+        require(len({x["id"] for x in bans}) == len(bans) and len({x["id"] for x in markers}) == len(markers), "BINDING")
+        prior_unknown = row.pop("_prior_unknown")
+        row["attempts"] = attempts
+        return {"intent": row, "run": run, "bans": {x["id"]: x["banned_until"] for x in bans},
+                "markers": {str(x["id"]): x for x in markers}, "members": members, "prior_unknown": prior_unknown}
 
     def stop(self):
         self.bootstrap.journal.stop(self.bootstrap.plan, reconcile=True)
@@ -249,18 +333,33 @@ class ServerValidator:
         require(not self.started or self.started <= wall < self.started + timedelta(seconds=1800), "CLOCK")
         return wall
 
-    async def bounded(self, awaitable, seconds):
+    async def bounded(self, awaitable, seconds, *, stage):
+        require(stage in {"admission_snapshot", "control_snapshot", "cleanup_snapshot", "durable_stop", "client_close", "user_login", "user_get"})
+        began, abandoned = time.monotonic(), False
+        def evidence(kind, outcome=None):
+            value = {"kind": kind, "stage": stage, "elapsed_ms": round(max(0, time.monotonic() - began) * 1000, 3)}
+            if outcome is not None:
+                value["outcome"] = outcome
+            self.emit(value)  # fixed labels/duration only; no SQL, values or exception
         job = asyncio.ensure_future(awaitable)
         self.jobs.add(job)
         def settled(task):
             self.jobs.discard(task)
-            if not task.cancelled():
-                task.exception()  # consume without logging an upstream error
+            error = None if task.cancelled() else task.exception()
+            if abandoned:
+                evidence("PRIVATE_VALIDATOR_LATE_STAGE", "cancelled" if task.cancelled() else "error" if error else "complete")
             if self.finished and not self.jobs:
                 self.emit({"kind": "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED", "owned_pending": 0, "client_closed": self.client_closed})
         job.add_done_callback(settled)
-        done, _ = await asyncio.wait({job}, timeout=seconds)
+        try:
+            done, _ = await asyncio.wait({job}, timeout=seconds)
+        except asyncio.CancelledError:
+            abandoned = True
+            evidence("PRIVATE_VALIDATOR_STAGE_INTERRUPTED")
+            raise
         if not done:
+            abandoned = True
+            evidence("PRIVATE_VALIDATOR_STAGE_TIMEOUT")
             raise Closed("TIMEOUT")  # not cancellation; late job stays owned
         return job.result()
 
@@ -270,7 +369,8 @@ class ServerValidator:
 
     async def snapshot(self, *, allow_stopped=False):
         begin = self.monotonic()
-        data = await self.bounded(self.threaded(self.port.read, self.read_pool), CONTROL_SECONDS)
+        data = await self.bounded(self.threaded(self.port.read, self.read_pool), CONTROL_SECONDS,
+                                  stage="admission_snapshot" if self.started is None else "control_snapshot")
         require(self.monotonic() - begin <= CONTROL_SECONDS, "STALE")
         now = self.now()
         if data is None:
@@ -354,7 +454,7 @@ class ServerValidator:
         if not deny:
             require(data["bans"].get(uid) is None or data["bans"][uid] <= self.now(), "IDENTITY")
         operation = self.client.login(label, uid, self.started, deny=deny) if login else self.client.get(label, route, uid, self.binding.organizations, self.started.date().isoformat(), deny=deny)
-        status = await self.bounded(operation, CONTROL_SECONDS)
+        status = await self.bounded(operation, CONTROL_SECONDS, stage="user_login" if login else "user_get")
         after = await self.snapshot()
         require(after is not None and self.monotonic() - began <= READ_SECONDS, "STALE")
         age = (self.now() - self.started).total_seconds()
@@ -441,12 +541,12 @@ class ServerValidator:
         finally:
             self.failed, self.ready, self.root_ready = code != "READS_COMPLETE", False, False
             try:
-                self.stop_confirmed = await self.bounded(self.threaded(self.port.stop, self.stop_pool), CONTROL_SECONDS) is True
+                self.stop_confirmed = await self.bounded(self.threaded(self.port.stop, self.stop_pool), CONTROL_SECONDS, stage="durable_stop") is True
             except Exception:
                 self.bootstrap.guard.cleanup_error = True
             if self.client is not None:
                 try:
-                    await self.bounded(self.client.close(), CONTROL_SECONDS)
+                    await self.bounded(self.client.close(), CONTROL_SECONDS, stage="client_close")
                     self.client_closed = True
                 except Exception:
                     pass
@@ -466,7 +566,7 @@ class ServerValidator:
             if self.started is None:
                 return {"status": "TASK_NOT_BOUND"}
             while self.now() < self.started + timedelta(seconds=1800):
-                data = await self.bounded(self.threaded(self.port.read, self.read_pool), CONTROL_SECONDS)
+                data = await self.bounded(self.threaded(self.port.read, self.read_pool), CONTROL_SECONDS, stage="cleanup_snapshot")
                 row, run = data["intent"], data["run"]
                 require(str(row["run_id"]) == self.binding.run_id and str(row["authorization_id"]) == self.binding.authorization_id
                         and row["candidate_sha"] == self.binding.operations_sha and str(row["deployment_id"]) == self.binding.deployment_id
