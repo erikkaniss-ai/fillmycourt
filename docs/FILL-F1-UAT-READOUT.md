@@ -882,3 +882,206 @@ account cleanup/readback continues independently even after expiry, preserving
 timing FAIL separately from eventual cleanup PASS. Nothing here is hosted F1 or
 MVP/pilot acceptance. No production/public/provider/customer/booking/hold/pay/
 paid/outreach action or new infrastructure is authorized. `PUBLIC_GO=false`.
+
+## CHECKPOINT-07 — canonical readback and externally driven relay (source only)
+
+Base `b51bfe6880d908bf7e8365728b5f205d11f9da40`; exclusive four-path lease:
+`platform/scripts/fill_uat_checkpoint_bridge.mjs`, its new test,
+this readout, and one test invocation in each existing Platform CI job.
+The collector, reducer, process transport, parser, public child and Python6ca
+are frozen. No live helper, account, Auth API, secret transfer, row write,
+deployment or additional runtime authority is part of this batch.
+
+### Schema, query and trust boundary
+
+The bridge reads the actual `20261030202410_fill_uat_guard.sql` and
+`20261031004340_fill_uat_bootstrap.sql` schema through a single bounded SELECT.
+`buildCheckpointReadPlan({run_id,known_ids,expected_lease_digest})` returns
+the query, SHA256, three-slot parameter template and validated parameters.
+The existing official raw-SQL connector accepts no separate bind arguments:
+only validated lowercase UUID/hex literals are rendered into those three
+slots. No caller SQL or identifier is accepted. The project is fixed to
+`yclqnbcrchwieyzkyumx`; run count1, principals<=3, attempts<=6, scoped Auth IDs<=16.
+The query reads one overflow sentinel beyond collection limits so malformed
+extra rows fail validation instead of disappearing. It performs no DML/DDL,
+locking, server file read or Auth operation.
+
+Projection: DB `clock_timestamp()`; immutable run/spec IDs, candidate, two
+organizations, original starts/expiry, armed/stopped/health/cleanup flags and
+receipt count; intent authorization/deployment/admission times, stopped and
+reconciliation flags; principal ID/label/ban/expiry/receipt/isolation; attempt
+label/operation/scoped user ID/verified/settled/has-nonce/reservation/first-ban
+times; allowlisted Auth `id,banned_until` only. Out-of-scope principal/attempt
+IDs are masked and rejected. Membership inspection returns only an isolation
+boolean for those IDs and the two fixed fictional organizations.
+
+No raw spec, verdict, nonce, email, password/hash, key, token or input_digest
+is returned. The password-bearing bootstrap input_digest produces only a
+format-valid boolean. The public lease/spec SHA256 is compared server-side
+against the separately supplied expected digest and against the verdict;
+only comparison booleans leave the query. A closed diagnostic may omit the
+expected public digest and therefore cannot become an active permit.
+
+`decodeReadback` accepts exact JSON rows and the official connector's nested
+result/text envelopes, including its exact symmetric untrusted-data wrapper.
+It parses data only, rejects mismatched/nested/multiple tags and arbitrary log
+prefixes, and never evaluates returned instructions. Typed rows have exact
+keys, bounded arrays, finite UTC timestamps retaining microseconds, scope and
+identity checks. Unexpected output becomes fixed safe DENY metadata.
+
+DTOs do not authenticate their own provenance. A trusted external caller must
+bind tool/project/query SHA and independently supply verified, current owner
+authority, original T0, disjoint new3/historical13 identities, deployment,
+public lease digest, accepted pins and frozen transport SHA. Neither the
+query, mapper nor trusted_readback flag grants GO. Missing/consumed authority,
+stopped/reconciliation state, unknown creation/unsettled activation, stale
+health, scope conflict or expired original window denies. All13 historical
+IDs must have current supported long-ban metadata. A create's settled=false
+is normal; a verified settled activation can await first-ban within its
+original window. request_expires_at controls start admission, not active
+lease renewal. Null independent verdict allows only the canary phase; an
+operator activation requires the canonical scoped PASS and timely canary
+ban. The frozen collector still owns its independent operator gate.
+
+### Concrete existing-tool invocation and cache handoff
+
+The trusted driver uses `relay.begin()` in persistent Node REPL, then calls
+the EXISTING official tool OUTSIDE any REPL callback:
+
+```js
+const result = await tools.mcp__codex_apps__supabase_execute_sql({
+  project_id: ticket.plan.project_id,
+  query: ticket.plan.query
+});
+// Existing Node REPL then receives safe JSON DTOs:
+await relay.complete(ticket.sequence, result, {
+  tool: 'mcp__codex_apps__supabase_execute_sql',
+  project_id: ticket.plan.project_id,
+  query_sha256: ticket.plan.query_sha256,
+  trusted_readback: true
+});
+// publish(envelope) -> cache.install(envelope)
+// Future accepted transport callback: () => cache.current()
+```
+
+This is an externally driven adapter, not automatic MCP access from a Node
+callback, a new service, scheduler or network client. `refresh()` is optional
+dependency injection for a trusted driver that already owns a read function;
+this batch does not add one to the live helper. The actual one-shot uses a
+single functions.exec orchestration begin -> official SELECT -> complete,
+with no model/typing boundary between those steps.
+
+Final read timeout<=6s, external minimum start-to-start cadence2.5s,
+publish wait<=500ms for an in-memory install. A stuck
+read/publisher settles the caller's wait; this does NOT cancel the underlying
+tool/network/publisher promise. Late completion cannot restore an older ALLOW
+over a higher sequence DENY. Original DB checked_at is never re-stamped.
+Cache current() expires it after10s, separately checks the ORIGINAL guard
+healthy_at+45s and original run/authority expiry, and latches clock reversal,
+changed T0/expiry, revocation and terminal failures. Its cleanup evidence
+retains the original DB observation separately even after denial/stop.
+
+Cadence is not an extra sleep after a slow read: when a read exceeds2.5s,
+the next read can start immediately after completion. A hypothetical6s
+read+500ms publish must still arrive before the previous DB observation+10s;
+additional host scheduling can consume the remaining margin. The frozen transport's
+bounded checker wait (2s) and idle check (1s) do not renew that budget. This
+is an assumption requiring measured margin, not demonstrated active safety.
+The bridge performs no autonomous refresh. Guard cleanup stays independent.
+
+### Initial one real CLOSED read; original4s latency gate FAIL, cleanup PASS
+
+Closed run `0e3a5a5a-fa68-4b3f-9a96-bdca500b1ab4`, expected digest=null,
+exact CTO-known13 allowlist, one official Supabase SELECT; no retry.
+Query SHA256:
+`ad1f55fd9ed6fecf47e59187dc6fc2e482418bbd3e6919bc4935dc8bb368dd34`.
+Result envelope keys content/structuredContent/isError, one text5887 bytes,
+strict snapshot accepted. DB observation **2026-11-01T04:18:26.926995Z**.
+Original T0 **2026-10-31T10:03:01.320855Z**, expiry **10:33:01.320855Z**;
+healthy_at **10:09:56.780556Z**. Three principals, four attempts (one activation),
+unknown creates0, unsettled activations0; all13 long-banned, active0,
+run/intent stopped=true, cleanup_complete=true, reconciliation_required=true,
+canonical verdict=fail. Mapper DENY/permit=null/operatorGateEligible=false,
+with CONSUMED_CONTEXT/stopped/expired/guard-unhealthy/FAIL/no-owner reasons.
+Cleanup independently PASS AS OF that observation; it does not erase timing
+or canary failure, reconciliation or consumed authority.
+
+Measured official tool roundtrip **4891ms >4000ms**. The independent relay
+timer published READ_TIMEOUT, complete returnedfalse, and cache latched DENY.
+The retained result was decoded as a separate closed diagnostic with source
+age65.005ms; that small age reflects the DB observation near response time
+and does not make the4891ms read meet its4s gate. The same retained DENY
+diagnostic was installed as sequence2 to preserve cleanup, with no immediate
+query repeat or ALLOW. Relay was stopped. This proves fail-closed timeout behavior,
+NOT a successful current-checkpoint handoff or active helper integration.
+After this probe, cache envelope typing was tightened. CTO then explicitly
+extended the batch for the engineering budget correction and EXACTLY TWO
+additional dry SELECTs below. The first timeout receipt remains unchanged.
+
+### Final source: two consecutive CLOSED publications, measured margin PASS
+
+CTO correction:6s read cap and500ms in-memory publisher wait, unchanged10s
+cache freshness/2s frozen checker wait/1s frozen idle poll/45s guard health
+and immutable original T0/authority expiry. No runtime authority, account
+quota or live launch was added. Exactly two additional SELECTs ran using the
+SAME closed run/query hash/known13 projection, each as begin -> official SQL
+outside REPL -> complete/cache within ONE functions.exec orchestration, with
+no model/typing delay and no added2.5s post-read sleep.
+
+Both bound these final bridge bytes, SHA256:
+`387dc8b9c0f8579844cde1ca7c2f42250a4d20d085b037718a3bbcff98cd8998`.
+
+| Dry read | DB observed_at UTC | Received UTC | Published UTC | Official tool RTT | Full relay RTT | Source age at mapping |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2026-11-01 04:21:50.712893 | 04:21:50.764 | 04:21:50.772 | 3932ms | 3995.2823ms | 51.107ms |
+| 2 | 2026-11-01 04:21:53.717822 | 04:21:53.756 | 04:21:53.760 | 2883ms | 2936.2929ms | 38.178ms |
+
+Both complete returned a typed result and cache install=true. Publication2
+arrived **6952.893ms BEFORE observation1+10s**. No prior observation existed
+inside this new dry relay for publication1, so its continuity margin is N/A.
+These two samples show a positive consecutive CLOSED read/cache margin under
+the revised budget; they do not prove production latency bounds or an active
+permit/helper path. Both states remained DENY/permit=null/cleanupPASS,
+knownBanCount13/active0/unknownCreates0/unsettledActivations0, consumed,
+stopped, reconciliation_required=true, canonicalFAIL, expired and no owner.
+Original T0/expiry/healthy_at stayed exactly as above. Relay and cache were
+explicitly stopped, cache closed/latched=true, with original last verified
+cleanup retained at04:21:53.717822Z. No more reads, helper invocation, Auth
+operation or row write was performed. Total real SELECT count for this batch3.
+
+### Offline Python6ca compatibility: distinct from hosted acceptance
+
+Exactly once, the existing reviewed interpreter ran the unchanged helper:
+`.work/f1-auth-admin-venv/Scripts/python.exe -I -B .work/f1-readonly-validator.py --self-test`.
+ProcessStartInfo used no shell/window; environment was cleared except
+SystemRoot; no stdin/credential was supplied. Inspected self-test clients use
+httpx.MockTransport only; helper config tests patch httpx.Client. Output:
+`{"offline_self_test":"PASS","cases":41,"real_network_calls":0}`.
+Exit0, elapsed1430ms, stderr0, process closed. This was not a live helper run.
+
+Verified before execution: helper6ca033af474c21180652652c21ee6d4d4dafd16d379a4c11eb646d9ac9e53548;
+venv interpreter9f29b8965d6bf169315bbc20946f33b23c9dacb4587c3cccaf1f536b844b2dc2;
+pyvenv.cfg fb495c656cb2605b9acdaa9e32df46ba855ea4470a0568a25ec962dcb79d1a31.
+Helper hash remained unchanged afterward. The one permitted offline self-test
+has been consumed and will not be repeated for this batch.
+
+The34 new synthetic tests cover active schema-to-permit/cached callback,
+canary/independent operator gating, scope/time/authority conflicts, historical
+bans, strict connector wrapper, cleanup separate from consumed DENY, original
+timestamps, rollback/reordering/revocation, stuck read/publish, bounded waits,
+late completion and no query after expiry, a real4.9s injected read under6s,
+minimum start cadence, and slow/hung500ms publisher waits. Frozen source hashes are checked;
+both existing exact-head CI jobs include the new suite. Twelve deployment/CI
+safety gates also passed locally. No valid live factory invocation occurred.
+
+DONE: typed canonical query/decoder/mapper and externally driven cache/relay,
+synthetic active-path tests, three scoped closed reads including initial
+timeout and revised two-sample margin, one offline41-case compatibility
+check. NOT DONE: active live checkpoint integration/ongoing margin, REAL helper
+launch/current stdin, canary/F1 hosted browser UAT or MVP/pilot acceptance.
+Main blocker: actual active helper/current-permit path remains uninvoked and
+requires CTO acceptance plus separately applicable runtime authority.
+Next: CTO reviews this exact bridge/transport integration and measured timing,
+including the preserved initial timeout and limited two-sample CLOSED pass.
+This batch requests no new GO/quota; prior authority is consumed and all13
+historical accounts remain banned. `PUBLIC_GO=false`; production untouched.

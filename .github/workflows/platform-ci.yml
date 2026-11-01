@@ -40,6 +40,7 @@ jobs:
           node --test platform/tests/fill_uat_helper_collector.test.mjs
           node --test platform/tests/fill_uat_evidence_verdict.test.mjs
           node --test platform/tests/fill_uat_process_transport.test.mjs
+          node --test platform/tests/fill_uat_checkpoint_bridge.test.mjs
           node --test platform/tests/fill_operator_demo_contract.test.mjs
           node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
   contract:
@@ -102,6 +103,8 @@ jobs:
         run: node --test platform/tests/fill_uat_evidence_verdict.test.mjs
       - name: Verify owned process transport with public sentinel child only
         run: node --test platform/tests/fill_uat_process_transport.test.mjs
+      - name: Verify read-only canonical checkpoint bridge and bounded relay
+        run: node --test platform/tests/fill_uat_checkpoint_bridge.test.mjs
       - name: GetAcourt Netlify boundary contracts (no network / no writes)
         run: node --experimental-strip-types --test platform/tests/getacourt_netlify_contract.test.mjs
       - name: Bootstrap Supabase auth contract
