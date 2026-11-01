@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import io
@@ -772,6 +773,19 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
     app = FastAPI(title="FillMyCourt shared platform", version="0.5.0",
                   docs_url=None, redoc_url=None, openapi_url=None, lifespan=fill_guard.lifespan)
     app.state.fill_uat_guard = fill_guard
+    # No validator config/client/task exists by default. Core/all modes do not
+    # install this Operations-only hook. The independent guard owns the outer
+    # lifespan so its cleanup continues while the validator runs or stops.
+    if service == "operations":
+        from .fill_uat_server_validator import from_environment as server_validator_from_environment
+        server_validator = server_validator_from_environment(settings, service, fill_guard, app)
+        if server_validator is not None:
+            @asynccontextmanager
+            async def fill_server_lifespan(application):
+                async with fill_guard.lifespan(application):
+                    async with server_validator.lifespan(application):
+                        yield
+            app.router.lifespan_context = fill_server_lifespan
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):

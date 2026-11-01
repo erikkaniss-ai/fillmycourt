@@ -328,6 +328,7 @@ class Bootstrap:
         self.plan, self.journal, self.admin, self.guard = plan, journal, admin, guard
         self.executor = executor or str(uuid.uuid4())
         self.next_preflight = float("-inf")
+        self.server_validator = None
 
     def fresh(self, *, seconds):
         row = self.journal.read(self.plan)
@@ -381,6 +382,8 @@ class Bootstrap:
         if row["stopped"]:
             self.recover()
             return
+        if self.server_validator is not None and not self.server_validator.admission_ready:
+            return  # opt-in server mode must pass independent read-only binding first
         if row["starts_at"] is None:
             if row["db_now"] >= row["request_expires_at"]:
                 self.journal.stop(self.plan, reconcile=False)
@@ -441,6 +444,8 @@ class Bootstrap:
             if label in activations:
                 continue
             if label != "canary":
+                if self.server_validator is not None and not self.server_validator.root_grant_ready:
+                    return  # never activate from a public/unbound verdict in server mode
                 if row["verdict"] is None:
                     if row["db_now"] >= row["starts_at"]+timedelta(minutes=10):
                         raise Closed()
