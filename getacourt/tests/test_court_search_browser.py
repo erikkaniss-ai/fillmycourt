@@ -686,3 +686,35 @@ def test_visible_money_real_parser_reply_obeys_browser_nonce_freshness_and_mode(
         expect(page.locator('#offers .card')).to_have_count(0)
     expect(page.locator('[data-result-pin]')).to_have_count(0)
     assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('prefix',['duplicates','distinct'])
+def test_visible_row_limit_late_conflict_cannot_reach_browser_cards(browser_page,fixture_url,prefix):
+    page,context,forbidden,_=browser_page
+    rows=[price_row('€36,00',court=1 if prefix=='duplicates' else i+1) for i in range(20)]
+    rows.append(price_row('€40,00',court=1))
+    writes=visible_price_fixture(page,context,fixture_url,90,rows)
+    assert page.locator('#offers .card').count()==0,page.locator('#offers').inner_text()
+    assert page.evaluate('priceBrowserFixture.observation.readerError')=='OFFER_FORMAT_CHANGED'
+    assert page.evaluate('priceBrowserFixture.observation.offers===undefined')
+    expect(page.locator('#offers .official-link')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('duplicates',[20,119])
+def test_visible_row_limit_duplicates_do_not_hide_late_independent_court(browser_page,fixture_url,duplicates):
+    page,context,forbidden,_=browser_page
+    rows=[price_row('€36,50',court=1)]*duplicates+[price_row('€40,05',court=2)]
+    writes=visible_price_fixture(page,context,fixture_url,90,rows)
+    expect(page.locator('#offers .card')).to_have_count(2)
+    assert page.evaluate('priceBrowserFixture.observation.offers.map(o=>o.court)')==['Court 1','Court 2']
+    for court,price in [('Court 1','€36.50'),('Court 2','€40.05')]:
+        card=page.locator('#offers .card').filter(has=page.locator('.court-name',has_text='Court: '+court))
+        expect(card).to_have_count(1)
+        expect(card.locator('.price')).to_contain_text(price)
+        expect(card.locator('.offer-time')).to_contain_text('90 min')
+        expect(card.locator('.distance')).to_contain_text('Position unverified')
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#mappedCount')).to_have_text('0 mapped clubs')
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)

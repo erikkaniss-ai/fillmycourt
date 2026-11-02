@@ -283,3 +283,75 @@ test('cannot use forged hosts, tracking query, foreign venue paths or credit car
   assert.throws(()=>normalizePersonalObservation(JSON.stringify({...buildObservation(base),secret:'private'}),query,
     {now:Date.now(),validator:validation}),/INVALID_OBSERVATION/);
 });
+
+const sameQuote=count=>Array.from({length:count},()=>priceRow('€36,00',90,'1'));
+function assertVisibleConflict(rows){
+  const obs=buildObservation({...base,rows});
+  assert.equal(obs.readerError,'OFFER_FORMAT_CHANGED');
+  assert.equal(obs.offers,undefined);
+  assert.throws(()=>validation(obs));
+  assert.throws(()=>normalizePersonalObservation(JSON.stringify(obs),query,
+    {now:Date.now(),validator:validation}),/INVALID_OBSERVATION/);
+}
+function normalizedVisibleRows(rows,changes={}){
+  const obs=buildObservation({...base,...changes,rows});
+  const result=normalizePersonalObservation(JSON.stringify(validation(obs)),query,
+    {now:Date.now(),validator:validation});
+  return {obs,offers:result.offers};
+}
+
+test('a conflicting duplicate after twenty repeated rows cannot become a validated or normalized quote',()=>{
+  for(const count of [20,119]){
+    assertVisibleConflict([...sameQuote(count),priceRow('€40,00',90,'1')]);
+    assertVisibleConflict([priceRow('€40,00',90,'1'),...sameQuote(count)]);
+  }
+});
+
+test('duplicate rows do not spend the distinct-offer budget or hide an independent late court',()=>{
+  for(const count of [20,119]){
+    const {offers}=normalizedVisibleRows([...sameQuote(count),priceRow('€40,00',90,'2')]);
+    assert.deepEqual(offers.map(o=>[o.courtName,o.priceMinor]),[['Court 1',3600],['Court 2',4000]]);
+  }
+});
+
+test('conflicts beyond the twentieth distinct result are checked even for a non-output court',()=>{
+  for(const count of [20,21,119]){
+    const distinct=Array.from({length:count},(_,i)=>priceRow('€36,00',90,String(i+1)));
+    assertVisibleConflict([...distinct,priceRow('€40,00',90,String(count))]);
+  }
+});
+
+test('the 120-row input boundary emits at most twenty distinct offers in first-seen order',()=>{
+  const ids=Array.from({length:120},(_,i)=>(i*7)%120+1);
+  const {obs,offers}=normalizedVisibleRows(ids.map(id=>priceRow('€36,50',90,String(id))));
+  assert.equal(obs.offers.length,20);
+  assert.deepEqual(offers.map(o=>o.courtName),ids.slice(0,20).map(id=>'Court '+id));
+  assert.ok(offers.every(o=>o.priceMinor===3650));
+});
+
+test('equal duplicate order preserves the first distinct appearance at the full input cap',()=>{
+  for(const rows of [[...sameQuote(119),priceRow('€40,00',90,'2')],
+    [priceRow('€40,00',90,'2'),...sameQuote(119)]]){
+    const {offers}=normalizedVisibleRows(rows);
+    const expected=rows[0].text.startsWith('Campo 2')?['Court 2','Court 1']:['Court 1','Court 2'];
+    assert.deepEqual(offers.map(o=>o.courtName),expected);
+  }
+});
+
+test('invalid disabled partial and out-of-query rows cannot cause conflicts or false offers',()=>{
+  const excluded=[{...priceRow('€40,00'),disabled:true},priceRow('€40,00/player'),
+    priceRow('€36.5'),{...priceRow('€40,00'),action:'Not available'},priceRow('€40,00',60),
+    {...priceRow('€40,00'),text:'Campo 1 07:00 - 08:30 €40,00'},
+    {...priceRow('€40,00'),text:'Campo 1 23:00 - 00:30 €40,00'}];
+  const {offers}=normalizedVisibleRows([priceRow('€36,00'),...excluded,priceRow('€40,00',90,'2')]);
+  assert.deepEqual(offers.map(o=>[o.courtName,o.priceMinor]),[['Court 1',3600],['Court 2',4000]]);
+});
+
+test('empty malformed duplicate-only and oversized inputs keep existing fail-closed limits',()=>{
+  for(const rows of [[],Array.from({length:120},()=>priceRow('€36.5'))])
+    assert.equal(buildObservation({...base,rows}).readerError,'NO_EXPANDED_OFFERS');
+  const {offers}=normalizedVisibleRows(sameQuote(120));
+  assert.equal(offers.length,1);assert.equal(offers[0].priceMinor,3600);
+  for(const rows of [sameQuote(121),Array.from({length:121},()=>priceRow('€36.5'))])
+    assert.equal(buildObservation({...base,rows}).readerError,'SCHEDULE_NOT_READY');
+});

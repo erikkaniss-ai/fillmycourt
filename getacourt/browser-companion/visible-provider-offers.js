@@ -84,26 +84,23 @@
     const from=Number(q.from.slice(0,2))*60+Number(q.from.slice(3));
     const to=Number(q.to.slice(0,2))*60+Number(q.to.slice(3));
     if(from>=to)return {readerError:"QUERY_INVALID"};
-    const valid=[];
+    // Check the whole bounded eligible input before applying the unique-output
+    // cap: repetitions must neither hide contradictions nor spend that budget.
+    const unique=new Map();
     for(const row of data.rows){
       const v=parseRow(row);
       if(!v||v.startMinute<from||v.startMinute>=to||
         (q.durationMinutes&&q.durationMinutes!==v.durationMinutes))continue;
-      valid.push({...v});
-      if(valid.length>=20)break;
-    }
-    if(!valid.length)return {readerError:"NO_EXPANDED_OFFERS"};
-    const unique=new Map();
-    for(const v of valid){
       const key=[v.court,v.startLabel,v.endLabel,v.durationMinutes].join("|");
       if(unique.has(key)&&unique.get(key).priceEur!==v.priceEur)return {readerError:"OFFER_FORMAT_CHANGED"};
-      unique.set(key,v);
+      if(!unique.has(key))unique.set(key,v);
     }
+    if(!unique.size)return {readerError:"NO_EXPANDED_OFFERS"};
     return {provider:data.provider,source:"user_ui_observation",
       sourceUrl:data.sourceUrl,venue:data.venue,date:data.date,sport:data.sport,
       capturedAt:new Date().toISOString(),timezone:null,
       sourceFreshness:"unknown",coverage:"expanded_offers_only",
-      offers:[...unique.values()].map(({court,startLabel,endLabel,durationMinutes,priceEur})=>
+      offers:[...unique.values()].slice(0,20).map(({court,startLabel,endLabel,durationMinutes,priceEur})=>
         ({court,startLabel,endLabel,durationMinutes,priceEur}))};
   }
   root.GetACourtVisibleProviderOffers=Object.freeze({buildObservation,parseRow});
