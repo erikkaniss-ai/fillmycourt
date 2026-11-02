@@ -412,15 +412,15 @@ def fake_store(connection):
     return db
 
 
-def test_complete_native_payload_matches_accepted_reference_and_five_calls():
+def test_complete_native_payload_matches_accepted_reference_and_four_calls():
     old, new = FakeConnection(), FakeConnection()
     expected = baseline(fake_store(old), Actor(ID(11)), ID(12))
     actual = reader.read_today(fake_store(new), Actor(ID(11)), ID(12), DAY, NOW.date())
     assert actual == expected and jsonable_encoder(actual) == jsonable_encoder(expected)
-    assert len(old.calls) == 9 and len(new.calls) == 5
+    assert len(old.calls) == 8 and len(new.calls) == 4
     assert new.calls[-2][0] is reader.SCOPE and new.calls[-1][0] is reader.SNAPSHOT
     assert new.calls[-2][1] == {"org": ID(12), "uid": ID(11)}
-    assert [str(x[0]) for x in new.calls[:3]] == [str(x[0]) for x in old.calls[:3]]
+    assert [str(x[0]) for x in new.calls[:2]] == [str(x[0]) for x in old.calls[:2]]
     assert new.calls[1][1] == {"uid": ID(11)}
     assert new.calls[-1][1]["begin"].tzinfo is not None
     assert isinstance(actual["courts"][0]["sellable_windows"][0]["starts_at"], datetime)
@@ -638,10 +638,10 @@ def test_postgres_complete_reference_parity_and_no_multiplied_finance(pg,day,zon
     e=seed(pg,day,zone,mode)
     a=Actor(e.users[0])
     expected=baseline(pg.db,a,e.orgs[0],day)
-    assert len(pg.calls)==9
+    assert len(pg.calls)==8
     pg.calls.clear()
     actual=reader.read_today(pg.db,a,e.orgs[0],day,e.day)
-    assert len(pg.calls)==5 and pg.calls[-2][0] is reader.SCOPE and pg.calls[-1][0] is reader.SNAPSHOT
+    assert len(pg.calls)==4 and pg.calls[-2][0] is reader.SCOPE and pg.calls[-1][0] is reader.SNAPSHOT
     assert pg.calls[-1][1]["uid"]==a.id and pg.calls[-1][1]["org"]==e.orgs[0]
     assert actual==expected and jsonable_encoder(actual)==jsonable_encoder(expected)
     if mode=="mixed":
@@ -674,4 +674,4 @@ def test_postgres_membership_removed_between_scope_and_data_fails_closed(pg):
     pg.hooks["before_data"]=remove
     with pytest.raises(DomainError) as rejected:
         reader.read_today(pg.db,Actor(e.users[0]),e.orgs[0],DAY,e.day)
-    assert rejected.value.status==403 and len(pg.calls)==5
+    assert rejected.value.status==403 and len(pg.calls)==4
