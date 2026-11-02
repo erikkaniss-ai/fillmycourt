@@ -196,6 +196,78 @@ test('price-marker words in court labels or unrelated time text preserve valid 6
     '€36,00 /jogadorX','€36,00 hourlyScore'])assert.equal(parseRow(priceRow(price))?.priceEur,36,price);
 });
 
+const malformedMoney=['€36.5','36.5€','€36,5','36,5 €','€36.500','36.500€',
+  '€36.5000','36.5000 €','€12345','12345€','€1,234.56','1,234.56€',
+  '€1.234,56','1.234,56€','€1 234,56','1 234,56 €','€1\u202f234.56','1\u00a0234.56 €',
+  "€1'234.56","1'234.56€",'€36e2','36e2€','€3.6e1','3.6e1€',
+  '€+36','+36€','€-36','-36€','-€36','- €36','- 36 €','€−36','−36€',
+  '€.50','.50€','€36.','36. €','€36,','36, €','€36_50','36_50€',
+  '€36..50','36..50€','€36,50.00','36,50.00€','€36.50abc','abc36.50€',
+  '€36.5 €40','€36.5 40€','€0,00','€2001'];
+const moneyFailures=admitted=>({count:admitted.length,examples:admitted.slice(0,6)});
+
+test('a malformed EUR token is rejected whole instead of salvaging numeric fragments',()=>{
+  const admitted=[];
+  for(const minutes of [60,90])for(const price of malformedMoney){
+    const parsed=parseRow(priceRow(price,minutes));
+    if(parsed)admitted.push([minutes,price,parsed.priceEur]);
+  }
+  assert.deepEqual(moneyFailures(admitted),{count:0,examples:[]});
+});
+
+test('malformed EUR tokens cannot become observed or normalized full-slot prices',()=>{
+  const admitted=[];
+  for(const minutes of [60,90])for(const price of malformedMoney){
+    const obs=buildObservation({...base,query:anyDuration,rows:[priceRow(price,minutes)]});
+    if(!obs.readerError){
+      const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+        {now:Date.now(),validator:validation});
+      admitted.push([minutes,price,result.offers[0].priceMinor]);
+      continue;
+    }
+    assert.equal(obs.readerError,'NO_EXPANDED_OFFERS');
+    assert.throws(()=>validation(obs));
+    assert.throws(()=>normalizePersonalObservation(JSON.stringify(obs),anyDurationQuery,
+      {now:Date.now(),validator:validation}),/INVALID_OBSERVATION/);
+  }
+  assert.deepEqual(moneyFailures(admitted),{count:0,examples:[]});
+});
+
+test('mixed malformed and valid EUR rows retain only the independent correct total',()=>{
+  const leaked=[];
+  for(const minutes of [60,90])for(const price of malformedMoney){
+    const obs=buildObservation({...base,query:anyDuration,
+      rows:[priceRow(price,minutes),priceRow('€40,05',minutes,'2')]});
+    const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+      {now:Date.now(),validator:validation});
+    assert.equal(result.offers.at(-1).courtName,'Court 2');
+    assert.equal(result.offers.at(-1).priceMinor,4005);
+    if(result.offers.length!==1)leaked.push([minutes,price]);
+  }
+  assert.deepEqual(moneyFailures(leaked),{count:0,examples:[]});
+});
+
+test('whole and exact-two-decimal EUR totals preserve their exact cents in both currency positions',()=>{
+  for(const minutes of [60,90])for(const [price,minor] of [['€36',3600],['36€',3600],
+    ['€ 36',3600],['36 €',3600],['€36.50',3650],['36.50€',3650],['36,50 €',3650],
+    ['€ 36,50',3650],['€36.05',3605],['36,00 €',3600],['(€36,50)',3650],['(36,50 €)',3650],
+    ['€1',100],['€2000.00',200000]]){
+    const obs=buildObservation({...base,query:anyDuration,rows:[priceRow(price,minutes)]});
+    const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+      {now:Date.now(),validator:validation});
+    assert.equal(result.offers[0].priceMinor,minor,price);
+    assert.equal(result.offers[0].duration,minutes);
+  }
+});
+
+test('court IDs and displayed times cannot be salvaged as a malformed price',()=>{
+  for(const text of ['Court 1 €NaN 18:00 - 19:30','Court 1 €invalid 18:00 - 19:30'])
+    assert.equal(parseRow({...row,text}),null,text);
+  for(const text of ['Court 1 € 36,50 from 18:00 - 19:30',
+    'Court 1 18:00 - 19:30 total:€36.50','Court 123 18:00 - 19:30 36,50 €'])
+    assert.equal(parseRow({...row,text})?.priceEur,36.5,text);
+});
+
 test('cannot use forged hosts, tracking query, foreign venue paths or credit card fields',()=>{
   for(const sourceUrl of [
     'https://clubs.tiesports.com.evil.invalid/en/lisboa/OeirasPadelAcademy',

@@ -42,13 +42,21 @@
     if(/\bper\s+(?:player|person)|por\s+(?:jogador|pessoa)|\/pessoa\b/i.test(line))return null;
     // An explicit hourly rate is not the total for this displayed slot.
     if(/\b(?:per\s+(?:hour|hr)|por\s+hora)\b|\/\s*(?:hour|hr|hora|h)\b/i.test(line))return null;
-    const prices=[...line.matchAll(/(?:€\s*(\d{1,4})(?:[,.](\d{2}))?|(?<![\d:])(\d{1,4})(?:[,.](\d{2}))?\s*€)/g)];
+    if((line.match(/€/g)||[]).length!==1)return null;
+    // Mask the known court label without moving offsets: its numeric ID is
+    // not a price, even when the EUR marker immediately follows that label.
+    const priceLine=line.slice(0,court.index)+" ".repeat(court[0].length)+line.slice(court.index+court[0].length);
+    const prices=[...priceLine.matchAll(/(?:(?<![\p{N}.,'’+−–—-])€\s*(\d{1,4})(?:[,.](\d{2}))?(?![\p{L}\p{N}_.,:'’+−–—-])|(?<![\p{L}\p{N}_.,:'’+−–—-])(\d{1,4})(?:[,.](\d{2}))?\s*€(?![\p{N}.,:'’+−–—-]))/gu)];
     if(prices.length!==1)return null;
     const m=prices[0],euros=Number(m[1]||m[3]),cents=Number(m[2]||m[4]||"0");
     // Bind new qualifiers to this sole amount, excluding the identified court
     // label so a court named From or Hourly is not mistaken for a price prefix.
     const before=line.slice(0,m.index).replace(court[0],"");
     const after=line.slice(m.index+m[0].length);
+    // Signs and space-grouped thousands are unsupported, not smaller totals.
+    if(/[+−-]\s*$/.test(before)||
+      (m[3]?.length===3&&/(?:^|\s)\d+(?:[,.]\d+)?\s+$/.test(before))||
+      (m[1]&&/^\s+\d{3}(?:[,.]\d+)?(?=\s|$)/.test(after)))return null;
     if(/\b(?:from|desde|a\s+partir\s+de|hourly)\s*:?\s*$/i.test(before)||
       /\/\s*(?:hourly|player|person|jogador|pessoa)\s*:?\s*$/i.test(before)||
       /^\s*(?:hourly\b|\/\s*(?:hourly|player|person|jogador|pessoa)\b)/i.test(after))return null;
