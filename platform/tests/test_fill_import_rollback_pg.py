@@ -84,7 +84,8 @@ def pg_rollback(monkeypatch, request, capsys):
     orgs, batches = ([str(uuid.uuid4()) for _ in range(2)] for _ in range(2))
     people = [[str(uuid.uuid4()) for _ in range(3)] for _ in range(2)]
     h = SimpleNamespace(store=store, users=users, orgs=orgs, batches=batches,
-                        people=people, mutations=[], completions=[], observer_pids=[])
+                        people=people, mutations=[], completions=[], observer_pids=[],
+                        delete_before_update=None, concurrent_deletes=[])
 
     def snapshot():
         # NullPool forces a new physical connection, outside the route transaction.
@@ -112,15 +113,44 @@ def pg_rollback(monkeypatch, request, capsys):
                     values(cast(:org as uuid),cast(:uid as uuid),cast(:role as public.fmc_member_role))"""),
                           {"org": orgs[0], "uid": users[2], "role": role})
 
+    def configure_commit(payload, tenant=0, status="staged"):
+        with observer.begin() as c:
+            c.execute(text("""update public.import_batches set payload=cast(:payload as jsonb),
+                result='{}'::jsonb,errors='[]'::jsonb,status=:status,
+                committed_at=null,rolled_back_at=null where id=cast(:batch as uuid)"""),
+                      {"payload": json.dumps(payload), "status": status, "batch": batches[tenant]})
+
+    def concurrent_delete(c, cursor, statement, parameters, context, executemany):
+        # Deterministic interleaving of TWO physical transactions: the route has
+        # already fetched the existing person, but has not executed its UPDATE.
+        # No SQL/parameters/driver results are replaced. Only opt-in commit tests
+        # delete their unlinked CI person through the separate observer engine.
+        sql = " ".join(statement.lower().split())
+        target = h.delete_before_update
+        if not (target and sql.startswith("update public.people ") and parameters.get("id") == target):
+            return
+        h.delete_before_update = None
+        route_pid = c.execute(text("select pg_backend_pid()")).scalar_one()
+        with observer.begin() as other:
+            pid = other.execute(text("select pg_backend_pid()")).scalar_one()
+            assert pid != route_pid
+            deleted = other.execute(text("""delete from public.people where id=cast(:id as uuid)
+                and organization_id=cast(:org as uuid) and auth_user_id is null"""),
+                                    {"id": target, "org": orgs[0]})
+            assert deleted.rowcount == 1
+            h.observer_pids.append(pid)
+        h.concurrent_deletes.append({"id": target, "pid": pid, "route_pid": route_pid, "count": 1})
+
     def proven():
         assert all(m["state"]["pid"] not in h.observer_pids for m in h.mutations)
         # A stable, non-secret execution receipt is visible despite pytest -qq.
         with capsys.disabled():
-            print("FILL_ROLLBACK_PG16_PASS " + request.node.name, flush=True)
+            prefix = "FILL_COMMIT_PG16_PASS " if request.node.name.startswith("test_pg16_commit_") else "FILL_ROLLBACK_PG16_PASS "
+            print(prefix + request.node.name, flush=True)
 
     def record(c, cursor, statement, parameters, context, executemany):
         sql = " ".join(statement.lower().split())
-        if sql.startswith(("update public.people ", "delete from public.people ")):
+        if sql.startswith(("update public.people ", "delete from public.people ", "insert into public.people ")):
             count = cursor.rowcount  # Actual driver result, never injected.
             state = dict(c.execute(text("""select pg_backend_pid() as pid,current_user as role,
                 current_setting('request.jwt.claim.sub') as uid,
@@ -132,6 +162,8 @@ def pg_rollback(monkeypatch, request, capsys):
                                 "state": state, "visible": visible})
         if "update public.import_batches set status='rolled_back'" in sql:
             h.completions.append("batch")
+        if "update public.import_batches set status='committed'" in sql:
+            h.completions.append("commit-batch")
         if sql.startswith("select private.append_event("):
             h.completions.append("audit")
 
@@ -174,6 +206,7 @@ def pg_rollback(monkeypatch, request, capsys):
                         return Actor(uid)
                 raise DomainError("AUTH_REQUIRED", "Sign in.", 401)
 
+        event.listen(store.engine, "before_cursor_execute", concurrent_delete)
         event.listen(store.engine, "after_cursor_execute", record)
         monkeypatch.setattr(v1_app, "V1Store", lambda _: store)
         monkeypatch.setattr(v1_app, "fill_guard_from_environment", lambda *_: Guard())
@@ -186,6 +219,11 @@ def pg_rollback(monkeypatch, request, capsys):
                 return client.post(f"/api/fmc/{org or orgs[tenant]}/imports/{batch or batches[tenant]}/rollback",
                                    headers=headers)
             h.snapshot, h.configure, h.set_role, h.proven, h.rollback = snapshot, configure, set_role, proven, rollback
+            def commit(tenant=0, actor=0, batch=None, org=None, authenticated=True):
+                headers = {"Authorization": "Bearer fictional-ci-" + str(actor)} if authenticated else {}
+                return client.post(f"/api/fmc/{org or orgs[tenant]}/imports/{batch or batches[tenant]}/commit",
+                                   headers=headers)
+            h.configure_commit, h.commit = configure_commit, commit
             yield h
     finally:
         store.engine.dispose()
@@ -333,5 +371,123 @@ def test_pg16_route_batch_state_denial_has_no_success_audit(pg_rollback, status)
     response = h.rollback()
     assert response.status_code == 409, response.text
     assert response.json()["error"] == "IMPORT_STATE"
+    assert h.snapshot() == before and h.mutations == h.completions == []
+    h.proven()
+
+
+def commit_item(person, **values):
+    return {"external_id": "ci-key-" + person, **values}
+
+
+@pytest.mark.parametrize("member_role", ["owner", "admin", "manager"])
+def test_pg16_commit_success_and_idempotency_preserve_update_and_create(pg_rollback, member_role):
+    h = pg_rollback
+    tenant, actor = (1, 1) if member_role == "admin" else (0, 0)
+    if member_role == "manager":
+        h.set_role("manager")
+        actor = 2
+    person = h.people[tenant][0]
+    new_key = "new-" + str(uuid.uuid4())
+    h.configure_commit([commit_item(person, name=None, email=None, phone="", marketing_consent=False),
+                        {"external_id": new_key, "name": "CI new committed person", "marketing_consent": False}], tenant)
+    before = h.snapshot()
+    original = next(r for r in before["people"] if str(r["id"]) == person)
+    response = h.commit(tenant=tenant, actor=actor)
+    assert response.status_code == 200, response.text
+    assert response.json() == {"id": h.batches[tenant], "status": "committed", "count": 2}
+    assert [(m["op"], m["count"]) for m in h.mutations] == [("update", 1), ("insert", 1)]
+    assert all(m["state"]["uid"] == h.users[actor] for m in h.mutations)
+    assert all(r["organization_id"] == h.orgs[tenant] for m in h.mutations for r in m["visible"])
+    after = h.snapshot()
+    existing = next(r for r in after["people"] if str(r["id"]) == person)
+    assert all(existing[k] == original[k] for k in ("full_name", "email", "phone", "external_key", "source"))
+    assert existing["marketing_consent"] is False
+    added = [r for r in after["people"] if r["external_key"] == new_key]
+    assert len(added) == 1 and added[0]["marketing_consent"] is False
+    batch = next(r for r in after["import_batches"] if str(r["id"]) == h.batches[tenant])
+    assert batch["status"] == "committed" and batch["committed_at"] is not None
+    assert batch["result"]["count"] == 2
+    changes = batch["result"]["changes"]
+    assert changes[0]["id"] == person and changes[0]["created"] is False
+    assert changes[0]["before"]["marketing_consent"] is True
+    assert changes[1] == {"id": str(added[0]["id"]), "created": True}
+    for table, key in [("audit_events", "entity_id"), ("domain_events", "aggregate_id")]:
+        assert len(after[table]) == 1
+        assert after[table][0]["event_type"] == "import.committed"
+        assert str(after[table][0][key]) == h.batches[tenant]
+    assert str(after["audit_events"][0]["actor_user_id"]) == h.users[actor]
+    assert after["audit_events"][0]["request_id"] == response.headers["x-request-id"]
+    second = h.commit(tenant=tenant, actor=actor)
+    assert second.status_code == 200, second.text
+    assert second.json() == {"id": h.batches[tenant], "status": "committed", "result": batch["result"]}
+    assert h.snapshot() == after and h.completions == ["commit-batch", "audit"]
+    assert len(h.mutations) == 2
+    h.proven()
+
+
+def assert_concurrent_commit_conflict(h, response, before, victim):
+    assert response.status_code == 409, response.text
+    assert response.json() == {"error": "IMPORT_COMMIT_CONFLICT", "message": "Import commit requires review."}
+    assert all(value not in response.text for value in h.orgs + sum(h.people, []))
+    assert len(h.concurrent_deletes) == 1 and h.concurrent_deletes[0]["id"] == victim
+    assert h.concurrent_deletes[0]["count"] == 1
+    assert h.mutations[-1]["op"] == "update" and h.mutations[-1]["count"] == 0
+    assert h.completions == [] and h.delete_before_update is None
+    # The OTHER transaction's committed deletion must survive; everything from
+    # the failing import transaction must be absent/unchanged in independent IO.
+    expected = {**before, "people": [r for r in before["people"] if str(r["id"]) != victim]}
+    assert h.snapshot() == expected
+
+
+def test_pg16_commit_real_delete_after_lookup_denies_zero_update(pg_rollback):
+    h = pg_rollback
+    victim = h.people[0][1]
+    h.configure_commit([commit_item(victim, name="CI must not commit")])
+    h.delete_before_update = victim
+    before = h.snapshot()
+    response = h.commit()
+    assert_concurrent_commit_conflict(h, response, before, victim)
+    assert [(m["op"], m["count"]) for m in h.mutations] == [("update", 0)]
+    h.proven()
+
+
+@pytest.mark.parametrize("first_op", ["update", "insert"])
+def test_pg16_commit_later_concurrent_conflict_aborts_earlier_real_mutation(pg_rollback, first_op):
+    h = pg_rollback
+    victim = h.people[0][1]
+    first = (commit_item(h.people[0][0], name="CI earlier real change") if first_op == "update" else
+             {"external_id": "new-" + str(uuid.uuid4()), "name": "CI earlier real change"})
+    h.configure_commit([first, commit_item(victim, name="CI must not commit")])
+    h.delete_before_update = victim
+    before = h.snapshot()
+    response = h.commit()
+    assert_concurrent_commit_conflict(h, response, before, victim)
+    assert [(m["op"], m["count"]) for m in h.mutations] == [(first_op, 1), ("update", 0)]
+    assert any(r["full_name"] == "CI earlier real change" for r in h.mutations[0]["visible"])
+    h.proven()
+
+
+@pytest.mark.parametrize("denial", ["auth", "outsider", "front-desk", "foreign-org", "foreign-batch", "rolled-back", "failed"])
+def test_pg16_commit_denials_preserve_people_batch_audit_and_domain(pg_rollback, denial):
+    h = pg_rollback
+    h.configure_commit([commit_item(h.people[0][0], name="CI denied change")],
+                       status="rolled_back" if denial == "rolled-back" else "failed" if denial == "failed" else "staged")
+    before = h.snapshot()
+    if denial == "auth":
+        response, status = h.commit(authenticated=False), 401
+    elif denial == "outsider":
+        response, status = h.commit(actor=3), 403
+    elif denial == "front-desk":
+        h.set_role("front_desk")
+        response, status = h.commit(actor=2), 403
+    elif denial == "foreign-org":
+        response, status = h.commit(org=h.orgs[1], batch=h.batches[1]), 403
+    elif denial == "foreign-batch":
+        response, status = h.commit(batch=h.batches[1]), 404
+        assert response.json()["error"] == "IMPORT_NOT_FOUND"
+    else:
+        response, status = h.commit(), 409
+        assert response.json()["error"] == "IMPORT_STATE"
+    assert response.status_code == status, response.text
     assert h.snapshot() == before and h.mutations == h.completions == []
     h.proven()

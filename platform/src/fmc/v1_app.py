@@ -1162,7 +1162,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         """), {"org": org, "email": item["email"]}))
                     before = dict(existing) if existing else None
                     if existing:
-                        c.execute(text("""
+                        updated = c.execute(text("""
                             update public.people set
                               external_key=coalesce(nullif(:external,''),external_key),
                               full_name=coalesce(nullif(:name,''),full_name),
@@ -1174,6 +1174,9 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         """), {"external": item.get("external_id",""), "name": item.get("name",""),
                                "email": item.get("email",""), "phone": item.get("phone",""),
                                "consent": item.get("marketing_consent"), "source": b["source"], "id": str(existing["id"])})
+                        updated_count = updated.rowcount
+                        if type(updated_count) is not int or updated_count != 1:
+                            raise DomainError("IMPORT_COMMIT_CONFLICT", "Import commit requires review.", 409)
                         pid = str(existing["id"])
                         changes.append({"id": pid, "created": False, "before": {k: str(v) if isinstance(v,(datetime,uuid.UUID)) else v for k,v in before.items()}})
                     else:
