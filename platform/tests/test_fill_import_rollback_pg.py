@@ -75,9 +75,14 @@ def pg_rollback(monkeypatch, request, capsys):
     if os.environ.get("GITHUB_ACTIONS") != "true":
         pytest.skip("Actual rollback PostgreSQL proof runs only in disposable CI")
     url = ci_database_url(os.environ)  # Must precede BOTH engine constructors.
+    mode = getattr(request, "param", None)
+    assert mode in (None, "concurrency-two"), "Unreviewed CI fixture mode"
     options = {"options": "-c statement_timeout=5000 -c lock_timeout=1000", "connect_timeout": 2}
+    if mode == "concurrency-two":
+        options = {**options, "options": "-c statement_timeout=5000 -c lock_timeout=3000",
+                   "application_name": "fmc-ci-serialization-" + uuid.uuid4().hex}
     store = V1Store.__new__(V1Store)
-    store.engine = create_engine(url, pool_size=1, max_overflow=0, pool_timeout=2,
+    store.engine = create_engine(url, pool_size=2 if mode == "concurrency-two" else 1, max_overflow=0, pool_timeout=2,
                                 pool_pre_ping=True, connect_args=options)
     observer = create_engine(url, poolclass=NullPool, connect_args=options)
     users = [str(uuid.uuid4()) for _ in range(4)]
@@ -213,6 +218,8 @@ def pg_rollback(monkeypatch, request, capsys):
         monkeypatch.setattr("fmc.fill_uat_server_validator.from_environment", lambda *_: None)
         app = v1_app.create_v1_app(Settings(origin="http://testserver", environment="test"),
                                    "operations", auth_override=FictionalAuth())
+        if mode == "concurrency-two":
+            h.app, h.observer, h.application_name = app, observer, options["application_name"]
         with TestClient(app, raise_server_exceptions=False) as client:
             def rollback(tenant=0, actor=0, batch=None, org=None, authenticated=True):
                 headers = {"Authorization": "Bearer fictional-ci-" + str(actor)} if authenticated else {}
