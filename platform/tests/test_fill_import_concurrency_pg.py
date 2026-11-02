@@ -309,3 +309,193 @@ def test_different_tenants_commit_independently_with_isolated_claims(pg_rollback
     for tenant in (0, 1):
         assert_events(h, after, ["import.committed"], tenant)
     proven(h, capsys, request, records, proof)
+
+
+class PersonWatch(BatchWatch):
+    """Different batches: hold A after its real person UPDATE, not its batch read."""
+    def after(self, c, cursor, statement, parameters, context, executemany):
+        if self.is_batch_lock(statement):
+            self.by_connection[id(c)]["acquired"] = True
+        elif " ".join(statement.lower().split()).startswith("update public.people "):
+            record = self.by_connection[id(c)]
+            if record["index"] == 0:
+                assert cursor.rowcount == 1
+                self.locked.set()
+                assert self.release.wait(8), "A's test-owned person row-lock gate expired"
+
+    def database_wait(self):
+        first, second = self.records
+        assert first["pid"] != second["pid"] and first["batch"] != second["batch"]
+        deadline = time.monotonic() + 1.8
+        while time.monotonic() < deadline:
+            rows = self.observe("""select pg_blocking_pids(:pid) as blockers,a.state,a.wait_event_type,a.query,
+                exists(select 1 from pg_locks l where l.pid=:pid and not l.granted) as pending_lock
+                from pg_stat_activity a where a.pid=:pid""", {"pid": second["pid"]})
+            if rows and first["pid"] in rows[0]["blockers"]:
+                row = rows[0]
+                assert row["state"] == "active" and row["wait_event_type"] == "Lock" and row["pending_lock"] is True
+                sql = " ".join(row["query"].lower().split())
+                if sql.startswith("select * from public.people ") and "for update" in sql:
+                    row["phase"] = "matched_person_select"
+                else:
+                    assert sql.startswith("update public.people ")
+                    row["phase"] = "person_update"
+                assert first["acquired"] and second["acquired"], "Both independent batch locks already acquired"
+                return row
+            time.sleep(0.01)
+        pytest.fail("B never demonstrated a physical wait on A's person row lock")
+
+
+async def person_pair(h, sibling, *, independent_person=False):
+    watch = PersonWatch(h)
+    tasks = []
+    watch.install()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=h.app), base_url="http://testserver") as left:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=h.app), base_url="http://testserver") as right:
+                def commit(client, batch, actor):
+                    return client.post(f"/api/fmc/{h.orgs[0]}/imports/{batch}/commit",
+                                       headers={"Authorization": "Bearer fictional-ci-" + str(actor)})
+                try:
+                    tasks.append(asyncio.create_task(commit(left, h.batches[0], 0)))
+                    await until(watch.locked.is_set, 2)
+                    tasks.append(asyncio.create_task(commit(right, sibling, 2)))
+                    await until(lambda: len(watch.records) == 2, 2)
+                    assert not tasks[0].done()
+                    if independent_person:
+                        second = await asyncio.wait_for(asyncio.shield(tasks[1]), 2)
+                        assert second.status_code == 200, second.text
+                        assert not tasks[0].done() and not watch.release.is_set()
+                        proof = {"phase": "unrelated_person_completed_while_A_locked"}
+                    else:
+                        proof = watch.database_wait()
+                        assert not tasks[1].done()
+                    watch.release.set()
+                    responses = await asyncio.wait_for(asyncio.gather(*tasks), 6)
+                finally:
+                    watch.release.set()
+                    if tasks:
+                        await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 8)
+                    assert all(t.done() for t in tasks)
+    finally:
+        watch.release.set()
+        watch.remove()
+    assert h.store.engine.pool.checkedout() == 0
+    assert len(watch.records) == 2 and all(r["acquired"] for r in watch.records)
+    pids = [r["pid"] for r in watch.records]
+    assert len(set(pids)) == 2
+    idle = watch.observe("""select pid,state,xact_start,pg_blocking_pids(pid) as blockers
+        from pg_stat_activity where pid=any(:pids) and datname='fmc_test' and application_name=:name""",
+                         {"pids": pids, "name": h.application_name})
+    assert len(idle) == 2 and all(r["state"] == "idle" and r["xact_start"] is None and r["blockers"] == [] for r in idle)
+    for i, record in enumerate(watch.records):
+        assert (record["uid"], record["org"], record["batch"]) == (
+            h.users[0 if i == 0 else 2], h.orgs[0], h.batches[0] if i == 0 else sibling)
+        assert record["pid"] not in h.observer_pids
+    assert all(r.status_code == 200 for r in responses), [r.text for r in responses]
+    return responses, watch.records, proof
+
+
+BUSINESS_FIELDS = ("external_key", "full_name", "email", "phone", "marketing_consent", "source")
+
+
+def business(row):
+    return {key: row[key] for key in BUSINESS_FIELDS}
+
+
+def assert_sibling_events(h, snapshot, sibling, *, rolled_back=False):
+    for table, column in [("audit_events", "entity_id"), ("domain_events", "aggregate_id")]:
+        a = [r for r in snapshot[table] if str(r[column]) == h.batches[0]]
+        b = [r for r in snapshot[table] if str(r[column]) == sibling]
+        assert len(snapshot[table]) == (3 if rolled_back else 2)
+        assert [r["event_type"] for r in a] == ["import.committed"]
+        assert [r["event_type"] for r in b] == (["import.committed", "import.rolled_back"] if rolled_back else ["import.committed"])
+        assert all(str(r["organization_id"]) == h.orgs[0] for r in a + b)
+        if table == "audit_events":
+            assert all(str(r["actor_user_id"]) == h.users[0] for r in a)
+            assert all(str(r["actor_user_id"]) == h.users[2] for r in b)
+
+
+@pytest.mark.parametrize("match", ["external", "email"])
+def test_person_snapshot_preserves_preceding_commit(pg_rollback, capsys, request, match):
+    h = pg_rollback
+    h.set_role("admin")
+    person = h.people[0][0]
+    email = "snapshot-" + str(uuid.uuid4()) + "@example.test"
+    a_key, b_key = "snapshot-A-" + str(uuid.uuid4()), "snapshot-B-" + str(uuid.uuid4())
+    a = commit_item(person, name="CI snapshot A", phone="+351000000101", marketing_consent=False)
+    b = (commit_item(person) if match == "external" else {"email": email.upper(), "external_id": ""})
+    b.update(name="CI snapshot B", phone="+351000000202", marketing_consent=True)
+    h.configure_commit([a, {"external_id": a_key, "name": "CI A created"}])
+    sibling = h.configure_sibling([b, {"external_id": b_key, "name": "CI B created"}], person_email=email)
+    before = h.snapshot()
+    original = next(r for r in before["people"] if str(r["id"]) == person)
+    expected_a = {**business(original), "full_name": "CI snapshot A", "phone": "+351000000101", "marketing_consent": False}
+    responses, records, proof = asyncio.run(person_pair(h, sibling))
+    assert all(r.json()["count"] == 2 for r in responses)
+    committed = h.snapshot()
+    batch_a = batch_row(h, committed)
+    batch_b = next(r for r in committed["import_batches"] if str(r["id"]) == sibling)
+    assert batch_a["status"] == batch_b["status"] == "committed"
+    assert batch_a["result"]["count"] == batch_b["result"]["count"] == 2
+    snapshot_a, snapshot_b = (batch["result"]["changes"][0]["before"] for batch in (batch_a, batch_b))
+    assert business(snapshot_a) == business(original)
+    assert all(batch["result"]["changes"][0]["id"] == person for batch in (batch_a, batch_b))
+    assert [(m["op"], m["count"]) for m in h.mutations] == [("update", 1), ("insert", 1), ("update", 1), ("insert", 1)]
+    for key in (a_key, b_key):
+        assert len([r for r in committed["people"] if r["external_key"] == key]) == 1
+    assert_sibling_events(h, committed, sibling)
+    stale = business(snapshot_b) == business(original)
+    # Honest diagnostic for tests-first CI: the unfixed route waits at UPDATE,
+    # and stores pre-A data. A fixed PASS is emitted only after all later checks.
+    with capsys.disabled():
+        print(f"FILL_IMPORT_PERSON_SNAPSHOT_OBSERVED {request.node.name} phase={proof['phase']} stale_before={stale}", flush=True)
+    assert business(snapshot_b) == expected_a, "B rollback-before snapshot must contain A's preceding committed fields"
+    assert proof["phase"] == "matched_person_select", "Matched row must be locked before copying its snapshot"
+    rolled = h.rollback(actor=2, batch=sibling)
+    assert rolled.status_code == 200 and rolled.json() == {"id": sibling, "status": "rolled_back"}
+    after = h.snapshot()
+    final_person = next(r for r in after["people"] if str(r["id"]) == person)
+    assert business(final_person) == expected_a  # No timestamp restoration claim.
+    assert len([r for r in after["people"] if r["external_key"] == a_key]) == 1
+    assert not any(r["external_key"] == b_key for r in after["people"])
+    a_created = batch_a["result"]["changes"][1]
+    b_created = batch_b["result"]["changes"][1]
+    assert a_created["created"] is True and b_created["created"] is True and a_created["id"] != b_created["id"]
+    ids = {str(r["id"]) for r in after["people"]}
+    assert a_created["id"] in ids and b_created["id"] not in ids
+    originals = {str(r["id"]): r for r in before["people"]}
+    for row in after["people"]:
+        if str(row["id"]) in originals and str(row["id"]) != person:
+            assert row == originals[str(row["id"])], "Foreign tenant and unrelated people untouched"
+    assert batch_row(h, after) == batch_a
+    final_b = next(r for r in after["import_batches"] if str(r["id"]) == sibling)
+    assert final_b["status"] == "rolled_back" and final_b["result"] == batch_b["result"]
+    assert_sibling_events(h, after, sibling, rolled_back=True)
+    assert h.store.engine.pool.checkedout() == 0
+    with capsys.disabled():
+        print("FILL_IMPORT_PERSON_SNAPSHOT_PG16_PASS " + request.node.name, flush=True)
+
+
+def test_unrelated_person_in_same_tenant_is_not_serialized(pg_rollback, capsys, request):
+    h = pg_rollback
+    h.set_role("admin")
+    h.configure_commit([commit_item(h.people[0][0], name="CI unrelated A")])
+    sibling = h.configure_sibling([commit_item(h.people[0][1], name="CI unrelated B")])
+    before = h.snapshot()
+    responses, records, proof = asyncio.run(person_pair(h, sibling, independent_person=True))
+    assert all(r.json()["count"] == 1 for r in responses)
+    assert proof["phase"] == "unrelated_person_completed_while_A_locked"
+    after = h.snapshot()
+    for i, batch_id in enumerate((h.batches[0], sibling)):
+        person = h.people[0][i]
+        row = next(r for r in after["people"] if str(r["id"]) == person)
+        original = next(r for r in before["people"] if str(r["id"]) == person)
+        batch = next(r for r in after["import_batches"] if str(r["id"]) == batch_id)
+        assert row["full_name"] == ("CI unrelated A" if i == 0 else "CI unrelated B")
+        assert business(batch["result"]["changes"][0]["before"]) == business(original)
+        assert batch["result"]["count"] == 1 and batch["status"] == "committed"
+    assert len(h.mutations) == 2 and all(m["count"] == 1 for m in h.mutations)
+    assert_sibling_events(h, after, sibling)
+    with capsys.disabled():
+        print("FILL_IMPORT_PERSON_CONTROL_PG16_PASS " + request.node.name, flush=True)

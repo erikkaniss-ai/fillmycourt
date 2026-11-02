@@ -125,6 +125,21 @@ def pg_rollback(monkeypatch, request, capsys):
                 committed_at=null,rolled_back_at=null where id=cast(:batch as uuid)"""),
                       {"payload": json.dumps(payload), "status": status, "batch": batches[tenant]})
 
+    def configure_sibling(payload, person_email=None):
+        assert mode == "concurrency-two", "Sibling batch requires reviewed CI opt-in"
+        batch = str(uuid.uuid4())
+        with observer.begin() as c:
+            if person_email is not None:
+                c.execute(text("update public.people set email=:email where id=cast(:id as uuid)"),
+                          {"email": person_email, "id": people[0][0]})
+            c.execute(text("""insert into public.import_batches(id,organization_id,source,kind,
+                fingerprint,status,payload,actor_user_id)
+                values(cast(:id as uuid),cast(:org as uuid),'ci-import','people',:fp,
+                       'staged',cast(:payload as jsonb),cast(:uid as uuid))"""),
+                      {"id": batch, "org": orgs[0], "fp": batch,
+                       "payload": json.dumps(payload), "uid": users[2]})
+        return batch
+
     def concurrent_delete(c, cursor, statement, parameters, context, executemany):
         # Deterministic interleaving of TWO physical transactions: the route has
         # already fetched the existing person, but has not executed its UPDATE.
@@ -220,6 +235,7 @@ def pg_rollback(monkeypatch, request, capsys):
                                    "operations", auth_override=FictionalAuth())
         if mode == "concurrency-two":
             h.app, h.observer, h.application_name = app, observer, options["application_name"]
+            h.configure_sibling = configure_sibling
         with TestClient(app, raise_server_exceptions=False) as client:
             def rollback(tenant=0, actor=0, batch=None, org=None, authenticated=True):
                 headers = {"Authorization": "Bearer fictional-ci-" + str(actor)} if authenticated else {}
