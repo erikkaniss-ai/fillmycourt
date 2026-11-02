@@ -606,6 +606,240 @@ def test_late_stop_does_not_block_client_closure_or_claim_cleanup(e):
         assert sentinel not in s.canonical(timeouts+late)
 
 
+async def delayed_get_diagnostics(e, monkeypatch, route, trigger, outcome):
+    """Injected HTTP and an accelerated wait only; production deadlines asserted."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    e.clock.seconds = 10
+    e.port.initial = False
+    e.runner.ready = True
+    e.runner.read_pool = s.ThreadPoolExecutor(max_workers=1)
+    bodies = {
+        "me": {"user": {"id": e.ids["canary"]}},
+        "organizations": {"items": [{"id": e.cfg.organizations["a"], "role": "owner"}]},
+        "own_today": {"date": START.date().isoformat(), "courts": []},
+        "own_calendar": {"bookings": [], "holds": [], "blocks": []},
+        "provider_connections": {"items": []},
+    }
+    async def delayed(request):
+        e.http.append((request.method, request.url.path, e.clock.seconds))
+        entered.set()
+        await release.wait()
+        if outcome == "error":
+            raise httpx.ReadTimeout(PASSWORD + TOKEN)
+        if outcome == "cancelled":
+            raise asyncio.CancelledError()
+        return httpx.Response(403 if route.startswith("foreign_") else 200, json=bodies.get(route, {}))
+    client = s.Clients(PUBLIC_KEY, e.plan, e.cfg.operations_origin,
+                       auth_transport=httpx.MockTransport(delayed), ops_transport=httpx.MockTransport(delayed), clock=e.clock.wall)
+    client.sessions["canary"] = (TOKEN, START + timedelta(hours=1))
+    e.runner.client = client
+    bounded = e.runner.bounded
+    async def controlled_wait(awaitable, seconds, **context):
+        if context["stage"] == "user_get":
+            assert seconds == s.CONTROL_SECONDS == 2.0
+            # Only this test's injected wait expires immediately; no runtime
+            # constant or clock/deadline is changed in the application.
+            seconds = 0 if trigger == "timeout" else seconds
+        return await bounded(awaitable, seconds, **context)
+    monkeypatch.setattr(e.runner, "bounded", controlled_wait)
+    task = asyncio.create_task(e.runner.action("canary", route))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        if trigger == "interrupted":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            with pytest.raises(s.Closed) as stopped:
+                await task
+            assert stopped.value.code == "TIMEOUT"
+        assert len(e.runner.jobs) == 1 and not e.runner.events
+        assert ("canary", route, False) in e.runner.used
+        with pytest.raises(s.Closed) as replay:
+            await e.runner.action("canary", route)
+        assert replay.value.code == "REPLAY" and len(e.http) == 1
+    finally:
+        release.set()
+        await asyncio.gather(task, *list(e.runner.jobs), return_exceptions=True)
+        await asyncio.sleep(0)
+        await client.close()
+        e.runner.read_pool.shutdown()
+    assert client.closed and not client.sessions and not e.runner.jobs and not e.runner.events
+    return [x for x in e.logs if x.get("stage") == "user_get"]
+
+
+@pytest.mark.parametrize("route", s.ROUTES)
+@pytest.mark.parametrize("trigger", ["timeout", "interrupted"])
+@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled"])
+def test_delayed_user_get_diagnostics_preserve_fixed_route_and_ownership(e, monkeypatch, route, trigger, outcome):
+    events = asyncio.run(delayed_get_diagnostics(e, monkeypatch, route, trigger, outcome))
+    first = "PRIVATE_VALIDATOR_STAGE_TIMEOUT" if trigger == "timeout" else "PRIVATE_VALIDATOR_STAGE_INTERRUPTED"
+    assert [x["kind"] for x in events] == [first, "PRIVATE_VALIDATOR_LATE_STAGE"]
+    assert [x["route"] for x in events] == [route, route]
+    assert events[-1]["outcome"] == outcome
+    assert all(set(x) <= {"kind", "stage", "elapsed_ms", "outcome", "route"} for x in events)
+    assert all(type(x["elapsed_ms"]) in {int, float} and x["elapsed_ms"] >= 0 for x in events)
+    encoded = s.canonical(events)
+    for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, e.plan.digest, e.cfg.run_id, e.cfg.authorization_id,
+                     e.cfg.operations_sha, e.cfg.organizations["a"], e.ids["canary"], "canary", "https://", "/api/"):
+        assert sentinel not in encoded
+
+
+@pytest.mark.parametrize("metadata", [None, "unknown-route", PASSWORD, TOKEN, PUBLIC_KEY, ID(999),
+    "https://ops-dummy.up.railway.app/api/me?token=" + TOKEN, "/api/me", "canary", ["me"], {"route": "me"}, 123])
+def test_untrusted_route_metadata_is_omitted_without_serializing_values(e, metadata):
+    async def exercise():
+        release = asyncio.Event()
+        async def delayed():
+            await release.wait()
+            raise ValueError(PASSWORD + TOKEN)
+        try:
+            with pytest.raises(s.Closed):
+                await e.runner.bounded(delayed(), 0, stage="user_get", route=metadata)
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert len(e.logs) == 2 and not e.http and not e.runner.jobs
+    assert all(set(x) <= {"kind", "stage", "elapsed_ms", "outcome"} for x in e.logs)
+    encoded = s.canonical(e.logs)
+    for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, ID(999), "unknown-route", "https://", "/api/", "canary"):
+        assert sentinel not in encoded
+
+
+@pytest.mark.parametrize("stage", ["admission_snapshot", "control_snapshot", "cleanup_snapshot", "durable_stop", "client_close", "user_login"])
+@pytest.mark.parametrize("trigger", ["timeout", "interrupted"])
+def test_non_get_diagnostic_shapes_ignore_route_metadata(e, stage, trigger):
+    async def exercise():
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def delayed():
+            entered.set()
+            await release.wait()
+        task = asyncio.create_task(e.runner.bounded(delayed(), 0 if trigger == "timeout" else 2, stage=stage, route="own_today"))
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            if trigger == "interrupted":
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError): await task
+            else:
+                with pytest.raises(s.Closed): await task
+        finally:
+            release.set()
+            await asyncio.gather(task, *list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    first = "PRIVATE_VALIDATOR_STAGE_TIMEOUT" if trigger == "timeout" else "PRIVATE_VALIDATOR_STAGE_INTERRUPTED"
+    assert [x["kind"] for x in e.logs] == [first, "PRIVATE_VALIDATOR_LATE_STAGE"]
+    assert all(x["stage"] == stage and set(x) <= {"kind", "stage", "elapsed_ms", "outcome"} for x in e.logs)
+    assert not e.http and not e.runner.jobs
+
+
+@pytest.mark.parametrize("stage", ["user_get", "user_login", "control_snapshot"])
+def test_successful_bounded_operations_emit_no_new_diagnostic_stream(e, stage):
+    async def exercise():
+        async def done(): return 200
+        assert await e.runner.bounded(done(), 2, stage=stage, route="own_today") == 200
+        await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert not e.logs and not e.runner.jobs and not e.http
+
+
+@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled"])
+def test_overlapping_abandoned_gets_keep_their_own_route(e, outcome):
+    async def exercise():
+        releases = {route: asyncio.Event() for route in ("own_today", "own_calendar")}
+        jobs = {}
+        async def delayed(route):
+            await releases[route].wait()
+            if route == "own_today" and outcome == "error": raise ValueError(PASSWORD + TOKEN)
+            if route == "own_today" and outcome == "cancelled": raise asyncio.CancelledError()
+            return {"unlogged": PASSWORD + TOKEN}
+        try:
+            for route in releases:
+                before = set(e.runner.jobs)
+                with pytest.raises(s.Closed):
+                    await e.runner.bounded(delayed(route), 0, stage="user_get", route=route)
+                jobs[route] = (e.runner.jobs - before).pop()
+            assert len(e.runner.jobs) == 2
+            # B completes while abandoned A is still owned; A must retain A.
+            for route in reversed(releases):
+                releases[route].set()
+                await asyncio.gather(jobs[route], return_exceptions=True)
+                await asyncio.sleep(0)
+        finally:
+            for release in releases.values(): release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+    asyncio.run(exercise())
+    assert [(x["kind"], x["route"]) for x in e.logs] == [
+        ("PRIVATE_VALIDATOR_STAGE_TIMEOUT", "own_today"),
+        ("PRIVATE_VALIDATOR_STAGE_TIMEOUT", "own_calendar"),
+        ("PRIVATE_VALIDATOR_LATE_STAGE", "own_calendar"),
+        ("PRIVATE_VALIDATOR_LATE_STAGE", "own_today"),
+    ]
+    assert e.logs[-1]["outcome"] == outcome and not e.runner.jobs and not e.http
+    assert PASSWORD not in s.canonical(e.logs) and TOKEN not in s.canonical(e.logs)
+
+
+@pytest.mark.parametrize("route", ["unknown-route", PASSWORD, TOKEN, "https://ops-dummy.up.railway.app/api/me?token=" + TOKEN])
+def test_unknown_action_route_never_sends_http_or_diagnostic_input(e, route):
+    e.clock.seconds = 10
+    e.port.initial = False
+    e.runner.ready = True
+    async def exercise():
+        e.runner.read_pool = s.ThreadPoolExecutor(max_workers=1)
+        e.runner.client = e.runner.client_factory()  # explicitly injected MockTransport fixture
+        e.runner.client.sessions["canary"] = (TOKEN, START + timedelta(hours=1))
+        try:
+            with pytest.raises(KeyError): await e.runner.action("canary", route)
+            with pytest.raises(s.Closed): await e.runner.action("canary", route)
+        finally:
+            await e.runner.client.close()
+            e.runner.read_pool.shutdown()
+        await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert not e.http and not e.logs and not e.runner.events and not e.runner.jobs
+
+
+@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled"])
+def test_user_get_timeout_closes_task_without_false_cleanup_then_drains(e, outcome):
+    release = asyncio.Event()
+    factory = e.runner.client_factory
+    def delayed_factory():
+        client = factory()  # fixture sends only injected public MockTransport requests
+        get = client.get
+        async def delayed(*args, **kwargs):
+            status = await get(*args, **kwargs)
+            await release.wait()
+            if outcome == "error": raise ValueError(PASSWORD + TOKEN)
+            if outcome == "cancelled": raise asyncio.CancelledError()
+            return status
+        client.get = delayed
+        return client
+    e.runner.client_factory = delayed_factory
+    async def exercise():
+        try:
+            await asyncio.wait_for(e.runner.run(), 4)
+            final = next(x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_TASK_STOPPED")
+            assert final["status"] == "TIMEOUT" and final["durable_stop"] and final["client_closed"]
+            assert final["owned_pending"] == 1 and final["cleanup"]["status"] == "UNKNOWN"
+            assert not e.runner.admission_ready and not e.runner.operator_gate and e.port.stopped
+            assert not any(x["kind"] == "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED" for x in e.logs)
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    relevant = [x for x in e.logs if x.get("stage") == "user_get"]
+    assert [(x["kind"], x["route"]) for x in relevant] == [
+        ("PRIVATE_VALIDATOR_STAGE_TIMEOUT", "own_today"), ("PRIVATE_VALIDATOR_LATE_STAGE", "own_today")]
+    assert relevant[0]["elapsed_ms"] >= 1900 and relevant[-1]["outcome"] == outcome
+    assert e.logs[-1] == {"kind": "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED", "owned_pending": 0, "client_closed": True}
+    assert not e.runner.jobs and not e.client.sessions and not e.runner.operator_gate
+    assert all(x["kind"] != "PRIVATE_FINAL_CANARY" for x in e.logs)
+    assert PASSWORD not in s.canonical(e.logs) and TOKEN not in s.canonical(e.logs)
+
+
 def snapshot_fixture_engine(url, opt_in):
     from test_fill_provenance_uat import fixture_database
     # Validation happens before create_engine or connection/fixture DDL. Reuse

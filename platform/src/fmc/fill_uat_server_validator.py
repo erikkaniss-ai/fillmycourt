@@ -335,14 +335,17 @@ class ServerValidator:
         require(not self.started or self.started <= wall < self.started + timedelta(seconds=1800), "CLOCK")
         return wall
 
-    async def bounded(self, awaitable, seconds, *, stage):
+    async def bounded(self, awaitable, seconds, *, stage, route=None):
         require(stage in {"admission_snapshot", "control_snapshot", "cleanup_snapshot", "durable_stop", "client_close", "user_login", "user_get"})
+        route = route if stage == "user_get" and type(route) is str and route in ROUTES else None
         began, abandoned = time.monotonic(), False
         def evidence(kind, outcome=None):
             value = {"kind": kind, "stage": stage, "elapsed_ms": round(max(0, time.monotonic() - began) * 1000, 3)}
+            if route is not None:
+                value["route"] = route
             if outcome is not None:
                 value["outcome"] = outcome
-            self.emit(value)  # fixed labels/duration only; no SQL, values or exception
+            self.emit(value)  # fixed enums/duration only; no IDs, SQL or exception
         job = asyncio.ensure_future(awaitable)
         self.jobs.add(job)
         def settled(task):
@@ -456,7 +459,7 @@ class ServerValidator:
         if not deny:
             require(data["bans"].get(uid) is None or data["bans"][uid] <= self.now(), "IDENTITY")
         operation = self.client.login(label, uid, self.started, deny=deny) if login else self.client.get(label, route, uid, self.binding.organizations, self.started.date().isoformat(), deny=deny)
-        status = await self.bounded(operation, CONTROL_SECONDS, stage="user_login" if login else "user_get")
+        status = await self.bounded(operation, CONTROL_SECONDS, stage="user_login" if login else "user_get", route=None if login else route)
         after = await self.snapshot()
         require(after is not None and self.monotonic() - began <= READ_SECONDS, "STALE")
         age = (self.now() - self.started).total_seconds()
