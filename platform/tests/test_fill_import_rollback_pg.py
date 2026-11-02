@@ -250,6 +250,11 @@ def pg_rollback(monkeypatch, request, capsys):
                 return client.post(f"/api/fmc/{org or orgs[tenant]}/imports/{batch or batches[tenant]}/commit",
                                    headers=headers)
             h.configure_commit, h.commit = configure_commit, commit
+            def stage(raw, source="ci-import", tenant=0, actor=0, org=None, authenticated=True):
+                headers = {"Authorization": "Bearer fictional-ci-" + str(actor)} if authenticated else {}
+                return client.post(f"/api/fmc/{org or orgs[tenant]}/imports", headers=headers,
+                                   json={"source": source, "csv": raw})
+            h.stage = stage
             yield h
     finally:
         store.engine.dispose()
