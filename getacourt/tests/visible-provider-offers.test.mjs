@@ -203,7 +203,9 @@ const malformedMoney=['€36.5','36.5€','€36,5','36,5 €','€36.500','36.5
   '€+36','+36€','€-36','-36€','-€36','- €36','- 36 €','€−36','−36€',
   '€.50','.50€','€36.','36. €','€36,','36, €','€36_50','36_50€',
   '€36..50','36..50€','€36,50.00','36,50.00€','€36.50abc','abc36.50€',
-  '€36.5 €40','€36.5 40€','€0,00','€2001'];
+  '€36.5 €40','€36.5 40€','€0,00','€2001','€36/2','36/2€','€36*2','36*2€',
+  '€36^2','36^2€','€36%','36%€','€36=40','36=40€','€36÷2','36÷2€','€36×2','36×2€',
+  '€36 / 2','36 / 2 €','€36 * 2','36 * 2 €','€1 23','1 23 €','€36 5','36 5€'];
 const moneyFailures=admitted=>({count:admitted.length,examples:admitted.slice(0,6)});
 
 test('a malformed EUR token is rejected whole instead of salvaging numeric fragments',()=>{
@@ -264,7 +266,8 @@ test('court IDs and displayed times cannot be salvaged as a malformed price',()=
   for(const text of ['Court 1 €NaN 18:00 - 19:30','Court 1 €invalid 18:00 - 19:30'])
     assert.equal(parseRow({...row,text}),null,text);
   for(const text of ['Court 1 € 36,50 from 18:00 - 19:30',
-    'Court 1 18:00 - 19:30 total:€36.50','Court 123 18:00 - 19:30 36,50 €'])
+    'Court 1 18:00 - 19:30 total:€36.50','Court 123 18:00 - 19:30 36,50 €',
+    'Court 1 18:00 - 19:30 €36.50 90 min','Court 1 18:00 - 19:30 €36.50 90 minutos'])
     assert.equal(parseRow({...row,text})?.priceEur,36.5,text);
 });
 
