@@ -499,3 +499,129 @@ def test_unrelated_person_in_same_tenant_is_not_serialized(pg_rollback, capsys, 
     assert_sibling_events(h, after, sibling)
     with capsys.disabled():
         print("FILL_IMPORT_PERSON_CONTROL_PG16_PASS " + request.node.name, flush=True)
+
+
+class DeleteWatch(BatchWatch):
+    def __init__(self, h, victim):
+        super().__init__(h)
+        self.victim = victim
+
+    def after(self, c, cursor, statement, parameters, context, executemany):
+        if self.is_batch_lock(statement):
+            self.by_connection[id(c)]["acquired"] = True
+        elif (" ".join(statement.lower().split()).startswith("select * from public.people ") and
+              "for update" in statement.lower() and parameters.get("external") == "ci-key-" + self.victim):
+            self.locked.set()
+            assert self.release.wait(8), "Matched-person gate expired"
+
+
+async def serialized_delete(h, victim):
+    # Exactly one owned observer thread; no blocked observer DELETE is run from
+    # a paused route callback. It has fixed CI connect/statement/lock bounds.
+    from threading import Thread
+    watch, started, result = DeleteWatch(h, victim), Event(), {}
+    task, worker = None, None
+
+    def delete_worker():
+        try:
+            with h.observer.begin() as c:
+                result["pid"] = c.execute(text("select pg_backend_pid()")).scalar_one()
+                h.observer_pids.append(result["pid"])
+                started.set()
+                deleted = c.execute(text("""delete from public.people where id=cast(:id as uuid)
+                    and organization_id=cast(:org as uuid) and auth_user_id is null"""),
+                                    {"id": victim, "org": h.orgs[0]})
+                result["count"] = deleted.rowcount
+        except BaseException as error:
+            result["error"] = error
+            started.set()
+
+    watch.install()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=h.app), base_url="http://testserver") as client:
+            try:
+                task = asyncio.create_task(client.post(f"/api/fmc/{h.orgs[0]}/imports/{h.batches[0]}/commit",
+                    headers={"Authorization": "Bearer fictional-ci-0"}))
+                await until(watch.locked.is_set, 2)
+                worker = Thread(target=delete_worker, name="fill-ci-owned-delete", daemon=True)
+                worker.start()
+                await until(started.is_set, 2)
+                assert "error" not in result, result.get("error")
+                route = watch.records[0]
+                assert result["pid"] != route["pid"]
+                deadline = time.monotonic() + 1.8
+                proof = None
+                while time.monotonic() < deadline:
+                    rows = watch.observe("""select pg_blocking_pids(:pid) as blockers,a.wait_event_type,a.query,
+                        exists(select 1 from pg_locks l where l.pid=:pid and not l.granted) as pending_lock
+                        from pg_stat_activity a where a.pid=:pid""", {"pid": result["pid"]})
+                    if rows and route["pid"] in rows[0]["blockers"]:
+                        proof = rows[0]
+                        assert proof["wait_event_type"] == "Lock" and proof["pending_lock"] is True
+                        assert "delete from public.people" in proof["query"].lower()
+                        break
+                    await asyncio.sleep(0.01)
+                assert proof is not None and worker.is_alive() and not task.done()
+                watch.release.set()
+                response = await asyncio.wait_for(asyncio.shield(task), 6)
+                await until(lambda: not worker.is_alive(), 6)
+            finally:
+                watch.release.set()
+                if task is not None:
+                    await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 8)
+                if worker is not None:
+                    worker.join(timeout=6)
+                    assert not worker.is_alive(), "Owned DELETE thread must not escape cleanup"
+    finally:
+        watch.release.set()
+        watch.remove()
+    assert task.done() and h.store.engine.pool.checkedout() == 0
+    assert "error" not in result, result.get("error")
+    assert result["count"] == 1 and response.status_code == 200, response.text
+    route = watch.records[0]
+    assert (route["uid"], route["org"], route["batch"]) == (h.users[0], h.orgs[0], h.batches[0])
+    deadline = time.monotonic() + 1.5
+    while watch.observe("select pid from pg_stat_activity where pid=:pid", {"pid": result["pid"]}):
+        assert time.monotonic() < deadline, "Observer backend must close after its committed DELETE"
+        await asyncio.sleep(0.01)
+    idle = watch.observe("select state,xact_start,pg_blocking_pids(pid) as blockers from pg_stat_activity where pid=:pid",
+                         {"pid": route["pid"]})
+    assert len(idle) == 1 and idle[0]["state"] == "idle" and idle[0]["xact_start"] is None and idle[0]["blockers"] == []
+    return response, result
+
+
+def run_serialized_delete_case(h, first_op=None):
+    victim = h.people[0][1]
+    payload = [commit_item(victim, name="CI committed before delete")]
+    if first_op is not None:
+        first = (commit_item(h.people[0][0], name="CI earlier committed change") if first_op == "update" else
+                 {"external_id": "delete-control-" + str(uuid.uuid4()), "name": "CI earlier committed change"})
+        payload.insert(0, first)
+    h.configure_commit(payload)
+    before = h.snapshot()
+    response, deleted = asyncio.run(serialized_delete(h, victim))
+    assert response.json() == {"id": h.batches[0], "status": "committed", "count": len(payload)}
+    assert [(m["op"], m["count"]) for m in h.mutations] == (
+        [("update", 1)] if first_op is None else [(first_op, 1), ("update", 1)])
+    after = h.snapshot()
+    assert not any(str(r["id"]) == victim for r in after["people"])
+    batch = batch_row(h, after)
+    assert batch["status"] == "committed" and batch["result"]["count"] == len(payload)
+    changes = batch["result"]["changes"]
+    assert changes[-1]["id"] == victim and changes[-1]["created"] is False
+    original = next(r for r in before["people"] if str(r["id"]) == victim)
+    assert business(changes[-1]["before"]) == business(original)
+    if first_op is not None:
+        first_id = changes[0]["id"]
+        first = next(r for r in after["people"] if str(r["id"]) == first_id)
+        assert first["full_name"] == "CI earlier committed change"
+        assert changes[0]["created"] is (first_op == "insert")
+    else:
+        first_id = None
+    originals = {str(r["id"]): r for r in before["people"]}
+    for row in after["people"]:
+        if str(row["id"]) in originals and str(row["id"]) != first_id:
+            assert row == originals[str(row["id"])]
+    assert h.completions == ["commit-batch", "audit"]
+    assert_events(h, after, ["import.committed"])
+    assert deleted["count"] == 1

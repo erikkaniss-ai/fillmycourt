@@ -1153,12 +1153,12 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     if item.get("external_id"):
                         existing = one(c.execute(text("""
                             select * from public.people where organization_id=cast(:org as uuid)
-                              and source=:source and external_key=:external limit 1
+                              and source=:source and external_key=:external limit 1 for update
                         """), {"org": org, "source": b["source"], "external": item["external_id"]}))
                     if not existing and item.get("email"):
                         existing = one(c.execute(text("""
                             select * from public.people where organization_id=cast(:org as uuid)
-                              and lower(email)=lower(:email) limit 1
+                              and lower(email)=lower(:email) limit 1 for update
                         """), {"org": org, "email": item["email"]}))
                     before = dict(existing) if existing else None
                     if existing:

@@ -90,7 +90,7 @@ def pg_rollback(monkeypatch, request, capsys):
     people = [[str(uuid.uuid4()) for _ in range(3)] for _ in range(2)]
     h = SimpleNamespace(store=store, users=users, orgs=orgs, batches=batches,
                         people=people, mutations=[], completions=[], observer_pids=[],
-                        delete_before_update=None, concurrent_deletes=[])
+                        revoke_before_update=None, membership_revocations=[])
 
     def snapshot():
         # NullPool forces a new physical connection, outside the route transaction.
@@ -140,26 +140,29 @@ def pg_rollback(monkeypatch, request, capsys):
                        "payload": json.dumps(payload), "uid": users[2]})
         return batch
 
-    def concurrent_delete(c, cursor, statement, parameters, context, executemany):
-        # Deterministic interleaving of TWO physical transactions: the route has
-        # already fetched the existing person, but has not executed its UPDATE.
-        # No SQL/parameters/driver results are replaced. Only opt-in commit tests
-        # delete their unlinked CI person through the separate observer engine.
+    def concurrent_revocation(c, cursor, statement, parameters, context, executemany):
+        # The matched person is locked, but a separate transaction can revoke
+        # ONLY this fictional CI membership. READ COMMITTED RLS must then yield
+        # a real zero-row UPDATE. No person DELETE waits inside this callback.
         sql = " ".join(statement.lower().split())
-        target = h.delete_before_update
+        target = h.revoke_before_update
         if not (target and sql.startswith("update public.people ") and parameters.get("id") == target):
             return
-        h.delete_before_update = None
+        assert mode == "concurrency-two"
+        h.revoke_before_update = None
         route_pid = c.execute(text("select pg_backend_pid()")).scalar_one()
+        uid = c.execute(text("select current_setting('request.jwt.claim.sub')")).scalar_one()
+        assert uid == users[0]
         with observer.begin() as other:
             pid = other.execute(text("select pg_backend_pid()")).scalar_one()
             assert pid != route_pid
-            deleted = other.execute(text("""delete from public.people where id=cast(:id as uuid)
-                and organization_id=cast(:org as uuid) and auth_user_id is null"""),
-                                    {"id": target, "org": orgs[0]})
-            assert deleted.rowcount == 1
+            revoked = other.execute(text("""delete from public.organization_members
+                where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)"""),
+                                    {"org": orgs[0], "uid": uid})
+            assert revoked.rowcount == 1
             h.observer_pids.append(pid)
-        h.concurrent_deletes.append({"id": target, "pid": pid, "route_pid": route_pid, "count": 1})
+        h.membership_revocations.append({"id": target, "uid": uid, "pid": pid,
+                                        "route_pid": route_pid, "count": 1})
 
     def proven():
         assert all(m["state"]["pid"] not in h.observer_pids for m in h.mutations)
@@ -226,7 +229,7 @@ def pg_rollback(monkeypatch, request, capsys):
                         return Actor(uid)
                 raise DomainError("AUTH_REQUIRED", "Sign in.", 401)
 
-        event.listen(store.engine, "before_cursor_execute", concurrent_delete)
+        event.listen(store.engine, "before_cursor_execute", concurrent_revocation)
         event.listen(store.engine, "after_cursor_execute", record)
         monkeypatch.setattr(v1_app, "V1Store", lambda _: store)
         monkeypatch.setattr(v1_app, "fill_guard_from_environment", lambda *_: Guard())
@@ -448,45 +451,55 @@ def test_pg16_commit_success_and_idempotency_preserve_update_and_create(pg_rollb
     h.proven()
 
 
-def assert_concurrent_commit_conflict(h, response, before, victim):
+def assert_rls_commit_conflict(h, response, before, victim):
     assert response.status_code == 409, response.text
     assert response.json() == {"error": "IMPORT_COMMIT_CONFLICT", "message": "Import commit requires review."}
     assert all(value not in response.text for value in h.orgs + sum(h.people, []))
-    assert len(h.concurrent_deletes) == 1 and h.concurrent_deletes[0]["id"] == victim
-    assert h.concurrent_deletes[0]["count"] == 1
+    assert len(h.membership_revocations) == 1 and h.membership_revocations[0]["id"] == victim
+    assert h.membership_revocations[0]["count"] == 1
     assert h.mutations[-1]["op"] == "update" and h.mutations[-1]["count"] == 0
-    assert h.completions == [] and h.delete_before_update is None
-    # The OTHER transaction's committed deletion must survive; everything from
-    # the failing import transaction must be absent/unchanged in independent IO.
-    expected = {**before, "people": [r for r in before["people"] if str(r["id"]) != victim]}
-    assert h.snapshot() == expected
+    assert h.completions == [] and h.revoke_before_update is None
+    assert h.snapshot() == before, "Every route mutation must physically roll back"
+    with h.observer.connect() as c:
+        assert c.execute(text("""select count(*) from public.organization_members
+            where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)"""),
+                         {"org": h.orgs[0], "uid": h.users[0]}).scalar_one() == 0
 
 
-def test_pg16_commit_real_delete_after_lookup_denies_zero_update(pg_rollback):
-    h = pg_rollback
-    victim = h.people[0][1]
-    h.configure_commit([commit_item(victim, name="CI must not commit")])
-    h.delete_before_update = victim
-    before = h.snapshot()
-    response = h.commit()
-    assert_concurrent_commit_conflict(h, response, before, victim)
-    assert [(m["op"], m["count"]) for m in h.mutations] == [("update", 0)]
-    h.proven()
+@pytest.mark.parametrize("pg_rollback", ["concurrency-two"], indirect=True)
+def test_pg16_commit_matched_person_lock_serializes_physical_delete(pg_rollback):
+    from test_fill_import_concurrency_pg import run_serialized_delete_case
+    run_serialized_delete_case(pg_rollback)
+    pg_rollback.proven()
 
 
 @pytest.mark.parametrize("first_op", ["update", "insert"])
-def test_pg16_commit_later_concurrent_conflict_aborts_earlier_real_mutation(pg_rollback, first_op):
+@pytest.mark.parametrize("pg_rollback", ["concurrency-two"], indirect=True)
+def test_pg16_commit_person_lock_preserves_earlier_mutation_before_delete(pg_rollback, first_op):
+    from test_fill_import_concurrency_pg import run_serialized_delete_case
+    run_serialized_delete_case(pg_rollback, first_op)
+    pg_rollback.proven()
+
+
+@pytest.mark.parametrize("first_op", ["none", "update", "insert"])
+@pytest.mark.parametrize("pg_rollback", ["concurrency-two"], indirect=True)
+def test_pg16_commit_real_membership_revocation_yields_zero_update_409(pg_rollback, first_op):
     h = pg_rollback
     victim = h.people[0][1]
-    first = (commit_item(h.people[0][0], name="CI earlier real change") if first_op == "update" else
-             {"external_id": "new-" + str(uuid.uuid4()), "name": "CI earlier real change"})
-    h.configure_commit([first, commit_item(victim, name="CI must not commit")])
-    h.delete_before_update = victim
+    payload = [commit_item(victim, name="CI must not commit")]
+    if first_op != "none":
+        first = (commit_item(h.people[0][0], name="CI earlier real change") if first_op == "update" else
+                 {"external_id": "new-" + str(uuid.uuid4()), "name": "CI earlier real change"})
+        payload.insert(0, first)
+    h.configure_commit(payload)
+    h.revoke_before_update = victim
     before = h.snapshot()
     response = h.commit()
-    assert_concurrent_commit_conflict(h, response, before, victim)
-    assert [(m["op"], m["count"]) for m in h.mutations] == [(first_op, 1), ("update", 0)]
-    assert any(r["full_name"] == "CI earlier real change" for r in h.mutations[0]["visible"])
+    assert_rls_commit_conflict(h, response, before, victim)
+    assert [(m["op"], m["count"]) for m in h.mutations] == (
+        [("update", 0)] if first_op == "none" else [(first_op, 1), ("update", 0)])
+    if first_op != "none":
+        assert any(r["full_name"] == "CI earlier real change" for r in h.mutations[0]["visible"])
     h.proven()
 
 
