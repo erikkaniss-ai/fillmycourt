@@ -45,6 +45,13 @@
     const prices=[...line.matchAll(/(?:€\s*(\d{1,4})(?:[,.](\d{2}))?|(?<![\d:])(\d{1,4})(?:[,.](\d{2}))?\s*€)/g)];
     if(prices.length!==1)return null;
     const m=prices[0],euros=Number(m[1]||m[3]),cents=Number(m[2]||m[4]||"0");
+    // Bind new qualifiers to this sole amount, excluding the identified court
+    // label so a court named From or Hourly is not mistaken for a price prefix.
+    const before=line.slice(0,m.index).replace(court[0],"");
+    const after=line.slice(m.index+m[0].length);
+    if(/\b(?:from|desde|a\s+partir\s+de|hourly)\s*:?\s*$/i.test(before)||
+      /\/\s*(?:hourly|player|person|jogador|pessoa)\s*:?\s*$/i.test(before)||
+      /^\s*(?:hourly\b|\/\s*(?:hourly|player|person|jogador|pessoa)\b)/i.test(after))return null;
     const priceMinor=euros*100+cents;
     if(!Number.isSafeInteger(priceMinor)||priceMinor<100||priceMinor>200000)return null;
     const courtName=("Court "+court[1]).replace(/^Court (?:(?:court|campo|pista)\s+)/i,"Court ").trim();

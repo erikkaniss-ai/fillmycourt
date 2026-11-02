@@ -127,6 +127,75 @@ test('court H and ordinary hour labels do not disqualify an unqualified sole EUR
   }
 });
 
+const partialPrices=['€36,00 hourly','HOURLY €36,00','hourly: 36,00 €','€36,00 /hourly',
+  '€36,00/player','€36,00 / PLAYER','/player €36,00','36,00 € /person',
+  '€36,00 / PERSON','/ person €36,00','€36,00/jogador','€36,00 / JOGADOR',
+  '/ jogador €36,00','€36,00 / pessoa','from €36,00','FROM: €36,00','from€36,00',
+  'desde 36,00 €','DESDE: €36,00','a partir de €36,00','A   PARTIR  DE: €36,00',
+  '€36,00\u00a0/\u00a0PLAYER','€36,00 per hour','€36,00 p/h','€36,00 por jogador'];
+const priceRow=(price,minutes=90,court='1')=>({...row,
+  text:`Campo ${court} 18:00 - ${minutes===60?'19:00':'19:30'} ${minutes} min ${price}`});
+const anyDuration={...base.query,durationMinutes:0};
+const anyDurationQuery={...query,duration:'any'};
+
+test('explicit per-unit and starting prices never parse as a sole full-slot amount',()=>{
+  const admitted=[];
+  for(const minutes of [60,90])for(const price of partialPrices){
+    if(parseRow(priceRow(price,minutes)))admitted.push([minutes,price]);
+  }
+  assert.deepEqual(admitted,[],'Explicit partial prices must fail closed, not become totals');
+});
+
+test('partial-price rows cannot survive observation validation and Get normalization',()=>{
+  const admitted=[];
+  for(const minutes of [60,90])for(const price of partialPrices){
+    const obs=buildObservation({...base,query:anyDuration,rows:[priceRow(price,minutes)]});
+    if(!obs.readerError){
+      const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+        {now:Date.now(),validator:validation});
+      admitted.push([minutes,price,result.offers[0].priceMinor]);
+      continue;
+    }
+    assert.equal(obs.readerError,'NO_EXPANDED_OFFERS',price);
+    assert.equal(obs.offers,undefined);
+    assert.throws(()=>validation(obs));
+    assert.throws(()=>normalizePersonalObservation(JSON.stringify(obs),anyDurationQuery,
+      {now:Date.now(),validator:validation}),/INVALID_OBSERVATION/);
+  }
+  assert.deepEqual(admitted,[],'No normalized EUR total may come from a partial-price row');
+});
+
+test('mixed partial and complete prices retain only the independent valid court total',()=>{
+  const leaked=[];
+  for(const minutes of [60,90])for(const price of partialPrices){
+    const obs=buildObservation({...base,query:anyDuration,
+      rows:[priceRow(price,minutes),priceRow('€40,00',minutes,'2')]});
+    const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+      {now:Date.now(),validator:validation});
+    assert.equal(result.offers.at(-1).courtName,'Court 2');
+    assert.equal(result.offers.at(-1).priceMinor,4000);
+    assert.equal(result.offers.at(-1).duration,minutes);
+    if(result.offers.length!==1)leaked.push([minutes,price]);
+  }
+  assert.deepEqual(leaked,[],'Partial quotes must not contaminate independently valid totals');
+});
+
+test('price-marker words in court labels or unrelated time text preserve valid 60/90-minute totals',()=>{
+  for(const minutes of [60,90])for(const court of ['Hourly','From','Desde','Player','Person','Jogador']){
+    for(const text of [priceRow('€36,00',minutes,court).text,
+      `Court ${court} €36,00 from 18:00 - ${minutes===60?'19:00':'19:30'}`]){
+      const obs=buildObservation({...base,query:anyDuration,rows:[{...row,text}]});
+      const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+        {now:Date.now(),validator:validation});
+      assert.equal(result.offers[0].priceMinor,3600,text);
+      assert.equal(result.offers[0].duration,minutes,text);
+      assert.equal(result.offers[0].courtName,'Court '+court);
+    }
+  }
+  for(const price of ['€36,00 personal best','€36,00 /playerboard','€36,00 /personnel',
+    '€36,00 /jogadorX','€36,00 hourlyScore'])assert.equal(parseRow(priceRow(price))?.priceEur,36,price);
+});
+
 test('cannot use forged hosts, tracking query, foreign venue paths or credit card fields',()=>{
   for(const sourceUrl of [
     'https://clubs.tiesports.com.evil.invalid/en/lisboa/OeirasPadelAcademy',
