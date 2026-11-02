@@ -121,8 +121,8 @@ class V1Store:
             if readonly:
                 c.execute(text("set transaction isolation level repeatable read, read only"))
             c.execute(text("set local role authenticated"))
-            c.execute(text("select set_config('request.jwt.claim.sub', :uid, true)"), {"uid": user_id})
-            c.execute(text("select set_config('request.jwt.claim.role', 'authenticated', true)"))
+            c.execute(text("""select set_config('request.jwt.claim.sub', :uid, true),
+                                   set_config('request.jwt.claim.role', 'authenticated', true)"""), {"uid": user_id})
             yield c
 
     def ping(self):
