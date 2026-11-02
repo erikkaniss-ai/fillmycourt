@@ -638,30 +638,41 @@ def set_history(e, count):
     e.runner.binding = e.cfg
 
 
-@pytest.mark.parametrize("count", [17,20])
+@pytest.mark.parametrize("count", [17,20,23])
 def test_supported_history_and_three_new_principals_complete_with_same_budget(e,count):
     set_history(e,count)
     asyncio.run(e.runner.run())
     final = next(x for x in e.logs if x["kind"]=="PRIVATE_VALIDATOR_TASK_STOPPED")
     assert final["status"]=="READS_COMPLETE" and final["owned_pending"]==0
+    assert final["durable_stop"] and final["client_closed"] and e.port.stopped
+    assert final["cleanup"]["status"]=="ALLOCATED_IDENTITIES_VERIFIED" and final["cleanup"]["full_three"]
     assert final["cleanup"]["known_banned"]==count+3
     assert len(e.runner.identities)==3 and len(e.runner.events)==21
     assert len([x for x in e.http if x[0]=="POST"])==4
     raw=wire_snapshot(e)
     port,calls=query_port(e,raw)
     assert len(port.read()["bans"])==count+3
-    assert calls[0][1]["ban_limit"]==count+4<=24
+    assert calls[0][1]["ban_limit"]==count+4<=27
 
 
-@pytest.mark.parametrize("count", [0,16,18,19,21,23,24])
-def test_only_two_explicit_history_cardinalities_are_supported(e,count):
+@pytest.mark.parametrize("count", [0,16,18,19,21,22,24,25,26,27])
+def test_only_three_explicit_history_cardinalities_are_supported(e,count):
     with pytest.raises(s.Closed): set_history(e,count)
     assert not e.http
 
 
+@pytest.mark.parametrize("count", [16,18,21,22,24,26,27])
+def test_journal_rejects_unsupported_history_before_query(e,count):
+    port,calls=query_port(e,None)
+    port.binding=SimpleNamespace(run_id=e.cfg.run_id,historical_ids=tuple(ID(i) for i in range(1,count+1)))
+    with pytest.raises(s.Closed): port.read()
+    assert not calls and not e.http
+
+
+@pytest.mark.parametrize("count", [20,23])
 @pytest.mark.parametrize("fault", ["duplicate","missing_old","invalid_uuid"])
-def test_history_scope_rejects_duplicate_missing_protected_or_noncanonical_id(e,fault):
-    raw=dict(e.cfg.__dict__,historical_ids=[ID(i) for i in range(1,21)],
+def test_history_scope_rejects_duplicate_missing_protected_or_noncanonical_id(e,count,fault):
+    raw=dict(e.cfg.__dict__,historical_ids=[ID(i) for i in range(1,count+1)],
              admission_expires_at=e.cfg.admission_expires_at.isoformat())
     if fault=="duplicate": raw["historical_ids"][-1]=ID(1)
     elif fault=="missing_old": raw["historical_ids"][0]=ID(999)
@@ -670,11 +681,14 @@ def test_history_scope_rejects_duplicate_missing_protected_or_noncanonical_id(e,
     assert not e.http
 
 
-@pytest.mark.parametrize("fault", ["missing_history_ban","ledger_identity_omitted"])
-def test_full_history_is_required_before_admission_not_just_old_subset(e,fault):
-    set_history(e,20)
+@pytest.mark.parametrize("count", [20,23])
+@pytest.mark.parametrize("fault", ["missing_history_ban","active_history","short_history_ban","ledger_identity_omitted"])
+def test_full_history_is_required_before_admission_not_just_old_subset(e,count,fault):
+    set_history(e,count)
     def mutate(data):
-        if fault=="missing_history_ban": data["bans"].pop(ID(20))
+        if fault=="missing_history_ban": data["bans"].pop(ID(count))
+        elif fault=="active_history": data["bans"][ID(count)]=None
+        elif fault=="short_history_ban": data["bans"][ID(count)]=START+timedelta(days=365)
         else: data["prior_unknown"]=True
     e.port.mutate=mutate
     asyncio.run(e.runner.run())
@@ -682,8 +696,44 @@ def test_full_history_is_required_before_admission_not_just_old_subset(e,fault):
     assert e.port.stopped and not e.runner.operator_gate
 
 
+@pytest.mark.parametrize("count", [17,20,23])
+@pytest.mark.parametrize("fault", ["sentinel","overflow","duplicate","missing_current","missing_history","fourth_new","overlap","prior_unknown","consumed"])
+def test_bounded_decoded_history_requires_exact_known_set_before_http(e,count,fault):
+    set_history(e,count)
+    raw=wire_snapshot(e)
+    assert len(raw["_bans"])==count+3
+    if fault in {"sentinel","overflow","fourth_new"}:
+        raw["_bans"].append({"id":ID(999),"banned_until":(START+timedelta(days=36500)).isoformat()})
+        if fault=="overflow":
+            raw["_bans"].append({"id":ID(998),"banned_until":(START+timedelta(days=36500)).isoformat()})
+        elif fault=="fourth_new":
+            raw["_attempts"].append(dict(raw["_attempts"][0],label="fourth",user_id=ID(999)))
+    elif fault=="duplicate": raw["_bans"].append(dict(raw["_bans"][0]))
+    elif fault in {"missing_current","missing_history"}:
+        omitted=e.ids["b"] if fault=="missing_current" else ID(count)
+        raw["_bans"]=[x for x in raw["_bans"] if x["id"]!=omitted]
+    elif fault=="overlap": raw["_attempts"][0]["user_id"]=ID(count)
+    elif fault=="prior_unknown": raw["_prior_unknown"]=True
+    else: raw["stopped"]=raw["reconciliation_required"]=True
+    port,calls=query_port(e,raw)
+    if fault in {"duplicate","overflow"}:
+        with pytest.raises(s.Closed): port.read()
+    else:
+        decoded=port.read()
+        if fault=="sentinel":
+            # The bounded sentinel is decoded, but never admitted as a known ID.
+            assert len(decoded["bans"])==count+4
+        e.runner.port=port
+        e.runner.ready=True
+        asyncio.run(e.runner.run())
+        final=next(x for x in e.logs if x["kind"]=="PRIVATE_VALIDATOR_TASK_STOPPED")
+        assert e.runner.failed and not e.runner.admission_ready and not e.runner.operator_gate
+        assert final["cleanup"]["status"]!="ALLOCATED_IDENTITIES_VERIFIED"
+    assert calls[0][1]["ban_limit"]==count+4<=27 and not e.http
+
+
 @pytest.mark.skipif(not os.environ.get("TEST_DATABASE_URL"), reason="Disposable local/CI PostgreSQL only")
-@pytest.mark.parametrize("history_count", [17, 20])
+@pytest.mark.parametrize("history_count", [17, 20, 23])
 def test_postgres_single_snapshot_matches_legacy_payload_and_privileges(history_count):
     # Synthetic SQL contract only, never supported Auth provisioning/hosted UAT.
     # All fixture schema/data changes roll back in the disposable CI database.
@@ -754,6 +804,17 @@ def test_postgres_single_snapshot_matches_legacy_payload_and_privileges(history_
             assert decoded["run"]["spec"] == json.loads(lease.document)
             assert decoded["run"]["healthy_at"].tzinfo is not None
             assert len(decoded["bans"]) == history_count+3 and len(decoded["markers"]) == len(decoded["members"]) == 3
+            assert set(decoded["bans"]) == set(history) | {p.id for p in lease.principals}
+            assert decoded["prior_unknown"] is False
+            if history_count==23:
+                for omitted in (history[-1],lease.principals[-1].id):
+                    savepoint=c.begin_nested()
+                    try:
+                        c.execute(text("delete from auth.users where id=cast(:id as uuid)"),{"id":omitted})
+                        partial=port.read()
+                        assert omitted not in partial["bans"] and len(partial["bans"])==25
+                    finally:
+                        savepoint.rollback()
             native_members = [dict(x) for x in c.execute(text("select user_id,organization_id,role::text "
                 "from public.organization_members where user_id=any(cast(:ids as uuid[]))"),
                 {"ids": [p.id for p in lease.principals]}).mappings()]
@@ -774,15 +835,19 @@ def test_postgres_single_snapshot_matches_legacy_payload_and_privileges(history_
                 {"next":next_plan.run_id,"authority":next_plan.authorization_id,"digest":next_plan.digest,"prior":run})
             next_port=s.JournalPort(SimpleNamespace(plan=next_plan,journal=journal),SimpleNamespace(run_id=next_plan.run_id,historical_ids=history))
             assert next_port.read()["prior_unknown"] is True
-            if history_count==17:
+            if history_count in {17,20}:
                 complete=history+[p.id for p in lease.principals]
                 next_port.binding=SimpleNamespace(run_id=next_plan.run_id,historical_ids=complete)
                 readback=next_port.read()
-                assert readback["prior_unknown"] is False and len(readback["bans"])==20
+                assert readback["prior_unknown"] is False and len(readback["bans"])==history_count+3
                 incomplete=list(complete)
                 incomplete[-1]=str(uuid.uuid4())
                 next_port.binding=SimpleNamespace(run_id=next_plan.run_id,historical_ids=incomplete)
                 assert next_port.read()["prior_unknown"] is True
+            else:
+                # 23+3 completed identities do not authorize a new history26 mode.
+                next_port.binding=SimpleNamespace(run_id=next_plan.run_id,historical_ids=history+[p.id for p in lease.principals])
+                with pytest.raises(s.Closed): next_port.read()
         finally:
             transaction.rollback()
     engine.dispose()

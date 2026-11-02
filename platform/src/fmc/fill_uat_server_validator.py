@@ -73,7 +73,7 @@ class Binding:
             for key in ("deployment_id", "run_id", "authorization_id"):
                 g.uid(value[key])
             history = value["historical_ids"]
-            require(isinstance(history, list) and len(history) in {17, 20} and len(history) == len(set(history))
+            require(isinstance(history, list) and len(history) in {17, 20, 23} and len(history) == len(set(history))
                     and g.OLD_USERS.issubset(set(history)), "BINDING")
             for uid in history:
                 g.uid(uid)
@@ -133,7 +133,7 @@ class JournalPort:
 
     def read(self):
         boot, cfg = self.bootstrap, self.binding
-        require(boot.plan.run_id == cfg.run_id and len(cfg.historical_ids) in {17, 20}, "BINDING")
+        require(boot.plan.run_id == cfg.run_id and len(cfg.historical_ids) in {17, 20, 23}, "BINDING")
         with boot.journal.tx() as c:
             raw = c.execute(self.SNAPSHOT, {"run": cfg.run_id, "history": list(cfg.historical_ids),
                                           "ban_limit": len(cfg.historical_ids)+4}).mappings().first()
@@ -180,7 +180,7 @@ class JournalPort:
             require(isinstance(run, dict) and isinstance(run["spec"], dict) and isinstance(run["receipts"], dict)
                     and all(type(run[k]) is bool for k in ("armed", "stopped", "cleanup_complete")), "BINDING")
             run = date_fields(dict(run), ("healthy_at",))
-        bans = rows("_bans", min(len(self.binding.historical_ids)+4, 24))
+        bans = rows("_bans", min(len(self.binding.historical_ids)+4, 27))
         markers = rows("_markers", 4)
         members = rows("_members", 7)
         for ban in bans:
