@@ -517,3 +517,172 @@ def test_one_find_combines_multiple_personal_playtomic_clubs_without_fabricating
     }
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
     assert forbidden==[]
+
+
+def visible_price_fixture(page, context, base_url, minutes, rows, *, hold=False):
+    """Actual browser parser over rendered fictional rows; no numeric report stub."""
+    context.request.get(base_url+'/__fixture?mode=direct')
+    writes=[]
+    context.on('request',lambda request: writes.append(request.method)
+               if request.method not in ('GET','HEAD') else None)
+    page.goto(base_url+'/find.html')
+    page.locator('[name="location"]').fill('Oeiras')
+    page.locator('[name="date"]').fill((datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat())
+    page.locator('[name="duration"]').select_option(str(minutes))
+    page.add_script_tag(url=base_url+'/browser-companion/visible-provider-offers.js')
+    page.evaluate("""({rows,hold}) => {
+      const panel=document.createElement('section');panel.id='qaVisibleBookingRows';
+      const title=document.createElement('h2');title.textContent='FICTIONAL player UI — no booking';
+      panel.append(title);
+      const qa=window.priceBrowserFixture={requests:0,deliveries:0,bookings:0,hold};
+      for(const text of rows){
+        const row=document.createElement('article');row.className='qa-booking-row';
+        row.append(document.createTextNode(text+' '));
+        const action=document.createElement('button');action.type='button';
+        action.textContent='Reservar';action.addEventListener('click',()=>qa.bookings++);
+        row.append(action);panel.append(row);
+      }
+      document.body.append(panel);
+      qa.deliver=({wrongNonce=false,ageMs=0}={})=>{
+        const detail=JSON.parse(JSON.stringify(qa.pending));
+        if(wrongNonce)detail.nonce='0'.repeat(48);
+        if(ageMs&&detail.result.sources[0].observation)
+          detail.result.sources[0].observation.capturedAt=new Date(Date.now()-ageMs).toISOString();
+        window.dispatchEvent(new CustomEvent('gac:additional-sources-response',{detail}));
+        qa.deliveries++;
+      };
+      window.addEventListener('gac:additional-sources-request',event=>{
+        qa.requests++;qa.query=event.detail.query;
+        const q=event.detail.query;
+        // No offer/price fields are manufactured here: read the rendered row
+        // text and pass the actual pure parser result through the page bridge.
+        qa.observation=GetACourtVisibleProviderOffers.buildObservation({
+          provider:'tiesports',sourceUrl:'https://clubs.tiesports.com/en/lisboa/OeirasPadelAcademy',
+          venue:'OPA OEIRAS',date:q.date,sport:'Padel',selectedDate:q.date,selectedSport:'Padel',
+          regionTitle:'Reservas de campos',query:{date:q.date,sport:'Padel',from:q.from,to:q.to,
+            durationMinutes:Number(q.duration)},
+          rows:[...panel.querySelectorAll('.qa-booking-row')].map(row=>({
+            text:row.innerText.trim(),action:row.querySelector('button').innerText,
+            disabled:row.querySelector('button').disabled}))});
+        const observation=qa.observation;
+        const source=observation.readerError
+          ?{provider:'tiesports',status:'unavailable',code:observation.readerError}
+          :{provider:'tiesports',status:'observed',observation};
+        qa.pending={nonce:event.detail.nonce,result:{version:'0.4.2',status:'partial',sources:[source]}};
+        if(!qa.hold)queueMicrotask(()=>qa.deliver());
+      });
+      window.addEventListener('gac:auto-search-request',event=>{
+        window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',{detail:{nonce:event.detail.nonce}}));
+      });
+    }""",{'rows':rows,'hold':hold})
+    expect(page.locator('#qaVisibleBookingRows')).to_be_visible()
+    page.get_by_role('button',name='Find courts',exact=True).click()
+    page.wait_for_function('window.priceBrowserFixture.requests===1')
+    if not hold:
+        page.wait_for_function('window.priceBrowserFixture.deliveries===1')
+    return writes
+
+
+def price_row(price, minutes=90, court=7):
+    return f'Campo {court} 18:00 - {"19:00" if minutes==60 else "19:30"} {minutes} min {price}'
+
+
+def assert_price_browser_quiet(page, context, forbidden, base_url, writes):
+    assert writes==[]
+    assert page.locator('#personalPayload').input_value()==''
+    assert page.evaluate('window.priceBrowserFixture.requests')==1
+    assert page.evaluate('window.priceBrowserFixture.bookings')==0
+    assert page.evaluate('localStorage.length+sessionStorage.length')==0
+    assert page.evaluate('indexedDB.databases().then(items=>items.length)')==0
+    assert context.cookies()==[]
+    assert len(context.pages)==1
+    assert context.service_workers==[]
+    assert context.request.get(base_url+'/__counts').json()=={'coreRequests':0,'clubRequests':0}
+    assert forbidden==[]  # Existing router fulfills OSM tiles locally; no external service egress.
+
+
+@pytest.mark.parametrize('minutes',[60,90])
+@pytest.mark.parametrize('price',['€36.50','36,50€'])
+def test_visible_money_parser_reaches_browser_cards_with_exact_cents(browser_page,fixture_url,minutes,price):
+    page,context,forbidden,_=browser_page
+    writes=visible_price_fixture(page,context,fixture_url,minutes,[price_row(price,minutes)])
+    expect(page.locator('#offers .card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('Court 7')
+    expect(page.locator('#offers .offer-time')).to_contain_text(f'{minutes} min')
+    expect(page.locator('#offers .offer-time')).to_contain_text('6:00 PM')
+    expect(page.locator('#offers .offer-time')).to_contain_text('7:00 PM' if minutes==60 else '7:30 PM')
+    expect(page.locator('#offers .offer-date')).to_have_text(page.locator('[name="date"]').input_value())
+    expect(page.locator('#offers .price')).to_contain_text('€36.50')
+    normalized=page.evaluate("""async() => {
+      const {normalizePersonalObservation}=await import('/assets/personal-observation-bridge.mjs');
+      const qa=window.priceBrowserFixture;
+      return normalizePersonalObservation(JSON.stringify(qa.observation),qa.query,
+        {now:Date.now(),validator:GetACourtPersonalSourceObservation.validateObservation});
+    }""")
+    assert normalized['offers'][0]['priceMinor']==3650
+    assert normalized['offers'][0]['duration']==minutes
+    assert normalized['offers'][0]['courtName']=='Court 7'
+    expect(page.locator('#offers .official-link')).to_have_attribute('href',normalized['sourceUrl'])
+    # TieSports has no trusted map coordinate: preserve provenance, invent no pin.
+    expect(page.locator('#offers .distance')).to_contain_text('Position unverified')
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#mappedCount')).to_have_text('0 mapped clubs')
+    assert page.locator('#offers .map-card-button').count()==0
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('minutes,price',[
+    pytest.param(90,'€36.5',id='90-single-decimal'),pytest.param(60,'€36.5',id='60-single-decimal'),
+    pytest.param(90,'36,500€',id='overprecision'),pytest.param(90,'-36€',id='signed'),
+    pytest.param(90,'€36/2',id='expression'),pytest.param(90,'€36.50/player',id='per-player'),
+    pytest.param(90,'from €36.50',id='from-price'),pytest.param(90,'€36.50 per hour',id='hourly')])
+def test_visible_money_parser_rejects_ambiguous_rows_before_browser_cards(browser_page,fixture_url,minutes,price):
+    page,context,forbidden,_=browser_page
+    writes=visible_price_fixture(page,context,fixture_url,minutes,[price_row(price,minutes)])
+    assert page.locator('#offers .card').count()==0,page.locator('#offers').inner_text()
+    assert page.evaluate('window.priceBrowserFixture.observation.readerError')=='NO_EXPANDED_OFFERS'
+    expect(page.locator('#offers .official-link')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#sourceStatus')).to_contain_text('No complete priced offers')
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('minutes',[60,90])
+def test_visible_money_mixed_rows_keep_only_the_valid_browser_card(browser_page,fixture_url,minutes):
+    page,context,forbidden,_=browser_page
+    writes=visible_price_fixture(page,context,fixture_url,minutes,[
+        price_row('€36.5',minutes),price_row('€36.50/player',minutes,8),price_row('€36.50',minutes,9)])
+    expect(page.locator('#offers .card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('Court 9')
+    expect(page.locator('#offers')).not_to_contain_text('Court 7')
+    expect(page.locator('#offers')).not_to_contain_text('Court 8')
+    expect(page.locator('#offers .price')).to_contain_text('€36.50')
+    assert page.evaluate('window.priceBrowserFixture.observation.offers.map(o=>o.court)')==['Court 9']
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#mappedCount')).to_have_text('0 mapped clubs')
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('rejection',['wrong_nonce','stale','mode_change'])
+def test_visible_money_real_parser_reply_obeys_browser_nonce_freshness_and_mode(browser_page,fixture_url,rejection):
+    page,context,forbidden,_=browser_page
+    writes=visible_price_fixture(page,context,fixture_url,90,[price_row('€36.50')],hold=True)
+    assert page.evaluate('window.priceBrowserFixture.observation.offers[0].priceEur')==36.5
+    if rejection=='mode_change':
+        page.get_by_role('button',name='Explore demo',exact=True).click()
+    page.evaluate("""kind => priceBrowserFixture.deliver({
+      wrongNonce:kind==='wrong_nonce',ageMs:kind==='stale'?61000:0})""",rejection)
+    expect(page.locator('#offers [data-offer-kind="real"]')).to_have_count(0)
+    expect(page.locator('#offers')).not_to_contain_text('Court 7')
+    if rejection=='wrong_nonce':
+        page.evaluate('priceBrowserFixture.deliver()')
+        expect(page.locator('#offers .card')).to_have_count(1)
+        expect(page.locator('#offers .price')).to_contain_text('€36.50')
+    elif rejection=='stale':
+        expect(page.locator('#sourceStatus')).to_contain_text('Client observation rejected')
+    else:
+        assert page.evaluate('window.priceBrowserFixture.requests')==1
+        page.get_by_role('button',name='Your sessions',exact=True).click()
+        expect(page.locator('#offers .card')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
