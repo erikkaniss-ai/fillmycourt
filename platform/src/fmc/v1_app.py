@@ -1220,7 +1220,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                             raise DomainError("IMPORT_ROLLBACK_CONFLICT", "Import rollback requires review.", 409)
                     else:
                         before = ch.get("before") or {}
-                        c.execute(text("""
+                        updated = c.execute(text("""
                             update public.people set external_key=:external,full_name=:name,email=:email,phone=:phone,
                               marketing_consent=:consent,source=:source,updated_at=now()
                             where id=cast(:id as uuid) and organization_id=cast(:org as uuid)
@@ -1228,6 +1228,9 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                                "email": before.get("email"), "phone": before.get("phone"),
                                "consent": before.get("marketing_consent"), "source": before.get("source","fmc"),
                                "id": ch["id"], "org": org})
+                        updated_count = updated.rowcount
+                        if type(updated_count) is not int or updated_count != 1:
+                            raise DomainError("IMPORT_ROLLBACK_CONFLICT", "Import rollback requires review.", 409)
                 c.execute(text("""
                     update public.import_batches set status='rolled_back',rolled_back_at=now()
                     where id=cast(:id as uuid)

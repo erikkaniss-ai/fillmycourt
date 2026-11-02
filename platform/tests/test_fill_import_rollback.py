@@ -34,6 +34,9 @@ def rollback_route(route, monkeypatch):
     store.people = {PERSON_A: {"full_name": "Fictional imported person"}}
     store.counts = {PERSON_A: 1}
     store.delete_attempts = []
+    store.update_counts = {PERSON_A: 1}
+    store.update_attempts = []
+    store.person_attempts = []
     store.committed = store.aborted = 0
     store.last_error = None
     base_execute = store.execute
@@ -49,14 +52,19 @@ def rollback_route(route, monkeypatch):
         if "delete from public.people" in sql:
             assert params["org"] == ORG
             store.delete_attempts.append(params["id"])
+            store.person_attempts.append(("delete", params["id"]))
             count = store.counts[params["id"]]
             if type(count) is int and count == 1:
                 store.people.pop(params["id"])
             return Outcome(rowcount=count)
         if "update public.people set external_key" in sql:
             assert params["org"] == ORG
-            store.people[params["id"]] = deepcopy(params)
-            return Outcome()
+            store.update_attempts.append(params["id"])
+            store.person_attempts.append(("update", params["id"]))
+            count = store.update_counts[params["id"]]
+            if type(count) is int and count == 1:
+                store.people[params["id"]] = deepcopy(params)
+            return Outcome(rowcount=count)
         if "update public.import_batches set status='rolled_back'" in sql:
             store.batch["status"] = "rolled_back"
             return Outcome()
@@ -136,19 +144,69 @@ def test_later_blocked_delete_propagates_and_aborts_fake_transaction(rollback_ro
     assert_no_completion(store)
 
 
-def test_updated_person_branch_is_unchanged(rollback_route):
+@pytest.mark.parametrize("member_role", ["owner", "admin"])
+@pytest.mark.parametrize("source", ["fictional-export", None, "absent"])
+def test_exact_one_update_restores_values_and_source_defaults(rollback_route, member_role, source):
     store = rollback_route[1]
+    store.members[(ORG, USER)] = member_role
     before = {"external_key": "fixture-key", "full_name": "Original fictional name",
               "email": "fixture@example.test", "phone": None, "marketing_consent": False,
-              "source": "fictional-export"}
+              "source": source}
+    if source == "absent":
+        del before["source"]
     store.batch["result"]["changes"] = [{"id": PERSON_A, "created": False, "before": before}]
     response = rollback(rollback_route)
     assert response.status_code == 200, response.text
     assert store.delete_attempts == []
     assert store.people[PERSON_A] == {"external": "fixture-key", "name": "Original fictional name",
         "email": "fixture@example.test", "phone": None, "consent": False,
-        "source": "fictional-export", "id": PERSON_A, "org": ORG}
-    assert store.committed == 1
+        "source": "fmc" if source == "absent" else source, "id": PERSON_A, "org": ORG}
+    assert store.update_attempts == [PERSON_A]
+    assert store.committed == 1 and store.aborted == 0
+    assert store.batch["status"] == "rolled_back"
+    assert len(store.events) == 1 and store.events[0]["event_type"] == "import.rolled_back"
+
+
+@pytest.mark.parametrize("count", [0, -1, None, 2, True, 1.0, "1"],
+                         ids=["zero", "unknown-minus-one", "unknown-none", "unexpected-two",
+                              "boolean", "float", "string"])
+def test_unconfirmed_update_denies_without_completion_or_audit(rollback_route, count):
+    store = rollback_route[1]
+    store.batch["result"]["changes"] = [{"id": PERSON_A, "created": False, "before": {
+        "full_name": "PRIVATE_FICTIONAL_NAME", "email": "private-fixture@example.test"}}]
+    store.update_counts[PERSON_A] = count
+    original = deepcopy(store.people)
+    response = rollback(rollback_route)
+    assert response.status_code == 409, response.text
+    assert response.json() == CONFLICT
+    assert all(value not in response.text for value in (
+        PERSON_A, ORG, "PRIVATE_FICTIONAL_NAME", "private-fixture@example.test"))
+    assert store.update_attempts == [PERSON_A] and store.delete_attempts == [], "No retry or fallback"
+    assert store.people == original and store.batch["status"] == "committed"
+    assert store.aborted == 1 and isinstance(store.last_error, DomainError)
+    assert_no_completion(store)
+
+
+@pytest.mark.parametrize("first_created,second_created", [(True, False), (False, False), (False, True)])
+def test_later_conflict_aborts_mixed_changes_in_simulated_transaction(
+        rollback_route, first_created, second_created):
+    store = rollback_route[1]
+    first = {"id": PERSON_A, "created": first_created, "before": {"full_name": "First restored"}}
+    second = {"id": PERSON_B, "created": second_created, "before": {"full_name": "Second restored"}}
+    store.batch["result"]["changes"] = [second, first]
+    store.people[PERSON_B] = {"full_name": "Second imported"}
+    store.update_counts.update({PERSON_A: 1, PERSON_B: 0})
+    store.counts[PERSON_B] = 0
+    original = deepcopy(store.people)
+    response = rollback(rollback_route)
+    assert response.status_code == 409, response.text
+    assert response.json() == CONFLICT
+    assert store.person_attempts == [
+        ("delete" if first_created else "update", PERSON_A),
+        ("delete" if second_created else "update", PERSON_B)]
+    assert store.people == original and store.batch["status"] == "committed"
+    assert store.aborted == 1 and isinstance(store.last_error, DomainError)
+    assert_no_completion(store)
 
 
 @pytest.mark.parametrize("member_role", ["manager", "front_desk", "analyst", "support", None])
