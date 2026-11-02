@@ -28,10 +28,14 @@
       !/^(?:book|reserve|reservar|reserva|available|dispon[ií]vel)$/i.test(item.action))return null;
     const line=item.text.replace(/\s+/g," ").trim();
     if(/\b(?:sold out|unavailable|not available|occupied|reserved|esgotado|ocupado|indispon[ií]vel|não dispon[ií]vel|no slots)\b/i.test(line))return null;
-    const court=/\b(?:court|campo|pista)\s+([A-Za-z0-9-]{1,30})(?=\s|$)/i.exec(line);
-    if(!court)return null;
-    const times=/\b(\d{1,2}):([0-5]\d)\s*(AM|PM)?\s*[-–—]\s*(\d{1,2}):([0-5]\d)\s*(AM|PM)?\b/i.exec(line);
-    if(!times)return null;
+    // One total must bind exactly one recognized court and one two-clock
+    // range. Never select the first of multiple supported bindings.
+    const courts=[...line.matchAll(/\b(?:court|campo|pista)\s+([A-Za-z0-9-]{1,30})(?=\s|$)/gi)];
+    if(courts.length!==1)return null;
+    const court=courts[0];
+    const ranges=[...line.matchAll(/\b(\d{1,2}):([0-5]\d)\s*(AM|PM)?\s*[-–—]\s*(\d{1,2}):([0-5]\d)\s*(AM|PM)?\b/gi)];
+    if(ranges.length!==1||(line.match(/\b\d{1,2}:[0-5]\d\s*(?:AM|PM)?\b/gi)||[]).length!==2)return null;
+    const times=ranges[0];
     const start=time(times[1],times[2],times[3]);
     const end=time(times[4],times[5],times[6]);
     if(start===null||end===null||start>=end)return null;

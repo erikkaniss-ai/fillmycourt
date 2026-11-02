@@ -718,3 +718,54 @@ def test_visible_row_limit_duplicates_do_not_hide_late_independent_court(browser
     expect(page.locator('[data-result-pin]')).to_have_count(0)
     expect(page.locator('#mappedCount')).to_have_text('0 mapped clubs')
     assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('minutes',[60,90])
+@pytest.mark.parametrize('binding',['courts','ranges'])
+def test_visible_binding_ambiguous_row_cannot_reach_browser_cards(browser_page,fixture_url,minutes,binding):
+    page,context,forbidden,_=browser_page
+    end='19:00' if minutes==60 else '19:30'
+    text=(f'Campo 1 / Campo 2 18:00 - {end} {minutes} min €36,00' if binding=='courts'
+          else f'Campo 1 18:00 - {end}; 20:00 - {"21:00" if minutes==60 else "21:30"} {minutes} min €36,00')
+    writes=visible_price_fixture(page,context,fixture_url,minutes,[text])
+    assert page.locator('#offers .card').count()==0,page.locator('#offers').inner_text()
+    assert page.evaluate('priceBrowserFixture.observation.readerError')=='NO_EXPANDED_OFFERS'
+    assert page.evaluate('priceBrowserFixture.observation.offers===undefined')
+    expect(page.locator('#offers .official-link')).to_have_count(0)
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#sourceStatus')).to_contain_text('No complete priced offers')
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)
+
+
+@pytest.mark.parametrize('minutes',[60,90])
+@pytest.mark.parametrize('reverse',[False,True])
+def test_visible_binding_mixed_rows_keep_only_independent_browser_card(browser_page,fixture_url,minutes,reverse):
+    page,context,forbidden,_=browser_page
+    end='19:00' if minutes==60 else '19:30'
+    rows=[f'Campo 1 / Campo 2 18:00 - {end} {minutes} min €36,00',
+          f'Campo 3 18:00 - {end}; 20:00 - {"21:00" if minutes==60 else "21:30"} {minutes} min €36,00',
+          price_row('€40,05',minutes,9)]
+    if reverse:
+        rows.reverse()
+    writes=visible_price_fixture(page,context,fixture_url,minutes,rows)
+    expect(page.locator('#offers .card')).to_have_count(1)
+    expect(page.locator('#offers')).to_contain_text('Court 9')
+    expect(page.locator('#offers')).not_to_contain_text('Court 1')
+    expect(page.locator('#offers')).not_to_contain_text('Court 3')
+    expect(page.locator('#offers .offer-time')).to_contain_text(f'{minutes} min')
+    expect(page.locator('#offers .offer-time')).to_contain_text('6:00 PM')
+    expect(page.locator('#offers .offer-time')).to_contain_text('7:00 PM' if minutes==60 else '7:30 PM')
+    expect(page.locator('#offers .price')).to_contain_text('€40.05')
+    normalized=page.evaluate("""async() => {
+      const {normalizePersonalObservation}=await import('/assets/personal-observation-bridge.mjs');
+      const qa=priceBrowserFixture;
+      return normalizePersonalObservation(JSON.stringify(qa.observation),qa.query,
+        {now:Date.now(),validator:GetACourtPersonalSourceObservation.validateObservation});
+    }""")
+    assert [(o['courtName'],o['duration'],o['priceMinor']) for o in normalized['offers']]==[('Court 9',minutes,4005)]
+    assert page.evaluate('priceBrowserFixture.observation.offers.map(o=>o.court)')==['Court 9']
+    expect(page.locator('#offers .official-link')).to_have_attribute('href',normalized['sourceUrl'])
+    expect(page.locator('#offers .distance')).to_contain_text('Position unverified')
+    expect(page.locator('[data-result-pin]')).to_have_count(0)
+    expect(page.locator('#mappedCount')).to_have_text('0 mapped clubs')
+    assert_price_browser_quiet(page,context,forbidden,fixture_url,writes)

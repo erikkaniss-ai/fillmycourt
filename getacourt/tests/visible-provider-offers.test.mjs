@@ -355,3 +355,68 @@ test('empty malformed duplicate-only and oversized inputs keep existing fail-clo
   for(const rows of [sameQuote(121),Array.from({length:121},()=>priceRow('€36.5'))])
     assert.equal(buildObservation({...base,rows}).readerError,'SCHEDULE_NOT_READY');
 });
+
+function ambiguousBindings(minutes){
+  const end=minutes===60?'19:00':'19:30',laterEnd=minutes===60?'21:00':'21:30';
+  return [
+    `Campo 1 / Campo 2 18:00 - ${end} ${minutes} min €36,00`,
+    `Pista 2 / Court 1 18:00 - ${end} €36,00`,
+    `Court 1 / Court 1 18:00 - ${end} €36,00`,
+    `Court 1 18:00 - ${end} €36,00 Campo 2`,
+    `Campo 1 18:00 - ${end}; 20:00 - ${laterEnd} ${minutes} min €36,00`,
+    `Campo 1 20:00 - ${laterEnd}; 18:00 - ${end} €36,00`,
+    `Court 1 6:00 PM - ${minutes===60?'7:00':'7:30'} PM; 8:00 PM - ${minutes===60?'9:00':'9:30'} PM €36,00`,
+    `Court 1 18:00 - ${end}; 18:00 - ${end} €36,00`,
+    `Court 1 18:00 - ${end} €36,00 20:00`,
+    `Court 1 17:00; 18:00 - ${end} €36,00`
+  ].map(text=>({...row,text}));
+}
+
+test('one total cannot bind the first of multiple recognized court labels',()=>{
+  for(const minutes of [60,90])for(const item of ambiguousBindings(minutes).slice(0,4))
+    assert.equal(parseRow(item),null,item.text);
+});
+
+test('one total cannot bind the first of multiple ranges or extra clock labels',()=>{
+  for(const minutes of [60,90])for(const item of ambiguousBindings(minutes).slice(4))
+    assert.equal(parseRow(item),null,item.text);
+});
+
+test('ambiguous court and time bindings cannot pass observation validation or Get normalization',()=>{
+  for(const minutes of [60,90])for(const item of ambiguousBindings(minutes)){
+    const obs=buildObservation({...base,query:anyDuration,rows:[item]});
+    assert.equal(obs.readerError,'NO_EXPANDED_OFFERS',item.text);
+    assert.equal(obs.offers,undefined);
+    assert.throws(()=>validation(obs));
+    assert.throws(()=>normalizePersonalObservation(JSON.stringify(obs),anyDurationQuery,
+      {now:Date.now(),validator:validation}),/INVALID_OBSERVATION/);
+  }
+});
+
+test('mixed ambiguous rows preserve only the independent concrete court time and exact total in either order',()=>{
+  for(const minutes of [60,90])for(const item of ambiguousBindings(minutes))for(const reverse of [false,true]){
+    const rows=[item,priceRow('€40,05',minutes,'9')];
+    if(reverse)rows.reverse();
+    const obs=buildObservation({...base,query:anyDuration,rows});
+    const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+      {now:Date.now(),validator:validation});
+    assert.equal(obs.offers.length,1,item.text);
+    assert.deepEqual(result.offers.map(o=>[o.courtName,o.duration,o.priceMinor]),[['Court 9',minutes,4005]]);
+    assert.equal(obs.offers[0].startLabel,'6:00 PM');
+    assert.equal(obs.offers[0].endLabel,minutes===60?'7:00 PM':'7:30 PM');
+  }
+});
+
+test('a single supported court and 12h or 24h range retains valid 60 and 90 minute totals',()=>{
+  for(const minutes of [60,90])for(const court of ['H','From','Hourly']){
+    for(const range of [`18:00 - ${minutes===60?'19:00':'19:30'}`,
+      `6:00 PM - ${minutes===60?'7:00':'7:30'} PM`]){
+      const item={...row,text:`Court ${court} €36,50 from ${range}`};
+      assert.equal(parseRow(item)?.priceEur,36.5,item.text);
+      const obs=buildObservation({...base,query:anyDuration,rows:[item]});
+      const result=normalizePersonalObservation(JSON.stringify(validation(obs)),anyDurationQuery,
+        {now:Date.now(),validator:validation});
+      assert.deepEqual(result.offers.map(o=>[o.courtName,o.duration,o.priceMinor]),[['Court '+court,minutes,3650]]);
+    }
+  }
+});
