@@ -258,6 +258,7 @@ export async function genuineFederatedCi(runs,sha,context,loadRunJobs,cache=new 
     if(!head||typeof head!=='object'||Array.isArray(head)||typeof name!=='string'||
       !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(name)||typeof branch!=='string'||
       !branch||/\s|[\x00-\x1f\x7f]/.test(branch))throw Error('CI_RUN_PROOF_INVALID');
+    if(name!==REPO&&name.toLowerCase()===REPO.toLowerCase())throw Error('CI_RUN_PROOF_INVALID');
     return name===REPO&&branch===SOURCE_BRANCH;
   });
   const seen=new Set();

@@ -143,6 +143,8 @@ test('newer relevant ambiguous head identity cannot fall through to an older gen
   const older={...greenRuns()[3],id:10,run_number:10};
   const mutations=[r=>delete r.head_repository,r=>r.head_repository=null,r=>r.head_repository=false,
     r=>r.head_repository=repo.full_name,r=>r.head_repository=[],r=>r.head_repository={},
+    r=>r.head_repository={full_name:repo.full_name.toUpperCase()},
+    r=>r.head_repository={full_name:'erikkaniss-ai/FillMyCourt'},
     ...[null,42,false,[],{},'', ' '].map(value=>r=>r.head_repository={full_name:value}),
     r=>delete r.head_branch,...[null,42,false,[],{},'', ' '].map(value=>r=>r.head_branch=value)];
   for(const mutate of mutations){
