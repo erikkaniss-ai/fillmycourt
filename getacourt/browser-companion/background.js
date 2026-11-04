@@ -544,7 +544,7 @@ async function status(){
 }
 async function runSearch(query){
   if(consentPending)fail("CONSENT_WITHDRAWN");
-  if(busy)fail("READ_BUSY");
+  if(busy||mainOperation)fail("READ_BUSY");
   busy=true;const epoch=generation;
   try{
     const {lastAttempt=0}=await chrome.storage.session.get("lastAttempt");

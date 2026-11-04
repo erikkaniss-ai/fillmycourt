@@ -460,6 +460,8 @@ test('pending collector retains busy ownership after deadline until its promise 
   assert.equal(run.snapshot().ownedTabs,0);assert.equal(run.snapshot().autoBusy,true);
   await run.clock.advanceTo(70000);
   assert.equal((await run.send(request(run))).code,'READ_BUSY');
+  assert.equal((await run.send({action:'read'},false,
+    {url:'chrome-extension://fictional-reader/reader.html'})).code,'READ_BUSY');
   run.controls.resolveCapture();await run.clock.flush();
   assert.equal(run.snapshot().autoBusy,false);assert.equal(run.snapshot().renderedOffers,0);
   assert.ok(run.trace.filter(row=>row.event==='script-requested').every(row=>row.at<43000));
