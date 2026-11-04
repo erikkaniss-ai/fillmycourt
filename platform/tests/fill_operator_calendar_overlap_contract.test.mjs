@@ -357,4 +357,3 @@ test("Older Calendar 403 after newer occupied 200 preserves grid error and opera
  assert.equal(fixture.calls.length,5,"No stale retry, fallback or additional request");
  assert.ok(fixture.calls.every(call=>call.method==="GET"));
 });
-
