@@ -187,16 +187,16 @@ export function approved(pr,sha){
 const SOURCE_BRANCH='get/release-candidate-mvp-qa-04';
 export function invocationCandidate(context){
   const c=context,sha=c?.sourceSha;
-  if(!SHA.test(sha??'')||!SHA.test(c?.workflowSha??'')||c?.repository!==REPO||
-    c?.browserResult!=='success')throw Error('READER_INVOCATION_REJECTED');
+  if(!SHA.test(sha??'')||!SHA.test(c?.workflowSha??'')||c?.repository!==REPO)
+    throw Error('READER_INVOCATION_REJECTED');
   if(c.eventName==='workflow_dispatch'){
     const inputs=c.event?.inputs;
-    if(!inputs||typeof inputs!=='object'||Array.isArray(inputs)||
+    if(c.browserResult!=='skipped'||!inputs||typeof inputs!=='object'||Array.isArray(inputs)||
       Object.keys(inputs).sort().join(',')!=='candidate_sha,scope'||
       inputs.scope!=='pr5-reader-static'||inputs.candidate_sha!==sha||
       c.workflowSha!==sha||c.ref!=='refs/heads/'+SOURCE_BRANCH)throw Error('READER_INVOCATION_REJECTED');
   }else if(c.eventName==='pull_request'){
-    if(c.ref!=='refs/pull/5/merge'||c.event?.number!==5||
+    if(c.browserResult!=='success'||c.ref!=='refs/pull/5/merge'||c.event?.number!==5||
       !approved(c.event?.pull_request,sha))throw Error('READER_INVOCATION_REJECTED');
   }else throw Error('READER_INVOCATION_REJECTED');
   return sha;

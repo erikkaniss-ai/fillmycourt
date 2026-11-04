@@ -18,14 +18,15 @@ const pr={number:5,state:'open',draft:true,title:'Reader [skip netlify]',
 
 const workflow=readFileSync(new URL('../../.github/workflows/getacourt-federated-search-ci.yml',import.meta.url),'utf8').replace(/\r\n/g,'\n');
 const readerJob=workflow.split('  private-reader-draft:\n')[1]?.split('  private-search-draft:\n')[0];
-function jobAdmitted(github,inputs={}){
+function jobAdmitted(github,inputs={},dependency=github.event_name==='pull_request'?'success':'skipped',wasCancelled=false){
   const expression=readerJob.match(/^    if: (.+)$/m)?.[1];
   assert.ok(expression,'existing Reader job has an explicit admission expression');
-  return !!runInNewContext(expression,{github,inputs,contains:(a,b)=>typeof a==='string'&&a.includes(b),
+  return !!runInNewContext(expression,{github,inputs,needs:{'search-contract-and-browser':{result:dependency}},
+    always:()=>true,cancelled:()=>wasCancelled,contains:(a,b)=>typeof a==='string'&&a.includes(b),
     format:(s,v)=>s.replace('{0}',v)});
 }
 const context={eventName:'workflow_dispatch',repository:repo.full_name,
-  ref:'refs/heads/'+pr.head.ref,workflowSha:sha,sourceSha:sha,browserResult:'success',
+  ref:'refs/heads/'+pr.head.ref,workflowSha:sha,sourceSha:sha,browserResult:'skipped',
   event:{inputs:{candidate_sha:sha,scope:'pr5-reader-static'}}};
 const requiredPaths=['platform-ci','getacourt-a11y-ci','getacourt-offline-safety-ci','getacourt-federated-search-ci'];
 const greenRuns=()=>requiredPaths.map(name=>({path:'.github/workflows/'+name+'.yml',head_sha:sha,
@@ -46,6 +47,10 @@ test('actual private Reader job admits the explicit same-commit manual PR5 stati
   assert.equal(jobAdmitted({...pull,event:{pull_request:{...pr,head:{...pr.head,ref:'main'}}}}),false);
   assert.equal(jobAdmitted({...pull,event:{pull_request:{...pr,head:{...pr.head,repo:{full_name:'other/repo'}}}}}),false);
   assert.equal(jobAdmitted({...gh,repository:'other/repo'},context.event.inputs),false);
+  for(const result of ['success','failure','cancelled'])assert.equal(jobAdmitted(gh,context.event.inputs,result),false);
+  for(const result of ['skipped','failure','cancelled'])assert.equal(jobAdmitted(pull,{},result),false);
+  assert.equal(jobAdmitted(gh,context.event.inputs,'skipped',true),false);
+  assert.equal(jobAdmitted(pull,{},'success',true),false);
 });
 
 test('offline precredential qualification allows only the exact candidate after current PR and complete CI rechecks',async()=>{
@@ -61,7 +66,7 @@ test('offline precredential qualification allows only the exact candidate after 
 
 test('existing approved PR invocation retains its successful browser dependency without a circular workflow requirement',async()=>{
   const pull={...context,eventName:'pull_request',ref:'refs/pull/5/merge',
-    workflowSha:'2'.repeat(40),event:{number:5,pull_request:pr}};
+    workflowSha:'2'.repeat(40),browserResult:'success',event:{number:5,pull_request:pr}};
   assert.equal(await readerGate.qualifyReaderInvocation({context:pull,loadPr:async()=>pr,
     loadRuns:async()=>greenRuns().slice(0,3),checkProtection:async()=>401}),sha);
   await assert.rejects(readerGate.qualifyReaderInvocation({context:{...pull,event:{number:5,pull_request:{...pr,body:''}}},
@@ -71,10 +76,12 @@ test('existing approved PR invocation retains its successful browser dependency 
 test('manual/PR event or candidate mismatches are refused before any external adapter',async()=>{
   assert.equal(typeof readerGate.qualifyReaderInvocation,'function');
   const prContext={...context,eventName:'pull_request',ref:'refs/pull/5/merge',
-    event:{number:5,pull_request:pr}};
+    browserResult:'success',event:{number:5,pull_request:pr}};
   const bad=[{...context,eventName:'push'},{...context,repository:'other/repo'},
     {...context,ref:'refs/heads/main'},{...context,workflowSha:'2'.repeat(40)},
     {...context,sourceSha:''},{...context,browserResult:'failure'},
+    {...context,browserResult:'success'},{...context,browserResult:'cancelled'},
+    {...prContext,browserResult:'skipped'},{...prContext,browserResult:'cancelled'},
     {...context,event:{inputs:{}}},{...context,event:{inputs:{candidate_sha:sha,scope:'pr8-reader-static'}}},
     {...context,event:{inputs:{...context.event.inputs,target:'public'}}},
     {...prContext,event:{number:8,pull_request:pr}},
@@ -122,6 +129,9 @@ test('manual qualification requires all four latest exact-SHA PR workflows and f
 });
 
 test('workflow keeps fixed target, private-search parked, and both guards ahead of the only deploy credential',()=>{
+  const browser=workflow.split('  search-contract-and-browser:\n')[1]?.split('  private-reader-draft:\n')[0];
+  assert.match(browser,/^    if: github\.event_name == 'pull_request'$/m,
+    'manual invocation reuses the four prior exact-SHA PR greens instead of replaying browser CI');
   assert.match(workflow,/candidate_sha:\s*\n\s+description:/);
   assert.match(workflow,/scope:\s*\n\s+description:/);
   assert.match(readerJob,/ref: \$\{\{ env\.SOURCE_SHA \}\}/);

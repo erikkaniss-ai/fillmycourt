@@ -25,6 +25,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   search-contract-and-browser:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -76,7 +77,7 @@ jobs:
   private-reader-draft:
     # Both paths still need the live exact-head owner gate before credentials.
     # Manual checkout must be the workflow's own assigned-branch immutable SHA.
-    if: github.repository == 'erikkaniss-ai/fillmycourt' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 5 && github.event.pull_request.head.ref == 'get/release-candidate-mvp-qa-04' && github.event.pull_request.head.repo.full_name == 'erikkaniss-ai/fillmycourt' && contains(github.event.pull_request.body, format('<!-- GET_STAGING_UAT_APPROVED_SHA:{0} -->', github.event.pull_request.head.sha))) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/get/release-candidate-mvp-qa-04' && inputs.scope == 'pr5-reader-static' && inputs.candidate_sha == github.sha))
+    if: always() && !cancelled() && github.repository == 'erikkaniss-ai/fillmycourt' && ((github.event_name == 'pull_request' && needs['search-contract-and-browser'].result == 'success' && github.event.pull_request.number == 5 && github.event.pull_request.head.ref == 'get/release-candidate-mvp-qa-04' && github.event.pull_request.head.repo.full_name == 'erikkaniss-ai/fillmycourt' && contains(github.event.pull_request.body, format('<!-- GET_STAGING_UAT_APPROVED_SHA:{0} -->', github.event.pull_request.head.sha))) || (github.event_name == 'workflow_dispatch' && needs['search-contract-and-browser'].result == 'skipped' && github.ref == 'refs/heads/get/release-candidate-mvp-qa-04' && inputs.scope == 'pr5-reader-static' && inputs.candidate_sha == github.sha))
     needs: search-contract-and-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
