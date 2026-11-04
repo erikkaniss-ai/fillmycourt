@@ -2109,6 +2109,8 @@ def test_fill_calendar_final_membership_contract(fill_today, capsys, monkeypatch
     else:
         require(state["role_denials"] == 0 and state["user_exit"] == "normal",
                 "Calendar unchanged-membership control did not exit normally.")
+        require(state["role_attempts"] == 2 and state["role_successes"] == 2,
+                "Calendar positive control did not exercise the final native role recheck.")
     # This final-check contract is not statement-atomic or a late-wire guarantee;
     # zero holds still does not qualify active-hold removal or hosted F1.
     with capsys.disabled():

@@ -1406,6 +1406,8 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     where organization_id=cast(:org as uuid) and starts_at<:finish and ends_at>:begin
                     order by starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
+                # Recheck membership after all collections, before returning data.
+                role(c, org, a)
                 return {"bookings": bookings, "holds": holds, "blocks": blocks}
 
         @app.get("/api/fmc/{org}/provider-provenance/connections")
