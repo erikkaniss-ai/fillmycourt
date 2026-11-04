@@ -236,12 +236,34 @@ export function invocationCandidate(context){
   return sha;
 }
 function latestSuccessful(runs,sha,path){
-  const latest=runs.filter(r=>r.path===path&&r.head_sha===sha&&r.event==='pull_request'&&
-    r.head_branch===SOURCE_BRANCH&&r.head_repository?.full_name===REPO)
-    .sort((a,b)=>b.run_number-a.run_number||b.run_attempt-a.run_attempt)[0];
+  const candidates=[],seen=new Set(),ids=new Map(),numbers=new Map();
+  for(const r of runs){
+    if(!r||typeof r!=='object'||Array.isArray(r))return false;
+    // Only positive unrelated identity can be excluded. Missing relevance or
+    // head fields must not erase a potentially newer required-workflow result.
+    const otherPath=typeof r.path==='string'&&/^\.github\/workflows\/[^/\s]+\.(?:yml|yaml)$/.test(r.path)&&r.path!==path;
+    const otherSha=typeof r.head_sha==='string'&&SHA.test(r.head_sha)&&r.head_sha!==sha;
+    const otherEvent=['push','workflow_dispatch','pull_request_target','repository_dispatch','schedule','workflow_run'].includes(r.event);
+    if(otherPath||otherSha||otherEvent)continue;
+    if(r.path!==path||r.head_sha!==sha||r.event!=='pull_request')return false;
+    const head=r.head_repository,name=head?.full_name,branch=r.head_branch;
+    if(!head||typeof head!=='object'||Array.isArray(head)||typeof name!=='string'||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(name)||typeof branch!=='string'||
+      !branch||/\s|[\x00-\x1f\x7f]/.test(branch)||
+      (name!==REPO&&name.toLowerCase()===REPO.toLowerCase()))return false;
+    if(name!==REPO||branch!==SOURCE_BRANCH)continue;
+    if(!positiveInteger(r.id)||!positiveInteger(r.run_number)||!positiveInteger(r.run_attempt)||
+      !validStatus(r)||!Array.isArray(r.pull_requests)||r.pull_requests.length!==1||r.pull_requests[0]?.number!==5)return false;
+    const key=r.id+'/'+r.run_attempt;
+    if(seen.has(key)||(ids.has(r.id)&&ids.get(r.id)!==r.run_number)||
+      (numbers.has(r.run_number)&&numbers.get(r.run_number)!==r.id))return false;
+    seen.add(key);ids.set(r.id,r.run_number);numbers.set(r.run_number,r.id);candidates.push(r);
+  }
+  const latest=candidates.sort((a,b)=>b.run_number-a.run_number||b.run_attempt-a.run_attempt)[0];
   return latest?.status==='completed'&&latest.conclusion==='success';
 }
 export function ciState(runs,sha){
+  if(!Array.isArray(runs)||typeof sha!=='string'||!SHA.test(sha))return false;
   const paths=['.github/workflows/platform-ci.yml','.github/workflows/getacourt-a11y-ci.yml',
     '.github/workflows/getacourt-offline-safety-ci.yml'];
   return paths.every(path=>latestSuccessful(runs,sha,path));

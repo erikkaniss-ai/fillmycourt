@@ -40,6 +40,72 @@ const edited=()=>({...context,eventName:'pull_request',ref:'refs/pull/5/merge',w
 const adapters=(c=edited())=>({context:c,loadPr:async()=>pr,loadRuns:async()=>greenRuns(),
   loadRunJobs:sourceJobs,checkProtection:async()=>401,attempts:1});
 
+for(const index of [0,1,2])for(const field of ['head_repository','head_branch']){
+  test(`shared ${requiredPaths[index]} refuses newer failure with missing ${field}`,async()=>{
+    const newer={...greenRuns()[index],id:20,run_number:3,conclusion:'failure'};delete newer[field];
+    const runs=[...greenRuns(),newer];
+    assert.equal(ciState(runs,sha),false);
+    await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),loadRuns:async()=>runs,
+      loadRunJobs:async()=>assert.fail('unknown shared CI reached federated reads'),
+      checkProtection:async()=>assert.fail('unknown shared CI reached protection')}),/REQUIRED_CI_NOT_GREEN/);
+  });
+}
+
+test('shared CI validates identity, PR linkage and exact-attempt ordering on all three workflows',()=>{
+  for(const index of [0,1,2]){
+    const mutations=[r=>r.head_repository=null,r=>r.head_repository=42,r=>r.head_repository=[],
+      r=>r.head_repository={full_name:null},r=>r.head_repository={full_name:[]},
+      r=>r.head_repository={full_name:repo.full_name.toUpperCase()},
+      r=>r.head_branch=null,r=>r.head_branch=42,r=>r.head_branch={},r=>r.head_branch='',
+      r=>r.id=0,r=>r.id='20',r=>r.id=9007199254740992,
+      r=>r.run_number=null,r=>r.run_number=0,r=>r.run_number='3',r=>r.run_number=1.5,
+      r=>r.run_attempt=0,r=>r.run_attempt='1',r=>r.run_attempt=NaN,
+      r=>r.pull_requests=[],r=>r.pull_requests=[{number:8}],r=>r.pull_requests=[{number:'5'}],
+      r=>r.pull_requests=[null],r=>r.pull_requests=[{number:5},{number:5}],r=>r.pull_requests='5',
+      r=>r.status='unknown',r=>r.conclusion=null];
+    for(const mutate of mutations){
+      const newer={...greenRuns()[index],id:20,run_number:3,conclusion:'failure'};mutate(newer);
+      assert.equal(ciState([...greenRuns(),newer],sha),false);
+    }
+    for(const [status,conclusion] of [['completed','failure'],['completed','cancelled'],['completed','skipped'],
+      ['queued',null],['pending',null],['in_progress',null]]){
+      assert.equal(ciState([...greenRuns(),{...greenRuns()[index],id:20,run_number:3,status,conclusion}],sha),false);
+    }
+    assert.equal(ciState([...greenRuns(),{...greenRuns()[index]}],sha),false,'duplicate exact attempt');
+    assert.equal(ciState([...greenRuns(),{...greenRuns()[index],id:20}],sha),false,'ambiguous run number');
+    assert.equal(ciState([...greenRuns(),{...greenRuns()[index],run_number:3}],sha),false,'contradictory same ID ordering');
+    const retry={...greenRuns()[index],run_attempt:2,conclusion:'failure'};
+    assert.equal(ciState([...greenRuns(),retry],sha),false,'later failed attempt');
+    const recovered=greenRuns();recovered[index]={...recovered[index],run_attempt:1,conclusion:'failure'};
+    assert.equal(ciState([...recovered,{...greenRuns()[index],run_attempt:2}],sha),true,'latest genuine success');
+  }
+});
+
+test('shared CI keeps exact relevance boundaries, explicit foreign heads, bool interface and input order',()=>{
+  const runs=greenRuns(),before=JSON.stringify(runs);
+  assert.equal(ciState(runs,sha),true);assert.equal(JSON.stringify(runs),before);
+  assert.equal(ciState(null,sha),false);assert.equal(ciState({},sha),false);
+  for(const index of [0,1,2]){
+    const newer={...runs[index],id:20,run_number:3,conclusion:'failure'};
+    for(const fields of [{head_sha:'2'.repeat(40)},{event:'workflow_dispatch'},{event:'push'},
+      {path:'.github/workflows/unrelated.yml'},{head_repository:{full_name:'other/repo'}},
+      {head_branch:'another-branch'}])assert.equal(ciState([...runs,{...newer,...fields}],sha),true);
+    for(const fields of [{head_sha:'2'.repeat(40)},{event:'pull_request_target'},
+      {path:'.github/workflows/unrelated.yml'}]){
+      const missing=runs.filter((_,i)=>i!==index);
+      assert.equal(ciState([...missing,{...newer,...fields}],sha),false);
+    }
+    for(const fields of [{path:null},{path:42},{path:'unknown'},{head_sha:null},{head_sha:42},
+      {event:null},{event:42},{event:'unknown'},{event:'PULL_REQUEST'}]){
+      assert.equal(ciState([...runs,{...newer,...fields}],sha),false,'ambiguous relevance is not unrelated');
+    }
+  }
+  const invalidSha='A'.repeat(40);
+  assert.equal(ciState(runs.map(r=>({...r,head_sha:invalidSha})),invalidSha),false);
+  const lower='a'.repeat(40),caseRuns=runs.map(r=>({...r,head_sha:lower}));
+  assert.equal(ciState([...caseRuns,{...caseRuns[0],id:20,run_number:3,head_sha:lower.toUpperCase(),conclusion:'failure'}],lower),false);
+});
+
 test('edited owner approval is an actual workflow path with no browser replay or Search activation',()=>{
   assert.match(workflow,/types: \[opened, synchronize, reopened, edited\]/);
   const github={repository:repo.full_name,event_name:'pull_request',actor:context.actor,triggering_actor:context.actor,run_attempt:1,event:edited().event};
@@ -283,7 +349,7 @@ test('missing/stale/duplicate approval and drift stay closed before credentials 
 
 test('manual qualification requires all four latest exact-SHA PR workflows and fail-closed protection',async()=>{
   assert.equal(typeof readerGate.qualifyReaderInvocation,'function');
-  const missing=greenRuns().slice(1),failed=[...greenRuns(),{...greenRuns()[0],run_number:3,conclusion:'failure'}];
+  const missing=greenRuns().slice(1),failed=[...greenRuns(),{...greenRuns()[0],id:20,run_number:3,conclusion:'failure'}];
   const laterFederatedFailure=[...greenRuns(),{...greenRuns()[3],id:5,run_number:3,conclusion:'failure'}];
   for(const runs of [[],missing,greenRuns().slice(0,3),failed,laterFederatedFailure,
     greenRuns().map(r=>({...r,head_sha:'2'.repeat(40)})),greenRuns().map(r=>({...r,event:'workflow_dispatch'}))]){
@@ -463,11 +529,11 @@ test('CLI prepare remains CI-only and local packaging never spoofs GITHUB_ACTION
 });
 test('only latest successful real PR workflows count; stale or later failures cannot inherit success',()=>{
   const paths=['platform-ci','getacourt-a11y-ci','getacourt-offline-safety-ci'];
-  const runs=paths.map(name=>({path:'.github/workflows/'+name+'.yml',head_sha:sha,event:'pull_request',
+  const runs=paths.map((name,index)=>({id:index+1,pull_requests:[{number:5}],path:'.github/workflows/'+name+'.yml',head_sha:sha,event:'pull_request',
     head_branch:pr.head.ref,head_repository:repo,run_number:2,run_attempt:1,status:'completed',conclusion:'success'}));
   assert.equal(ciState(runs,sha),true);
   assert.equal(ciState(runs.slice(1),sha),false);
   assert.equal(ciState(runs,'2'.repeat(40)),false);
-  assert.equal(ciState([...runs,{...runs[0],run_number:3,conclusion:'failure'}],sha),false);
+  assert.equal(ciState([...runs,{...runs[0],id:20,run_number:3,conclusion:'failure'}],sha),false);
   assert.equal(FILES.some(f=>/app\.js|auth|book|checkout|provider-connection/.test(f)),false);
 });
