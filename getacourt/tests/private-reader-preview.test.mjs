@@ -27,11 +27,140 @@ function jobAdmitted(github,inputs={},dependency=github.event_name==='pull_reque
 }
 const context={eventName:'workflow_dispatch',repository:repo.full_name,
   ref:'refs/heads/'+pr.head.ref,workflowSha:sha,sourceSha:sha,browserResult:'skipped',
+  runId:'99',runAttempt:'1',actor:'erikkaniss-ai',triggeringActor:'erikkaniss-ai',
   event:{inputs:{candidate_sha:sha,scope:'pr5-reader-static'}}};
 const requiredPaths=['platform-ci','getacourt-a11y-ci','getacourt-offline-safety-ci','getacourt-federated-search-ci'];
-const greenRuns=()=>requiredPaths.map(name=>({path:'.github/workflows/'+name+'.yml',head_sha:sha,
+const greenRuns=()=>requiredPaths.map((name,index)=>({id:index+1,pull_requests:[{number:5}],path:'.github/workflows/'+name+'.yml',head_sha:sha,
   event:'pull_request',head_branch:pr.head.ref,head_repository:repo,run_number:2,run_attempt:1,
   status:'completed',conclusion:'success'}));
+const sourceJobs=async(id,attempt)=>({total_count:1,jobs:[{id:100+id,run_id:id,name:'search-contract-and-browser',status:'completed',conclusion:'success'}]});
+const approvalJobs=id=>({total_count:1,jobs:[{id:100+id,run_id:id,name:'reader-approval-event-no-source-ci',status:'completed',conclusion:'skipped'}]});
+const edited=()=>({...context,eventName:'pull_request',ref:'refs/pull/5/merge',workflowSha:'2'.repeat(40),
+  event:{number:5,action:'edited',pull_request:pr,changes:{body:{from:''}},sender:{login:'erikkaniss-ai',type:'User'}}});
+const adapters=(c=edited())=>({context:c,loadPr:async()=>pr,loadRuns:async()=>greenRuns(),
+  loadRunJobs:sourceJobs,checkProtection:async()=>401,attempts:1});
+
+test('edited owner approval is an actual workflow path with no browser replay or Search activation',()=>{
+  assert.match(workflow,/types: \[opened, synchronize, reopened, edited\]/);
+  const github={repository:repo.full_name,event_name:'pull_request',actor:context.actor,triggering_actor:context.actor,run_attempt:1,event:edited().event};
+  assert.equal(jobAdmitted(github,{},'skipped'),true);
+  assert.equal(jobAdmitted(github,{},'success'),false);
+  assert.equal(jobAdmitted(github,{},'skipped',true),false);
+  for(const mutate of [g=>g.actor='other',g=>g.triggering_actor='other',g=>g.event.sender.type='Bot',
+    g=>g.run_attempt=2,g=>g.event.pull_request.number=8,g=>g.event.pull_request.head.ref='main']){
+    const g=structuredClone(github);mutate(g);assert.equal(jobAdmitted(g,{},'skipped'),false);
+  }
+  const browser=workflow.split('  search-contract-and-browser:\n')[1].split('  private-reader-draft:\n')[0];
+  const sourceIf=browser.match(/^    if: (.+)$/m)[1];
+  assert.equal(runInNewContext(sourceIf,{github}),false);
+  assert.match(browser,/reader-approval-event-no-source-ci/);
+  assert.match(workflow,/group: .*reader-approval.*get-federated/);
+  const searchIf=workflow.split('  private-search-draft:\n')[1].match(/^    if: (.+)$/m)[1];
+  assert.equal(runInNewContext(searchIf,{github}),false);
+});
+
+test('only a first-attempt owner marker-only transition can qualify an edited snapshot',async()=>{
+  assert.equal(await readerGate.qualifyReaderInvocation(adapters()),sha);
+  const stale=edited();stale.event.changes.body.from=pr.body.replace(sha,'2'.repeat(40));
+  assert.equal(await readerGate.qualifyReaderInvocation(adapters(stale)),sha);
+  const cases=[];
+  const change=fn=>{const c=structuredClone(edited());fn(c);cases.push(c);};
+  change(c=>delete c.event.changes);change(c=>c.event.changes={title:{from:'x'}});
+  change(c=>c.event.changes.title={from:'x'});change(c=>c.event.changes.base={});
+  change(c=>c.event.changes.body.extra='unexpected');
+  change(c=>c.event.changes.body.from=pr.body);change(c=>c.event.changes.body.from='unrelated prose');
+  change(c=>c.event.changes.body.from=pr.body+pr.body);
+  change(c=>c.event.changes.body.from='<!-- GET_STAGING_UAT_APPROVED_SHA:bad -->');
+  change(c=>c.event.pull_request.body='');change(c=>c.event.pull_request.body=pr.body+pr.body);
+  change(c=>c.event.pull_request.body=pr.body+'\n<!-- GET_SEARCH_UAT_APPROVED_SHA:'+sha+' -->');
+  change(c=>c.actor='other');change(c=>c.event.sender.login='other');change(c=>c.event.sender.type='Bot');
+  change(c=>c.triggeringActor='other');change(c=>c.runAttempt='2');change(c=>c.runAttempt=1);change(c=>c.runId='0');
+  change(c=>c.runId='9007199254740993');change(c=>c.sourceSha='2'.repeat(40));
+  change(c=>c.event.number=8);change(c=>c.event.pull_request.head.ref='main');change(c=>c.event.pull_request.base.ref='main');
+  change(c=>c.event.pull_request.head.repo={full_name:'other/repo'});change(c=>c.eventName='pull_request_target');
+  change(c=>c.event.action='labeled');change(c=>c.ref='refs/pull/8/merge');
+  for(const result of ['success','failure','cancelled'])change(c=>c.browserResult=result);
+  for(const c of cases)await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(c),
+    loadPr:async()=>assert.fail('invalid event reached a live adapter')}),/INVOCATION|APPROVAL/);
+});
+
+test('edited live body as well as head must remain bound through both post-CI rechecks',async()=>{
+  for(const driftAt of [1,2,3]){
+    let calls=0;
+    await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+      loadPr:async()=>++calls===driftAt?{...pr,body:pr.body+'\nchanged'}:pr}),
+    /EXACT_OWNER_UAT|PR_CHANGED/);
+  }
+  const c=edited();c.event.pull_request={...pr,body:pr.body+'\n'};
+  assert.equal(await readerGate.qualifyReaderInvocation({...adapters(c),loadPr:async()=>c.event.pull_request}),sha);
+});
+
+test('approval-only green cannot replace genuine federated CI and current approval must not self-wait',async()=>{
+  await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(context),loadRunJobs:async id=>approvalJobs(id)}),/CI/);
+  const genuine=greenRuns()[3];
+  const olderApproval={...genuine,id:5,run_number:3};
+  const currentApproval={...genuine,id:99,run_number:4,status:'in_progress',conclusion:null};
+  const calls=[];
+  assert.equal(await readerGate.qualifyReaderInvocation({...adapters(),loadRuns:async()=>[...greenRuns(),olderApproval,currentApproval],
+    loadRunJobs:async(id,attempt)=>{calls.push([id,attempt]);return id===5?approvalJobs(id):sourceJobs(id,attempt);}}),sha);
+  assert.deepEqual(calls,[[5,1],[4,1]]);
+  // Current-run API metadata can lag; its authenticated exact runner ID/attempt
+  // must be excluded without waiting for its own PR-linkage population.
+  assert.equal(await readerGate.qualifyReaderInvocation({...adapters(),
+    loadRuns:async()=>[...greenRuns(),{...currentApproval,pull_requests:[]}]}),sha);
+  const failed={...genuine,id:6,run_number:3,conclusion:'failure'};
+  await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+    loadRuns:async()=>[...greenRuns(),failed,{...olderApproval,run_number:4}],
+    loadRunJobs:async(id,a)=>id===5?approvalJobs(id):sourceJobs(id,a)}),/CI/);
+});
+
+test('exact-attempt job proof refuses unknown, duplicate, partial and unlinked evidence',async()=>{
+  const bad=[{total_count:2,jobs:(await sourceJobs(4,1)).jobs},
+    {total_count:0,jobs:[]},
+    {total_count:2,jobs:[...(await sourceJobs(4,1)).jobs,...approvalJobs(4).jobs]},
+    {total_count:1,jobs:[{...(await sourceJobs(4,1)).jobs[0],name:'unknown'}]},
+    {total_count:2,jobs:[...(await sourceJobs(4,1)).jobs,{...(await sourceJobs(4,1)).jobs[0],id:999}]},
+    {total_count:1,jobs:[{...approvalJobs(4).jobs[0],conclusion:'success'}]},
+    {total_count:1,jobs:[null]},
+    {total_count:1,jobs:[{...(await sourceJobs(4,1)).jobs[0],id:0}]},
+    {total_count:1,jobs:[{...(await sourceJobs(4,1)).jobs[0],run_id:5}]},
+    {total_count:1,jobs:[{...(await sourceJobs(4,1)).jobs[0],status:'unknown'}]},
+    {total_count:101,jobs:Array.from({length:101},(_,i)=>({...approvalJobs(4).jobs[0],id:100+i}))}];
+  for(const payload of bad)await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),loadRunJobs:async()=>payload}),/CI/);
+  for(const fields of [{id:0},{id:'4'},{run_attempt:0},{run_attempt:1.5},{run_number:0},{id:9007199254740992},
+    {pull_requests:[]},{pull_requests:[{number:8}]},{status:'unknown'}]){
+    await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+      loadRuns:async()=>[...greenRuns().slice(0,3),{...greenRuns()[3],...fields}]}),/CI/);
+  }
+  for(const status of ['queued','in_progress','cancelled'])await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+    loadRuns:async()=>[...greenRuns().slice(0,3),{...greenRuns()[3],status,conclusion:status==='cancelled'?'cancelled':null}]}),/CI/);
+  await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),loadRunJobs:async()=>{throw Error('READ_FAILED');}}),/READ_FAILED/);
+  for(const conclusion of ['cancelled','skipped','failure'])await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+    loadRunJobs:async()=>({total_count:1,jobs:[{...(await sourceJobs(4,1)).jobs[0],conclusion}]})}),/CI/);
+});
+
+test('classification has a 16-candidate bound and caches only complete exact attempts',async()=>{
+  const candidates=Array.from({length:17},(_,i)=>({...greenRuns()[3],id:20+i,run_number:20+i}));
+  let calls=0;
+  await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),loadRuns:async()=>[...greenRuns().slice(0,3),...candidates],
+    loadRunJobs:async id=>{calls++;return approvalJobs(id);}}),/CI/);
+  assert.equal(calls,16);
+  assert.equal(typeof readerGate.genuineFederatedCi,'function');
+  const cache=new Map(),ids=[];
+  const load=async(id,a)=>{ids.push([id,a]);return sourceJobs(id,a);};
+  assert.equal(await readerGate.genuineFederatedCi(greenRuns(),sha,edited(),load,cache),true);
+  assert.equal(await readerGate.genuineFederatedCi(greenRuns(),sha,edited(),load,cache),true);
+  const next=[...greenRuns().slice(0,3),{...greenRuns()[3],run_attempt:2}];
+  assert.equal(await readerGate.genuineFederatedCi(next,sha,edited(),load,cache),true);
+  assert.deepEqual(ids,[[4,1],[4,2]]);
+  const pending=[...greenRuns().slice(0,3),{...greenRuns()[3],status:'in_progress',conclusion:null}];
+  const uncached=new Map(),reads=[];
+  const read=async(id,a)=>{reads.push([id,a]);return sourceJobs(id,a);};
+  assert.equal(await readerGate.genuineFederatedCi(pending,sha,edited(),read,uncached),false);
+  assert.equal(uncached.size,0);
+  assert.equal(await readerGate.genuineFederatedCi(greenRuns(),sha,edited(),read,uncached),true);
+  assert.deepEqual(reads,[[4,1],[4,1]]);
+});
 
 test('actual private Reader job admits the explicit same-commit manual PR5 static invocation only',()=>{
   const gh={repository:repo.full_name,event_name:'workflow_dispatch',sha,ref:context.ref,event:{}};
@@ -41,7 +170,7 @@ test('actual private Reader job admits the explicit same-commit manual PR5 stati
     {...context.event.inputs,scope:'pr5-search'}])assert.equal(jobAdmitted(gh,inputs),false);
   assert.equal(jobAdmitted({...gh,ref:'refs/heads/main'},context.event.inputs),false);
   assert.equal(jobAdmitted({...gh,event_name:'push'},context.event.inputs),false);
-  const pull={repository:repo.full_name,event_name:'pull_request',event:{pull_request:pr}};
+  const pull={repository:repo.full_name,event_name:'pull_request',event:{action:'synchronize',pull_request:pr}};
   assert.equal(jobAdmitted(pull),true);
   assert.equal(jobAdmitted({...pull,event:{pull_request:{...pr,body:''}}}),false);
   assert.equal(jobAdmitted({...pull,event:{pull_request:{...pr,head:{...pr.head,ref:'main'}}}}),false);
@@ -59,6 +188,7 @@ test('offline precredential qualification allows only the exact candidate after 
   const result=await readerGate.qualifyReaderInvocation({context,
     loadPr:async()=>{trace.push('pr');return pr;},
     loadRuns:async()=>{trace.push('ci');return greenRuns();},
+    loadRunJobs:sourceJobs,
     checkProtection:async target=>{trace.push('protection');assert.equal(target,'https://deploy-preview-5--getacourt-preview.netlify.app/');return 401;},
     wait:async()=>assert.fail('green prerequisites do not wait')});
   assert.equal(result,sha);assert.deepEqual(trace,['pr','ci','pr','protection','pr']);
@@ -66,7 +196,7 @@ test('offline precredential qualification allows only the exact candidate after 
 
 test('existing approved PR invocation retains its successful browser dependency without a circular workflow requirement',async()=>{
   const pull={...context,eventName:'pull_request',ref:'refs/pull/5/merge',
-    workflowSha:'2'.repeat(40),browserResult:'success',event:{number:5,pull_request:pr}};
+    workflowSha:'2'.repeat(40),browserResult:'success',event:{number:5,action:'synchronize',pull_request:pr}};
   assert.equal(await readerGate.qualifyReaderInvocation({context:pull,loadPr:async()=>pr,
     loadRuns:async()=>greenRuns().slice(0,3),checkProtection:async()=>401}),sha);
   await assert.rejects(readerGate.qualifyReaderInvocation({context:{...pull,event:{number:5,pull_request:{...pr,body:''}}},
@@ -76,7 +206,7 @@ test('existing approved PR invocation retains its successful browser dependency 
 test('manual/PR event or candidate mismatches are refused before any external adapter',async()=>{
   assert.equal(typeof readerGate.qualifyReaderInvocation,'function');
   const prContext={...context,eventName:'pull_request',ref:'refs/pull/5/merge',
-    browserResult:'success',event:{number:5,pull_request:pr}};
+    browserResult:'success',event:{number:5,action:'synchronize',pull_request:pr}};
   const bad=[{...context,eventName:'push'},{...context,repository:'other/repo'},
     {...context,ref:'refs/heads/main'},{...context,workflowSha:'2'.repeat(40)},
     {...context,sourceSha:''},{...context,browserResult:'failure'},
@@ -109,7 +239,7 @@ test('missing/stale/duplicate approval and drift stay closed before credentials 
   for(const driftAt of [2,3]){
     let calls=0,probes=0;
     await assert.rejects(readerGate.qualifyReaderInvocation({context,loadPr:async()=>++calls===driftAt?{...pr,head:{...pr.head,sha:'2'.repeat(40)}}:pr,
-      loadRuns:async()=>greenRuns(),checkProtection:async()=>{probes++;return 401;}}),/PR_CHANGED/);
+      loadRuns:async()=>greenRuns(),loadRunJobs:sourceJobs,checkProtection:async()=>{probes++;return 401;}}),/PR_CHANGED/);
     assert.equal(probes,driftAt===2?0:1);
   }
 });
@@ -117,20 +247,20 @@ test('missing/stale/duplicate approval and drift stay closed before credentials 
 test('manual qualification requires all four latest exact-SHA PR workflows and fail-closed protection',async()=>{
   assert.equal(typeof readerGate.qualifyReaderInvocation,'function');
   const missing=greenRuns().slice(1),failed=[...greenRuns(),{...greenRuns()[0],run_number:3,conclusion:'failure'}];
-  const laterFederatedFailure=[...greenRuns(),{...greenRuns()[3],run_number:3,conclusion:'failure'}];
+  const laterFederatedFailure=[...greenRuns(),{...greenRuns()[3],id:5,run_number:3,conclusion:'failure'}];
   for(const runs of [[],missing,greenRuns().slice(0,3),failed,laterFederatedFailure,
     greenRuns().map(r=>({...r,head_sha:'2'.repeat(40)})),greenRuns().map(r=>({...r,event:'workflow_dispatch'}))]){
-    await assert.rejects(readerGate.qualifyReaderInvocation({context,loadPr:async()=>pr,loadRuns:async()=>runs,
+    await assert.rejects(readerGate.qualifyReaderInvocation({context,loadPr:async()=>pr,loadRuns:async()=>runs,loadRunJobs:sourceJobs,
       attempts:1,wait:async()=>assert.fail('final failed attempt must not wait'),
       checkProtection:async()=>assert.fail('failed prerequisites reached protection')}),/REQUIRED_CI_NOT_GREEN/);
   }
   for(const status of [200,302,403,500])await assert.rejects(readerGate.qualifyReaderInvocation({context,loadPr:async()=>pr,
-    loadRuns:async()=>greenRuns(),checkProtection:async()=>status}),/EXISTING_NONPRODUCTION_PROTECTION_UNVERIFIED/);
+    loadRuns:async()=>greenRuns(),loadRunJobs:sourceJobs,checkProtection:async()=>status}),/EXISTING_NONPRODUCTION_PROTECTION_UNVERIFIED/);
 });
 
 test('workflow keeps fixed target, private-search parked, and both guards ahead of the only deploy credential',()=>{
   const browser=workflow.split('  search-contract-and-browser:\n')[1]?.split('  private-reader-draft:\n')[0];
-  assert.match(browser,/^    if: github\.event_name == 'pull_request'$/m,
+  assert.match(browser,/^    if: github\.event_name == 'pull_request' && \(github\.event\.action == 'opened'.*'synchronize'.*'reopened'\)$/m,
     'manual invocation reuses the four prior exact-SHA PR greens instead of replaying browser CI');
   assert.match(workflow,/candidate_sha:\s*\n\s+description:/);
   assert.match(workflow,/scope:\s*\n\s+description:/);
@@ -141,7 +271,7 @@ test('workflow keeps fixed target, private-search parked, and both guards ahead 
   assert.match(readerJob,/--site 5dbcc4a3-5c87-4c75-959f-9a4f9fbc9570/);
   assert.match(readerJob,/--alias get-pr5-reader-uat --no-build/);
   assert.doesNotMatch(readerJob,/--prod\b|inputs\.(?:site|alias|token|target)/);
-  assert.match(workflow.split('  private-search-draft:\n')[1],/^    if: github\.event_name == 'pull_request' && github\.event\.pull_request\.number == 5 && contains\(github\.event\.pull_request\.body, format\('<!-- GET_SEARCH_UAT_APPROVED_SHA:/);
+  assert.match(workflow.split('  private-search-draft:\n')[1],/^    if: github\.event_name == 'pull_request' && github\.event\.action != 'edited' && github\.event\.pull_request\.number == 5 && contains\(github\.event\.pull_request\.body, format\('<!-- GET_SEARCH_UAT_APPROVED_SHA:/);
 });
 test('protected Reader deploy requires the current single exact SHA approval and original draft scope',()=>{
   assert.equal(approved(pr,sha),true);

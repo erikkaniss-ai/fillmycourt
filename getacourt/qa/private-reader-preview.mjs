@@ -185,9 +185,41 @@ export function approved(pr,sha){
     marks.length===1&&marks[0][1]===sha;
 }
 const SOURCE_BRANCH='get/release-candidate-mvp-qa-04';
+const SOURCE_ACTIONS=new Set(['opened','synchronize','reopened']);
+const SOURCE_JOB='search-contract-and-browser',APPROVAL_JOB='reader-approval-event-no-source-ci';
+const FEDERATED_PATH='.github/workflows/getacourt-federated-search-ci.yml';
+const approvalEvent=c=>c?.eventName==='pull_request'&&c.event?.action==='edited';
+const positiveInteger=n=>Number.isSafeInteger(n)&&n>0;
+const runnerInteger=s=>typeof s==='string'&&/^[1-9][0-9]*$/.test(s)&&positiveInteger(Number(s));
+const RUN_STATUSES=new Set(['queued','waiting','pending','requested','in_progress','completed']);
+const CONCLUSIONS=new Set(['success','failure','neutral','cancelled','skipped','timed_out','action_required','stale','startup_failure']);
+const validStatus=value=>RUN_STATUSES.has(value?.status)&&(value.status==='completed'?
+  CONCLUSIONS.has(value.conclusion):value.conclusion===null);
+function readerMark(body){
+  if(typeof body!=='string')throw Error('APPROVAL_BODY_REJECTED');
+  const prefixes=body.match(/<!--\s*GET_STAGING_UAT_APPROVED_SHA\b/g)??[];
+  const exact=[...body.matchAll(/<!-- GET_STAGING_UAT_APPROVED_SHA:([a-f0-9]{40}) -->/g)];
+  if(prefixes.length>1||exact.length!==prefixes.length)throw Error('APPROVAL_MARKER_REJECTED');
+  return {sha:exact[0]?.[1]??null,rest:body.replace(/<!-- GET_STAGING_UAT_APPROVED_SHA:[a-f0-9]{40} -->/g,'')
+    .replace(/\r\n/g,'\n').trimEnd()};
+}
+function approvalTransition(c){
+  const e=c.event;
+  // Eligibility only: this fixed principal does not establish human credential
+  // ownership. The operational owner decision and real delivery remain separate.
+  if(c.browserResult!=='skipped'||Object.keys(e.changes??{}).join(',')!=='body'||
+    typeof e.changes.body?.from!=='string'||Array.isArray(e.changes.body)||
+    Object.keys(e.changes.body).join(',')!=='from'||c.actor!=='erikkaniss-ai'||
+    c.triggeringActor!==c.actor||e.sender?.login!==c.actor||e.sender?.type!=='User'||
+    c.runAttempt!=='1'||!runnerInteger(c.runId))throw Error('APPROVAL_EVENT_REJECTED');
+  const before=readerMark(e.changes.body.from),after=readerMark(e.pull_request.body);
+  if(before.sha===c.sourceSha||after.sha!==c.sourceSha||before.rest!==after.rest||
+    e.changes.body.from===e.pull_request.body)throw Error('APPROVAL_TRANSITION_REJECTED');
+}
 export function invocationCandidate(context){
   const c=context,sha=c?.sourceSha;
-  if(!SHA.test(sha??'')||!SHA.test(c?.workflowSha??'')||c?.repository!==REPO)
+  if(typeof sha!=='string'||!SHA.test(sha)||typeof c?.workflowSha!=='string'||
+    !SHA.test(c.workflowSha)||c?.repository!==REPO)
     throw Error('READER_INVOCATION_REJECTED');
   if(c.eventName==='workflow_dispatch'){
     const inputs=c.event?.inputs;
@@ -196,8 +228,10 @@ export function invocationCandidate(context){
       inputs.scope!=='pr5-reader-static'||inputs.candidate_sha!==sha||
       c.workflowSha!==sha||c.ref!=='refs/heads/'+SOURCE_BRANCH)throw Error('READER_INVOCATION_REJECTED');
   }else if(c.eventName==='pull_request'){
-    if(c.browserResult!=='success'||c.ref!=='refs/pull/5/merge'||c.event?.number!==5||
+    if(c.ref!=='refs/pull/5/merge'||c.event?.number!==5||
       !approved(c.event?.pull_request,sha))throw Error('READER_INVOCATION_REJECTED');
+    if(approvalEvent(c))approvalTransition(c);
+    else if(!SOURCE_ACTIONS.has(c.event?.action)||c.browserResult!=='success')throw Error('READER_INVOCATION_REJECTED');
   }else throw Error('READER_INVOCATION_REJECTED');
   return sha;
 }
@@ -212,21 +246,62 @@ export function ciState(runs,sha){
     '.github/workflows/getacourt-offline-safety-ci.yml'];
   return paths.every(path=>latestSuccessful(runs,sha,path));
 }
+export async function genuineFederatedCi(runs,sha,context,loadRunJobs,cache=new Map()){
+  if(!runnerInteger(context.runId)||typeof loadRunJobs!=='function')throw Error('CI_JOB_PROOF_REQUIRED');
+  const candidates=runs.filter(r=>r.path===FEDERATED_PATH&&r.head_sha===sha&&r.event==='pull_request'&&
+    r.head_branch===SOURCE_BRANCH&&r.head_repository?.full_name===REPO&&
+    !(approvalEvent(context)&&positiveInteger(r.id)&&String(r.id)===context.runId&&
+      r.run_attempt===Number(context.runAttempt)));
+  const seen=new Set();
+  for(const r of candidates){
+    const key=r.id+'/'+r.run_attempt;
+    if(!positiveInteger(r.id)||!positiveInteger(r.run_attempt)||!positiveInteger(r.run_number)||
+      !validStatus(r)||!Array.isArray(r.pull_requests)||r.pull_requests.length!==1||r.pull_requests[0]?.number!==5||
+      seen.has(key))throw Error('CI_RUN_PROOF_INVALID');
+    seen.add(key);
+  }
+  candidates.sort((a,b)=>b.run_number-a.run_number||b.run_attempt-a.run_attempt);
+  let inspected=0;
+  for(const r of candidates){
+    if(inspected++===16)throw Error('CI_HISTORY_LIMIT');
+    const key=r.id+'/'+r.run_attempt;
+    const payload=cache.get(key)??await loadRunJobs(r.id,r.run_attempt);
+    const jobs=payload?.jobs;
+    const allowed=new Set([SOURCE_JOB,APPROVAL_JOB,'private-reader-draft','private-search-draft']);
+    if(!Array.isArray(jobs)||!positiveInteger(payload.total_count)||payload.total_count!==jobs.length||
+      jobs.length>100||jobs.some(j=>!j||typeof j!=='object'||Array.isArray(j)||!validStatus(j))||
+      new Set(jobs.map(j=>j.id)).size!==jobs.length||
+      new Set(jobs.map(j=>j.name)).size!==jobs.length||
+      jobs.some(j=>!positiveInteger(j.id)||j.run_id!==r.id||!allowed.has(j.name)))throw Error('CI_JOB_PROOF_INVALID');
+    if(r.status==='completed'&&jobs.every(j=>j.status==='completed'))cache.set(key,payload);
+    const source=jobs.filter(j=>j.name===SOURCE_JOB),approval=jobs.filter(j=>j.name===APPROVAL_JOB);
+    if(approval.length===1&&source.length===0){
+      if(approval[0].status!=='completed'||approval[0].conclusion!=='skipped')throw Error('CI_JOB_PROOF_INVALID');
+      continue; // Positive approval-only identity is never source-CI evidence.
+    }
+    if(source.length!==1||approval.length)throw Error('CI_JOB_PROOF_INVALID');
+    // The first genuine/unknown source candidate is terminal: no older-green fallback.
+    return r.status==='completed'&&r.conclusion==='success'&&source[0].status==='completed'&&source[0].conclusion==='success';
+  }
+  return false;
+}
 // Adapters are injected only for offline qualification. The CLI below supplies
 // the real runner event/API/protection adapters, never a synthetic environment.
-export async function qualifyReaderInvocation({context,loadPr,loadRuns,checkProtection,
+export async function qualifyReaderInvocation({context,loadPr,loadRuns,loadRunJobs,checkProtection,
   wait=ms=>new Promise(r=>setTimeout(r,ms)),attempts=20}){
   const sha=invocationCandidate(context);
-  if(!approved(await loadPr(),sha))throw Error('EXACT_OWNER_UAT_GO_MISSING_OR_STALE');
+  const liveApproved=pr=>approved(pr,sha)&&(!approvalEvent(context)||pr.body===context.event.pull_request.body);
+  const jobCache=new Map();
+  if(!liveApproved(await loadPr()))throw Error('EXACT_OWNER_UAT_GO_MISSING_OR_STALE');
   for(let i=0;i<attempts;i++){
     const runs=await loadRuns(sha);
-    const complete=ciState(runs,sha)&&(context.eventName!=='workflow_dispatch'||
-      latestSuccessful(runs,sha,'.github/workflows/getacourt-federated-search-ci.yml'));
+    const complete=ciState(runs,sha)&&(!(context.eventName==='workflow_dispatch'||approvalEvent(context))||
+      await genuineFederatedCi(runs,sha,context,loadRunJobs,jobCache));
     if(complete){
-      if(!approved(await loadPr(),sha))throw Error('PR_CHANGED');
+      if(!liveApproved(await loadPr()))throw Error('PR_CHANGED');
       if(await checkProtection('https://deploy-preview-5--getacourt-preview.netlify.app/')!==401)
         throw Error('EXISTING_NONPRODUCTION_PROTECTION_UNVERIFIED');
-      if(!approved(await loadPr(),sha))throw Error('PR_CHANGED');
+      if(!liveApproved(await loadPr()))throw Error('PR_CHANGED');
       return sha;
     }
     if(i===attempts-1)throw Error('REQUIRED_CI_NOT_GREEN');
@@ -246,9 +321,12 @@ async function gate(){
   const context={eventName:process.env.GITHUB_EVENT_NAME,repository:process.env.GITHUB_REPOSITORY,
     ref:process.env.GITHUB_REF,workflowSha:process.env.GITHUB_SHA,sourceSha:process.env.SOURCE_SHA,
     browserResult:process.env.READER_BROWSER_RESULT,
+    actor:process.env.GITHUB_ACTOR,triggeringActor:process.env.GITHUB_TRIGGERING_ACTOR,
+    runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,
     event:JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH,'utf8'))};
   await qualifyReaderInvocation({context,loadPr:()=>api('/pulls/5'),
     loadRuns:async sha=>(await api('/actions/runs?head_sha='+sha+'&event=pull_request&per_page=100')).workflow_runs??[],
+    loadRunJobs:(id,attempt)=>api('/actions/runs/'+id+'/attempts/'+attempt+'/jobs?per_page=100'),
     checkProtection:async url=>{
       const r=await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(15000)});
       await r.body?.cancel();return r.status;
