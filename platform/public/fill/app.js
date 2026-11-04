@@ -105,7 +105,11 @@
     const token = state.token, epoch = state.authEpoch, readEpoch = state.readEpoch;
     const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
     let body = {};
-    try { body = await response.json(); } catch {}
+    try { body = await response.json(); } catch {
+      // A successful Calendar response must not turn a decode failure into
+      // an empty snapshot. Other views and HTTP-error handling stay unchanged.
+      if (expectedCalendarEpoch !== null && response.ok) body = null;
+    }
     // A response from a previous login must never clear or rehydrate a newer session.
     if (epoch !== state.authEpoch || token !== state.token) throw Error("STALE_SESSION");
     // An older tenant/date read must never revoke the session after navigation.
@@ -309,12 +313,17 @@
     let calendar;
     try {
       calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, calendarEpoch);
+      if (!calendar || typeof calendar !== "object" || Array.isArray(calendar) ||
+          !["bookings", "holds", "blocks"].every((key) => Array.isArray(calendar[key])))
+        throw Error("Unable to load Calendar. Try again.");
     } catch (error) {
       // Network failures, unlike HTTP responses, bypass api()'s epoch check.
       // Never show an error from a club/date/session the operator has left.
       if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
           calendarEpoch !== state.calendarEpoch || state.view !== "calendar" ||
           state.org !== org || state.today !== day) return;
+      state.calendar = null;
+      el.timeline.innerHTML = "";
       throw error;
     }
     if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
