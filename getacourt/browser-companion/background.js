@@ -1,5 +1,5 @@
 importScripts("capture.js","observation.js","playtomic-club-catalog.js");
-const VERSION="0.4.2";
+const VERSION="0.4.3";
 // Exact owner-authorised, Team Login protected static UAT receiver. Public
 // promotion remains separate; the public search-all path is not deployed yet.
 const COMPARISON_PAGE="https://get-pr5-reader-uat--getacourt-preview.netlify.app/find.html";
@@ -33,7 +33,9 @@ const errors=Object.freeze({
   COMPARISON_EXPIRED:"The prepared observation expired. Search the club again.",
   COMPARISON_PAGE_REQUIRED:"Open the protected GetACourt personal search page in this browser, then use this extension icon.",
   COMPARISON_DELIVERY_FAILED:"The GetACourt page could not receive the observation. No offers were shared.",
-  READ_FAILED:"The search could not be completed. No offers were shared."
+  READ_FAILED:"The search could not be completed. No offers were shared.",
+  SEARCH_DEADLINE:"The search time limit was reached. Unchecked clubs remain unverified.",
+  OBSERVATION_EXPIRED:"The observed offers expired before delivery."
 });
 const fail=code=>{throw Object.assign(new Error("Reader unavailable"),{readerCode:code});};
 const unavailable=error=>{
@@ -226,6 +228,7 @@ async function deliverComparison(nonce,sender){
 }
 async function disconnect(){
   generation++;
+  if(mainOperation)retireMainOperation(mainOperation,"CONSENT_WITHDRAWN");
   return consentOperation(async()=>{
     await clearConsent();
   return {status:"disconnected",version:VERSION};
@@ -236,6 +239,7 @@ async function approve(){
   if(!sourceAllowed(tab?.url))fail("CLUB_PAGE_REQUIRED");
   const u=new URL(tab?.url||"about:blank"),source=u.origin+u.pathname;
   generation++;
+  if(mainOperation)retireMainOperation(mainOperation,"CONSENT_WITHDRAWN");
   return consentOperation(async()=>{
     await clearConsent();
     await chrome.storage.local.set({approvedSource:source});
@@ -245,8 +249,9 @@ async function approve(){
 }
 // Chrome stores the player's native Playtomic session. No cookies, passwords or
 // tokens are read or copied into GetACourt. The remembered club URL is not auth.
-async function waitForPage(tabId) {
+async function waitForPage(tabId,operation) {
   const tab=await chrome.tabs.get(tabId);
+  if(operation)checkMainOperation(operation);
   if(tab.status==="complete")return;
   await new Promise((resolve,reject)=>{
     let done=false;
@@ -255,6 +260,7 @@ async function waitForPage(tabId) {
     const onUpdate=(id,change)=>{if(id===tabId&&change.status==="complete")finish();};
     const deadline=setTimeout(()=>finish(Error("TAB_LOAD_TIMEOUT")),15000);
     chrome.tabs.onUpdated.addListener(onUpdate);
+    if(operation)operation.stopped.then(()=>finish(Object.assign(Error("Search stopped"),{readerCode:operation.reason||"SEARCH_DEADLINE"})));
     chrome.tabs.get(tabId).then(t=>{if(t.status==="complete")finish();}).catch(finish);
   });
 }
@@ -308,57 +314,184 @@ function multiPlaytomicQueryValid(query){
   const {location,...filters}=query;
   return queryValid(filters)&&!!location.trim();
 }
-async function autoSearchPlaytomicClubsFromGet(query){
+// A retired operation continues to own late/unresolved browser calls. It cannot
+// grant a new search until its own resources and outstanding work are settled.
+let mainOperation=null;
+const mainNonces=new Map();
+const MAIN_RESPONSE_MARGIN=2000;
+const MAIN_CLUB_BUDGET=15000+200+6000+6000+1080;
+const mainNonceAllowed=value=>typeof value==="string"&&/^[a-f0-9]{48}$/.test(value);
+function pruneMainNonces(now){
+  for(const [key,expiry] of mainNonces)if(expiry<=now)mainNonces.delete(key);
+}
+function releaseMainOperation(operation){
+  if(mainOperation===operation&&operation.retired&&!operation.uncertain&&
+     !operation.pending.size&&!operation.cleaning.size&&
+     !operation.tabs.size&&!operation.windows.size){
+    mainOperation=null;autoBusy=false;
+  }
+}
+function removeMainResource(operation,key,remove,confirmed){
+  if(operation.attempted.has(key))return;
+  operation.attempted.add(key);operation.cleaning.add(key);
+  Promise.resolve().then(remove).then(confirmed).catch(()=>{
+    // Retain ownership after an unconfirmed cleanup. No automatic retry.
+  }).finally(()=>{operation.cleaning.delete(key);releaseMainOperation(operation);});
+}
+function cleanMainOperation(operation){
+  for(const id of operation.windows){
+    if(typeof chrome.windows.remove!=="function"){operation.uncertain=true;continue;}
+    removeMainResource(operation,"window:"+id,()=>chrome.windows.remove(id),()=>{
+      operation.windows.delete(id);
+      for(const [tab,window] of operation.tabs)if(window===id)operation.tabs.delete(tab);
+    });
+  }
+  for(const [id,window] of operation.tabs){
+    if(operation.windows.has(window))continue;
+    if(typeof chrome.tabs.remove!=="function"){operation.uncertain=true;continue;}
+    removeMainResource(operation,"tab:"+id,()=>chrome.tabs.remove(id),()=>operation.tabs.delete(id));
+  }
+  releaseMainOperation(operation);
+}
+function retireMainOperation(operation,reason=null){
+  if(operation.retired)return;
+  operation.retired=true;operation.reason=reason;clearTimeout(operation.timer);
+  operation.stop();
+  if(Number.isInteger(operation.collector)){
+    const token={};operation.pending.add(token);
+    Promise.resolve().then(()=>chrome.tabs.sendMessage(operation.collector,{
+      action:"cancelPersonalSearch",nonce:operation.nonce
+    })).catch(()=>{}).finally(()=>{
+      operation.pending.delete(token);releaseMainOperation(operation);
+    });
+  }
+  cleanMainOperation(operation);
+}
+function checkMainOperation(operation){
+  if(!operation.retired&&(operation.epoch!==generation||consentPending))
+    retireMainOperation(operation,"CONSENT_WITHDRAWN");
+  if(!operation.retired&&Date.now()>=operation.cutoff)
+    retireMainOperation(operation,"SEARCH_DEADLINE");
+  if(operation.retired)fail(operation.reason||"SEARCH_DEADLINE");
+}
+function awaitMainOperation(operation,run,remember){
+  checkMainOperation(operation);
+  const token={};operation.pending.add(token);
+  const pending=Promise.resolve().then(()=>{
+    checkMainOperation(operation);return run();
+  }).then(value=>{if(remember)remember(value);return value;}).finally(()=>{
+    operation.pending.delete(token);
+    if(operation.retired)cleanMainOperation(operation);
+  });
+  return Promise.race([pending,operation.stopped.then(()=>{
+    fail(operation.reason||"SEARCH_DEADLINE");
+  })]);
+}
+function beginMainOperation(message,sender){
+  const {nonce,deadlineAt}=message,now=Date.now();
+  const key=sender.tab.id+":"+nonce;
+  pruneMainNonces(now);
+  if(!mainNonceAllowed(nonce)||
+     !Number.isSafeInteger(deadlineAt)||deadlineAt<=now||deadlineAt>now+45000||
+     mainNonces.has(key))fail("REQUEST_REJECTED");
+  if(busy||autoBusy||consentPending||mainOperation||mainNonces.size>=32)fail("READ_BUSY");
+  mainNonces.set(key,deadlineAt);
+  const operation={nonce,page:sender.tab.id,cutoff:deadlineAt-MAIN_RESPONSE_MARGIN,
+    epoch:generation,retired:false,reason:null,uncertain:false,collector:null,
+    pending:new Set(),cleaning:new Set(),attempted:new Set(),tabs:new Map(),windows:new Set()};
+  operation.stopped=new Promise(resolve=>{operation.stop=resolve;});
+  mainOperation=operation;autoBusy=true;
+  operation.timer=setTimeout(()=>retireMainOperation(operation,"SEARCH_DEADLINE"),
+    Math.max(0,operation.cutoff-now));
+  return operation;
+}
+function cancelMainOperation(nonce,sender){
+  const operation=mainOperation;
+  if(!mainNonceAllowed(nonce))fail("REQUEST_REJECTED");
+  if(!operation||operation.retired||operation.nonce!==nonce||operation.page!==sender.tab.id){
+    // Reject an unknown cancellation while retiring that sender's possible
+    // reordered start. It cannot cancel another tab's operation or extend life.
+    const now=Date.now(),key=sender.tab.id+":"+nonce;
+    pruneMainNonces(now);
+    if(!mainNonces.has(key)&&mainNonces.size<32)mainNonces.set(key,now+45000);
+    fail("REQUEST_REJECTED");
+  }
+  retireMainOperation(operation,"CONSENT_WITHDRAWN");
+  return {status:"cancelled",version:VERSION};
+}
+async function autoSearchPlaytomicClubsFromGet(message,sender){
+  const {query}=message;
   if(!multiPlaytomicQueryValid(query))fail("QUERY_INVALID");
-  if(busy||autoBusy||consentPending)fail("READ_BUSY");
-  autoBusy=true;
-  const epoch=generation;
-  let tempWindow=null,tempTab=null;
+  const operation=beginMainOperation(message,sender);
+  let tempWindow=null,clubs=[];
+  const results=[];
+  const partial=()=>({status:"partial",sources:results.map(row=>{
+    if(row.status!=="observed")return row;
+    const age=Date.now()-Date.parse(row.observation.capturedAt);
+    return !Number.isFinite(age)||age>=60000||age< -5000
+      ?{provider:row.provider,sourceUrl:row.sourceUrl,status:"unavailable",code:"OBSERVATION_EXPIRED"}:row;
+  }),coverage:"bounded_reviewed_club_pages_only",version:VERSION});
+  const incomplete=()=>{
+    for(const club of clubs.slice(results.length))results.push({provider:"playtomic",
+      sourceUrl:club.sourceUrl,status:"unavailable",code:"SEARCH_DEADLINE"});
+    return partial();
+  };
   try{
-    const {approvedSource}=await chrome.storage.local.get("approvedSource");
+    const {approvedSource}=await awaitMainOperation(operation,()=>chrome.storage.local.get("approvedSource"));
     if(!sourceAllowed(approvedSource))fail("CONNECT_REQUIRED");
-    if(!await chrome.permissions.contains({origins:["https://playtomic.com/*"]}))
+    if(!await awaitMainOperation(operation,()=>chrome.permissions.contains({origins:["https://playtomic.com/*"]})))
       fail("SITE_ACCESS_REQUIRED");
     const registry=globalThis.GetACourtPlaytomicClubCatalog;
     if(!registry||typeof registry.matching!=="function")fail("READ_FAILED");
-    const clubs=registry.matching(query);
+    clubs=registry.matching(query);
     if(!Array.isArray(clubs)||clubs.length>4)fail("READ_FAILED");
     if(!clubs.length)return {status:"partial",sources:[],coverage:"no_reviewed_club_in_area",version:VERSION};
     if(clubs.some(c=>!sourceAllowed(c.sourceUrl)))fail("CLUB_PAGE_REQUIRED");
-    const {lastAttempt=0}=await chrome.storage.session.get("lastAttempt");
+    const {lastAttempt=0}=await awaitMainOperation(operation,()=>chrome.storage.session.get("lastAttempt"));
     if(Date.now()-lastAttempt<60000)fail("RATE_LIMITED");
-    await chrome.storage.session.set({lastAttempt:Date.now()});
+    await awaitMainOperation(operation,()=>chrome.storage.session.set({lastAttempt:Date.now()}));
     const providerQuery={date:query.date,sport:query.sport,from:query.from,to:query.to,
       durationMinutes:query.durationMinutes};
-    const results=[];
     for(const club of clubs){
-      if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+      checkMainOperation(operation);
+      if(operation.cutoff-Date.now()<MAIN_CLUB_BUDGET)return incomplete();
       const result={provider:"playtomic",sourceUrl:club.sourceUrl,
         status:"unavailable",code:"READ_FAILED"};
       try{
         let tab;
         // Only our OWN temporary worker window is compacted or closed.
         if(tempWindow===null){
-          tab=await chrome.tabs.create({url:club.sourceUrl,active:false});
-          tempTab=tab.id;
-          const window=await chrome.windows.create({
+          tab=await awaitMainOperation(operation,()=>chrome.tabs.create({url:club.sourceUrl,active:false}),created=>{
+            if(!Number.isInteger(created?.id)){operation.uncertain=true;fail("READ_FAILED");}
+            operation.tabs.set(created.id,null);
+          });
+          const window=await awaitMainOperation(operation,()=>chrome.windows.create({
             tabId:tab.id,type:"normal",width:480,height:850,focused:false
+          }),created=>{
+            if(!Number.isInteger(created?.id)){operation.uncertain=true;fail("READ_FAILED");}
+            operation.windows.add(created.id);
+            if(operation.tabs.has(tab.id))operation.tabs.set(tab.id,created.id);
           });
           tempWindow=window.id;
         }else{
-          tab=await chrome.tabs.create({
+          tab=await awaitMainOperation(operation,()=>chrome.tabs.create({
             url:club.sourceUrl,active:false,windowId:tempWindow
+          }),created=>{
+            if(!Number.isInteger(created?.id)){operation.uncertain=true;fail("READ_FAILED");}
+            operation.tabs.set(created.id,tempWindow);
           });
         }
-        await waitForPage(tab.id);
-        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
-        await chrome.scripting.executeScript({
+        await awaitMainOperation(operation,()=>waitForPage(tab.id,operation));
+        operation.collector=tab.id;
+        await awaitMainOperation(operation,()=>chrome.scripting.executeScript({
           target:{tabId:tab.id},files:["capture.js","search.js"]
-        });
-        const rows=await chrome.scripting.executeScript({
-          target:{tabId:tab.id},func:async q=>searchPlaytomic(q),args:[providerQuery]
-        });
-        if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
+        }));
+        const rows=await awaitMainOperation(operation,()=>chrome.scripting.executeScript({
+          target:{tabId:tab.id},func:async(q,lifetime)=>searchPlaytomic(q,lifetime),
+          args:[providerQuery,{nonce:operation.nonce,deadlineAt:operation.cutoff}]
+        }));
+        operation.collector=null;
+        checkMainOperation(operation);
         const observed=rows?.find(x=>x.frameId===0)?.result;
         if(observed?.readerError)fail(observed.readerError);
         if(!observed||observed.sourceUrl!==club.sourceUrl||
@@ -367,20 +500,18 @@ async function autoSearchPlaytomicClubsFromGet(query){
         result.observation=globalThis.GetACourtPersonalSourceObservation.validateObservation(observed);
         result.status="observed";delete result.code;
       }catch(error){
+        if(operation.retired)throw error;
         result.code=Object.hasOwn(errors,error?.readerCode)?error.readerCode:"READ_FAILED";
       }
       results.push(result);
       // One failure must not blank another club's genuine observation.
     }
-    return {status:"partial",sources:results,
-      coverage:"bounded_reviewed_club_pages_only",version:VERSION};
+    return partial();
+  }catch(error){
+    if(operation.reason==="SEARCH_DEADLINE"&&clubs.length)return incomplete();
+    throw error;
   }finally{
-    if(Number.isInteger(tempWindow)&&typeof chrome.windows.remove==="function"){
-      try{await chrome.windows.remove(tempWindow);}catch{}
-    }else if(Number.isInteger(tempTab)&&typeof chrome.tabs.remove==="function"){
-      try{await chrome.tabs.remove(tempTab);}catch{}
-    }
-    autoBusy=false;
+    retireMainOperation(operation,operation.reason);
   }
 }
 
@@ -460,7 +591,8 @@ async function handle(message,sender){
   }
   const role=caller(sender);
   const actionKeys=Object.freeze({status:["action"],revoke:["action"],approve:["action"],open:["action"],read:["action"],
-    search:["action","query"],autoSearchFromGet:["action","query"],autoSearchPlaytomicClubsFromGet:["action","query"],autoStatus:["action"],
+    search:["action","query"],autoSearchFromGet:["action","query"],autoSearchPlaytomicClubsFromGet:["action","query","nonce","deadlineAt"],
+    cancelPlaytomicSearchFromGet:["action","nonce"],autoStatus:["action"],
     autoSearchAdditionalFromGet:["action","query"],approveAdditional:["action"],
     showClub:["action"],prepareComparison:["action","observation"],
     enableComparisonBridge:["action"],pageBridgeReady:["action","nonce"]});
@@ -469,7 +601,14 @@ async function handle(message,sender){
   if(message.action==="status")return status();
   if(message.action==="autoStatus"&&role==="page")return autoStatus();
   if(message.action==="autoSearchFromGet"&&role==="page")return autoSearchFromGet(message.query);
-  if(message.action==="autoSearchPlaytomicClubsFromGet"&&role==="page")return autoSearchPlaytomicClubsFromGet(message.query);
+  if(message.action==="autoSearchPlaytomicClubsFromGet"&&role==="page"){
+    if(Object.keys(message).sort().join(",")!=="action,deadlineAt,nonce,query")fail("REQUEST_REJECTED");
+    return autoSearchPlaytomicClubsFromGet(message,sender);
+  }
+  if(message.action==="cancelPlaytomicSearchFromGet"&&role==="page"){
+    if(Object.keys(message).sort().join(",")!=="action,nonce")fail("REQUEST_REJECTED");
+    return cancelMainOperation(message.nonce,sender);
+  }
   if(message.action==="autoSearchAdditionalFromGet"&&role==="page")return autoSearchAdditionalFromGet(message.query);
   if(message.action==="approveAdditional"&&role==="popup")return approveAdditional();
   if(message.action==="revoke")return disconnect();

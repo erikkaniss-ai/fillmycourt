@@ -2,6 +2,7 @@
 // Fictional source UI only. No provider contact, account harvesting, booking,
 // hidden APIs, background poll, or invented availability.
 import test from 'node:test';
+import './playtomic-deadline-lifecycle.test.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
@@ -84,7 +85,12 @@ function driver({grant=true,failSet=new Set(),forgedSource=null}={}){
  vm.runInContext(catalog,ctx);
  vm.runInContext(observations,ctx);
  vm.runInContext(background,ctx);
- const send=message=>new Promise(resolve=>handlers.message(message,page,resolve));
+ let nonceSequence=0;
+ const send=message=>{
+   if(message.action==='autoSearchPlaytomicClubsFromGet')message={
+     nonce:(++nonceSequence).toString(16).padStart(48,'0'),deadlineAt:Date.now()+45000,...message};
+   return new Promise(resolve=>handlers.message(message,page,resolve));
+ };
  return{send,local,session,created,removed,calls,get captures(){return captures;},
   catalog:ctx.GetACourtPlaytomicClubCatalog,setGranted:v=>approved=v};
 }
@@ -154,6 +160,7 @@ test('forged provider origin, revoked grant and time budget all fail closed with
  assert.equal(first.sources[1].code,'SCHEDULE_NOT_READY');
  assert.equal(first.sources.filter(s=>s.status==='observed').length,3);
  const count=d.created.length;
+ await new Promise(resolve=>setImmediate(resolve));
  const second=await d.send({action:'autoSearchPlaytomicClubsFromGet',query:query()});
  assert.equal(second.code,'RATE_LIMITED');
  assert.equal(d.created.length,count);

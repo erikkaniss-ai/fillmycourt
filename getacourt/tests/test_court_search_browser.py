@@ -136,7 +136,7 @@ def test_late_court_reader_reply_cannot_cross_into_an_event_intention(browser_pa
     page.get_by_role('button',name='Join a game',exact=True).click()
     page.evaluate("""({nonce,observation}) => {
       window.dispatchEvent(new CustomEvent('gac:auto-search-response',{detail:{nonce,
-        result:{version:'0.4.2',status:'observed',observation}}}));
+        result:{version:'0.4.3',status:'observed',observation}}}));
     }""",{'nonce':nonce,'observation':record})
     expect(page.locator('#offers .card')).to_have_count(0)
     expect(page.locator('#offers')).not_to_contain_text('FICTIONAL COURT 1')
@@ -282,7 +282,7 @@ def test_real_ttl_clears_map_cards_and_late_reply_cannot_cross_demo_boundary(bro
     record=sample(page)
     page.get_by_role('button',name='Explore demo',exact=True).click()
     page.evaluate("""record => window.dispatchEvent(new CustomEvent('gac:auto-search-response',{
-      detail:{nonce:window.qaOldNonce,result:{status:'observed',version:'0.4.2',observation:record}}
+      detail:{nonce:window.qaOldNonce,result:{status:'observed',version:'0.4.3',observation:record}}
     }))""",record)
     assert page.locator('[data-offer-kind="real"]').count()==0
     expect(page.locator('#offers')).not_to_contain_text('FICTIONAL COURT 1')
@@ -432,7 +432,7 @@ def test_one_click_receives_personal_result_without_manual_import(browser_page,f
           {detail:{nonce:event.detail.nonce,result:{status:'unavailable',
             code:'REQUEST_REJECTED',version:'0.2.3'}}}));
         window.dispatchEvent(new CustomEvent('gac:auto-search-response',
-          {detail:{nonce:event.detail.nonce,result:{status:'observed',observation:record,version:'0.4.2'}}}));
+          {detail:{nonce:event.detail.nonce,result:{status:'observed',observation:record,version:'0.4.3'}}}));
       });
     }""",record)
     page.get_by_role('button',name='Find courts',exact=True).click()
@@ -456,7 +456,7 @@ def test_auto_search_provider_login_expiry_is_explicit(browser_page,fixture_url)
           {detail:{nonce:event.detail.nonce}}));
         window.dispatchEvent(new CustomEvent('gac:auto-search-response',
           {detail:{nonce:event.detail.nonce,
-           result:{status:'unavailable',code:'CHALLENGE_REQUIRED',version:'0.4.2'}}}));
+           result:{status:'unavailable',code:'CHALLENGE_REQUIRED',version:'0.4.3'}}}));
       });
     }""")
     page.get_by_role('button',name='Find courts',exact=True).click()
@@ -487,7 +487,7 @@ def test_one_find_combines_multiple_personal_playtomic_clubs_without_fabricating
         const nonce=ev.detail.nonce;
         window.dispatchEvent(new CustomEvent('gac:auto-search-accepted',{detail:{nonce}}));
         window.dispatchEvent(new CustomEvent('gac:auto-search-response',{detail:{
-          nonce,result:{status:'partial',version:'0.4.2',coverage:'bounded_reviewed_club_pages_only',sources:[
+          nonce,result:{status:'partial',version:'0.4.3',coverage:'bounded_reviewed_club_pages_only',sources:[
             {provider:'playtomic',sourceUrl:data.good.sourceUrl,
              status:'observed',observation:data.good},
             {provider:'playtomic',sourceUrl:data.other.sourceUrl,
@@ -568,7 +568,7 @@ def visible_price_fixture(page, context, base_url, minutes, rows, *, hold=False)
         const source=observation.readerError
           ?{provider:'tiesports',status:'unavailable',code:observation.readerError}
           :{provider:'tiesports',status:'observed',observation};
-        qa.pending={nonce:event.detail.nonce,result:{version:'0.4.2',status:'partial',sources:[source]}};
+        qa.pending={nonce:event.detail.nonce,result:{version:'0.4.3',status:'partial',sources:[source]}};
         if(!qa.hold)queueMicrotask(()=>qa.deliver());
       });
       window.addEventListener('gac:auto-search-request',event=>{

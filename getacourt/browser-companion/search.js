@@ -1,11 +1,15 @@
 // User-requested presentation/filter changes only. Never activate Book or checkout.
-async function searchPlaytomic(query) {
+async function searchPlaytomic(query,lifetime) {
   const fail=code=>{throw Object.assign(new Error("Search unavailable"),{readerCode:code});};
   const visible=e=>!!e&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=="hidden";
-  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,lifetime?Math.max(0,Math.min(ms,lifetime.deadlineAt-Date.now())):ms));
   let canceled=false,cancelWait;
-  const cancel=(message,sender)=>{if(sender.id===chrome.runtime.id&&message?.action==="cancelPersonalSearch"){canceled=true;cancelWait?.();}};
-  const check=()=>{if(canceled)fail("CONSENT_WITHDRAWN");};
+  const cancel=(message,sender)=>{if(sender.id===chrome.runtime.id&&message?.action==="cancelPersonalSearch"&&
+    (lifetime?message.nonce===lifetime.nonce:message.nonce===undefined)){canceled=true;cancelWait?.();}};
+  const check=()=>{
+    if(canceled)fail("CONSENT_WITHDRAWN");
+    if(lifetime&&Date.now()>=lifetime.deadlineAt)fail("SEARCH_DEADLINE");
+  };
   const challenge=()=>[...document.querySelectorAll('input[type="password"],input[autocomplete="one-time-code"],iframe[src*="recaptcha"],iframe[src*="hcaptcha"],[id*="captcha"]')].some(visible);
   const minutes=label=>{
     const m=/^(\d{1,2}):(\d{2}) ([AP]M)$/.exec(label);
@@ -14,6 +18,10 @@ async function searchPlaytomic(query) {
   };
   chrome.runtime.onMessage.addListener(cancel);
   try {
+    if(lifetime!==undefined&&(!lifetime||typeof lifetime!=="object"||Array.isArray(lifetime)||
+       Object.keys(lifetime).sort().join(",")!=="deadlineAt,nonce"||
+       typeof lifetime.nonce!=="string"||!/^[a-f0-9]{48}$/.test(lifetime.nonce)||
+       !Number.isSafeInteger(lifetime.deadlineAt)||lifetime.deadlineAt>Date.now()+45000))fail("QUERY_INVALID");
     const url=new URL(location.href);
     if(url.origin!=="https://playtomic.com"||!/^\/clubs\/[a-z0-9-]+$/.test(url.pathname))fail("CLUB_PAGE_REQUIRED");
     if(!query||!/^\d{4}-\d{2}-\d{2}$/.test(query.date)||!["Padel","Tennis"].includes(query.sport)||
@@ -55,7 +63,7 @@ async function searchPlaytomic(query) {
       const observer=new MutationObserver(changed);
       cancelWait=()=>finish("CONSENT_WITHDRAWN");
       observer.observe(region,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-busy","class","hidden"]});
-      deadline=setTimeout(()=>finish("SCHEDULE_NOT_READY"),6000);
+      deadline=setTimeout(()=>finish("SCHEDULE_NOT_READY"),lifetime?Math.max(0,Math.min(6000,lifetime.deadlineAt-Date.now())):6000);
       changed();
     });
     let problem=await settle();check();if(problem)fail(problem);
@@ -122,7 +130,7 @@ async function searchPlaytomic(query) {
     check();
     return result;
   } catch(error) {
-    const allowed=["CLUB_PAGE_REQUIRED","QUERY_INVALID","COMPACT_VIEW_REQUIRED","CHALLENGE_REQUIRED","SCHEDULE_NOT_READY","OFFER_SECTION_MISSING","DATE_AMBIGUOUS","SPORT_AMBIGUOUS","VENUE_MISSING","NO_EXPANDED_OFFERS","OFFER_FORMAT_CHANGED","CONSENT_WITHDRAWN"];
+    const allowed=["CLUB_PAGE_REQUIRED","QUERY_INVALID","COMPACT_VIEW_REQUIRED","CHALLENGE_REQUIRED","SCHEDULE_NOT_READY","OFFER_SECTION_MISSING","DATE_AMBIGUOUS","SPORT_AMBIGUOUS","VENUE_MISSING","NO_EXPANDED_OFFERS","OFFER_FORMAT_CHANGED","CONSENT_WITHDRAWN","SEARCH_DEADLINE"];
     return {readerError:allowed.includes(error?.readerCode)?error.readerCode:"READ_FAILED"};
   } finally {chrome.runtime.onMessage.removeListener(cancel);}
 }

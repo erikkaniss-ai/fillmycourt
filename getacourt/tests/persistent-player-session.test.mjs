@@ -57,7 +57,12 @@ function fixture({approvedSource=source,activeSource=source,grant=true,previousS
           vm.runInContext(readFileSync(new URL(file,base),'utf8'),context);
     }});
   vm.runInContext(script,context);
-  const call=(message,from=sender)=>new Promise(resolve=>handlers.internal(message,from,resolve));
+  let nonceSequence=0;
+  const call=(message,from=sender)=>{
+    if(message.action==='autoSearchPlaytomicClubsFromGet')message={
+      nonce:(++nonceSequence).toString(16).padStart(48,'0'),deadlineAt:Date.now()+45000,...message};
+    return new Promise(resolve=>handlers.internal(message,from,resolve));
+  };
   return {call,session,local,created,windows,permissionChecks,operations,get searchCount(){return searchCount;}};
 }
 
@@ -189,7 +194,7 @@ test('a saved Racket grant stays paused across worker restart without affecting 
   for(const f of [original,restarted]){
     const before=JSON.stringify(f.local);
     const result=await f.call({action:'autoSearchAdditionalFromGet',query:{...query,location:'Cascais'}});
-    assert.equal(result.version,'0.4.2');
+    assert.equal(result.version,'0.4.3');
     assert.deepEqual(JSON.parse(JSON.stringify(result.sources)),[
       {provider:'racket_id',status:'unavailable',code:'SAFETY_REVIEW_REQUIRED'}
     ]);
@@ -223,8 +228,8 @@ test('site permission is optional and Get relay is limited to the exact protecte
     'https://racket.id/*','https://smashpro.pt/*','https://www.matchi.se/*'
   ]);
   assert.equal(manifest.host_permissions,undefined);
-  assert.equal(manifest.version,'0.4.2');
-  assert.match(script,/const VERSION="0\.4\.2"/);
+  assert.equal(manifest.version,'0.4.3');
+  assert.match(script,/const VERSION="0\.4\.3"/);
   assert.equal(manifest.externally_connectable,undefined);
   assert.deepEqual(manifest.content_scripts.map(x=>x.matches),[[getPage]]);
   assert.match(readFileSync(new URL('popup.js',base),'utf8'),/chrome\.permissions\.request/);
@@ -242,7 +247,7 @@ test('site permission is optional and Get relay is limited to the exact protecte
   }}},CustomEvent:class{constructor(type,init){this.type=type;this.detail=init.detail;}}};
   vm.runInNewContext(relay,context);
   assert.ok(listeners['gac:auto-search-request']);
-  listeners['gac:auto-search-request']({detail:{nonce:'a'.repeat(48),query:{
+  listeners['gac:auto-search-request']({detail:{nonce:'a'.repeat(48),deadlineAt:Date.now()+45000,query:{
     location:'Cascais',sport:'padel',date:'2026-10-29',from:'08:00',to:'23:00',duration:'90'}}});
   assert.equal(notifications[0].type,'gac:auto-search-accepted');
   const otherListeners={},otherWindow={
@@ -292,10 +297,13 @@ function relayThroughBackground(f,{href=getPage,topFrame=true,senderChanges={}}=
     messages.push(message);
     const result=f.call(message,from());pending.push(result);return result;
   }}},CustomEvent:class{constructor(type,options){this.type=type;this.detail=options.detail;}}});
-  const detail={nonce:'a'.repeat(48),query:{location:'Cascais',date:query.date,
+  const detail={nonce:'a'.repeat(48),deadlineAt:Date.now()+45000,query:{location:'Cascais',date:query.date,
     sport:'padel',from:'08:00',to:'23:00',duration:'90'}};
   return {listeners,events,messages,location,detail,from,
     async fire(name='gac:auto-search-request',value=detail){
+      if(name==='gac:additional-sources-request'&&value===detail){
+        const {deadlineAt,...additional}=detail;value=additional;
+      }
       listeners[name]?.({detail:value});
       await Promise.all(pending);await new Promise(resolve=>setImmediate(resolve));
       const response=name==='gac:auto-search-request'?'gac:auto-search-response':'gac:additional-sources-response';
@@ -306,7 +314,7 @@ function relayThroughBackground(f,{href=getPage,topFrame=true,senderChanges={}}=
 test('canonical and same-document fragments run actual relay/background only after an explicit valid Find',async()=>{
   for(const fragment of ['', '#results', '#search', '#', '#arbitrary?fragment=@value#tail']){
     const f=fixture({multiClub:true}),r=relayThroughBackground(f,{href:getPage+fragment});
-    assert.equal(Object.keys(r.listeners).length,2);
+    assert.equal(Object.keys(r.listeners).length,3);
     assert.equal(r.messages.length,0);assert.equal(f.operations.length,0);
     r.location.href=getPage+'#another-fragment';
     await r.fire('hashchange');
@@ -315,7 +323,7 @@ test('canonical and same-document fragments run actual relay/background only aft
     assert.equal(r.messages.length,0);assert.equal(f.operations.length,0);
     r.location.href=getPage+fragment;
     const result=await r.fire();
-    assert.equal(result.version,'0.4.2');assert.equal(result.status,'partial');
+    assert.equal(result.version,'0.4.3');assert.equal(result.status,'partial');
     assert.equal(result.sources.length,4);
     assert.ok(result.sources.every(row=>row.status==='observed'&&row.observation.provider==='playtomic'));
     assert.equal(f.searchCount,4);assert.equal(f.created.length,4);
@@ -380,7 +388,7 @@ test('fragment support preserves top-frame, runtime identity and page-sender req
 test('a valid fragment never bypasses the existing once-per-provider site grant',async()=>{
   const f=fixture({multiClub:true,grant:false}),r=relayThroughBackground(f,{href:getPage+'#results'});
   const result=await r.fire();
-  assert.equal(result.code,'SITE_ACCESS_REQUIRED');assert.equal(result.version,'0.4.2');
+  assert.equal(result.code,'SITE_ACCESS_REQUIRED');assert.equal(result.version,'0.4.3');
   assert.deepEqual(f.permissionChecks,['https://playtomic.com/*']);
   assert.equal(f.created.length,0);assert.equal(f.searchCount,0);
   assert.deepEqual(f.operations,['permission']);

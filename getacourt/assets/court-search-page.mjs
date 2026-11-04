@@ -22,7 +22,9 @@ function clearPending(){
   pendingBridge=null;
   delete document.documentElement.dataset.gacPersonalBridgeRequest;
 }
-function cancelAuto(){
+function cancelAuto(cancel=true){
+  if(cancel&&pendingAuto)window.dispatchEvent(new CustomEvent('gac:auto-search-cancel',
+    {detail:{nonce:pendingAuto.nonce}}));
   clearTimeout(autoAckTimer);clearTimeout(autoResultTimer);
   autoAckTimer=autoResultTimer=null;pendingAuto=null;
 }
@@ -33,11 +35,12 @@ function cancelAdditional(){
 const readerCodes=new Set(['REQUEST_REJECTED','CONNECT_REQUIRED','SITE_ACCESS_REQUIRED',
   'READ_BUSY','RATE_LIMITED','CONSENT_WITHDRAWN','QUERY_INVALID','READ_FAILED',
   'READER_UNAVAILABLE','CHALLENGE_REQUIRED','TAB_ACCESS_REQUIRED',
-  'COMPACT_VIEW_REQUIRED','NO_EXPANDED_OFFERS','OFFER_SECTION_MISSING','SCHEDULE_NOT_READY']);
+  'COMPACT_VIEW_REQUIRED','NO_EXPANDED_OFFERS','OFFER_SECTION_MISSING','SCHEDULE_NOT_READY',
+  'SEARCH_DEADLINE','OBSERVATION_EXPIRED']);
 const readerCode=result=>readerCodes.has(result?.code)?result.code:'UNKNOWN';
-// Pin the reviewed automatic Racket navigation contract; an unknown future or
-// legacy runtime is not evidence that it can perform this query safely.
-const compatibleReader='0.4.2';
+// Pin the reviewed request lifetime protocol. Old or unknown runtimes cannot
+// establish that this automatic query uses the required bounded operation.
+const compatibleReader='0.4.3';
 const returnedVersion=result=>typeof result?.version==='string'&&/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(result.version)
   ?result.version:null;
 const readerVersion=result=>returnedVersion(result)?' · Reader '+returnedVersion(result):' · Reader version not reported';
@@ -81,14 +84,17 @@ function autoError(result){
     NO_EXPANDED_OFFERS:'No explicit priced offers found in the inspected portion of this club. Other slots may exist.',
     OFFER_SECTION_MISSING:'Playtomic has changed its visible booking layout; offers could not be verified.',
     SCHEDULE_NOT_READY:'Playtomic did not confirm the requested date or sport. Search again later.',
-    READ_BUSY:'A Playtomic search is already running. Finish that search first.'
+    READ_BUSY:'A Playtomic search is already running. Finish that search first.',
+    SEARCH_DEADLINE:'The search time limit was reached. Unchecked clubs remain unverified.',
+    OBSERVATION_EXPIRED:'The observed offers expired before delivery. Search again when ready.'
   })[code]||'This provider search could not be verified ('+readerCode(result)+'). Check the Playtomic page or connection.';
 }
 function startAutomaticSearch(){
   if(!query||mode!=='real'||intent!=='courts')return;
   const nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join('');
   const incompatible=new Map(); // At most three versions across BOTH groups.
-  const request={nonce,query,revision,acked:false,incompatible,group:'playtomic',unsupported:false};
+  const deadlineAt=Date.now()+45000;
+  const request={nonce,query,revision,deadlineAt,acked:false,incompatible,group:'playtomic',unsupported:false};
   cancelAuto();cancelAdditional();pendingAuto=request;
   const extraRequest={nonce,query,revision,incompatible,group:'additional',unsupported:false};
   additionalPending=extraRequest;
@@ -115,7 +121,7 @@ function startAutomaticSearch(){
     personalStatus.textContent=readerDeadline(request,'Playtomic search');
     finishWaitingStatus();
   },45000);
-  window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query}}));
+  window.dispatchEvent(new CustomEvent('gac:auto-search-request',{detail:{nonce,query,deadlineAt}}));
 }
 window.addEventListener('gac:auto-search-accepted',event=>{
   const request=pendingAuto;
@@ -133,7 +139,7 @@ window.addEventListener('gac:auto-search-response',event=>{
       '; unsupported replies: '+incompatibleReply(request,detail.result)+'. Availability unverified.';
     return;
   }
-  cancelAuto();
+  cancelAuto(false);
   if(detail.result?.status==='observed'){
     // Compatibility with existing single-club reader in the protected beta.
     let raw;
@@ -146,6 +152,7 @@ window.addEventListener('gac:auto-search-response',event=>{
     // One first-party Playtomic site grant, several independently checked named
     // clubs. Absence of an offer from a club is NEVER a sold-out claim.
     const checked=detail.result.sources.slice(0,4);
+    const timeLimited=checked.some(result=>result?.code==='SEARCH_DEADLINE');
     let accepted=0,unavailable=0;
     for(const result of checked){
       if(result?.provider!=='playtomic'){unavailable++;continue;}
@@ -160,14 +167,16 @@ window.addEventListener('gac:auto-search-response',event=>{
       status.textContent='Compared '+checked.length+' reviewed Playtomic club(s); '+accepted+
         ' supplied fresh personally observed priced court offers. Confirm on the official site.';
       personalStatus.textContent=unavailable+
-        ' club(s) incomplete or unverified; no provider-wide sold-out conclusion.';
+        ' club(s) incomplete or unverified; '+(timeLimited?'search time limit reached. ':'')+
+        'No provider-wide sold-out conclusion.';
     }else if(checked.length===0){
       status.textContent='No reviewed Playtomic club in this exact area yet. Try Cascais, Parede, Carcavelos or Alcabideche.';
       personalStatus.textContent='No availability claim was made for unsupported areas.';
     }else{
       status.textContent='Checked '+checked.length+
         ' reviewed Playtomic club page(s), but no complete priced offer was verified.';
-      personalStatus.textContent='One or more clubs require a valid login, compatible booking layout or a different date. Other slots may exist.';
+      personalStatus.textContent=timeLimited?autoError({code:'SEARCH_DEADLINE'}):
+        'One or more clubs require a valid login, compatible booking layout or a different date. Other slots may exist.';
     }
   }else{
     personalStatus.textContent=autoError(detail.result)+readerVersion(detail.result);
