@@ -1866,7 +1866,7 @@ def test_f11_offline_ed25519_core_attestation_registry_and_security(fill_today):
     assert cancelled.json()["fixture_count"]==0
     assert cancelled.json()["billable"] is False
 @pytest.mark.parametrize("mode", ["keep", "revoke"])
-def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monkeypatch, mode):
+def test_fill_calendar_final_membership_contract(fill_today, capsys, monkeypatch, mode):
     from contextlib import ExitStack, contextmanager
     from threading import get_ident
 
@@ -1886,9 +1886,10 @@ def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monke
 
     trace = []
     state = {
-        "constructor_calls": 0, "user_contexts": 0, "role_calls": 0,
+        "constructor_calls": 0, "user_contexts": 0, "role_attempts": 0,
+        "role_successes": 0, "role_denials": 0, "denial_code": None, "denial_status": None,
         "trusted_closed": False, "user_closed": False, "deleted": 0,
-        "lifecycle_closed": False, "thread": None,
+        "lifecycle_closed": False, "thread": None, "user_exit": None,
     }
 
     class ConnectionObserver:
@@ -1913,7 +1914,7 @@ def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monke
             if phase == "role":
                 require(params.get("uid") == user_id, "Calendar native membership scope changed.")
             else:
-                require(state["role_calls"] == 1 and state["trusted_closed"],
+                require(state["role_successes"] >= 1 and state["trusted_closed"],
                         "Calendar payload preceded accepted role or committed hook.")
             trace.append(phase + "_entered")
             result = self.native.execute(statement, params)
@@ -1959,35 +1960,47 @@ def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monke
                     # Preserve an actual handler denial after original context
                     # unwinding, never substitute a role or an exception.
                     state["user_closed"] = True
+                    state["user_exit"] = "denial_unwound"
                     trace.append("user_closed")
                     raise
                 else:
                     state["user_closed"] = True
+                    state["user_exit"] = "normal"
                     trace.append("user_closed")
 
         def require_role(self, connection, org, uid, allowed=None):
             require(get_ident() == state["thread"], "Calendar role changed execution chain.")
             require(org == org_id and uid == user_id and allowed is None,
                     "Calendar role arguments changed.")
-            actual_role = store.require_role(connection, org, uid, allowed)
-            # Original Store.role/one has consumed the actual native row.
-            state["role_calls"] += 1
-            require(state["role_calls"] == 1 and actual_role == "owner",
-                    "Calendar initial native role observation is unsupported.")
-            trace.append("role_accepted")
-            if mode == "revoke":
-                deleted = self.trusted.execute(text("""
-                    delete from public.organization_members
-                    where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
-                """), {"org": org_id, "uid": user_id})
-                require(deleted.rowcount == 1, "Calendar membership mutation was inconclusive.")
-                state["deleted"] = deleted.rowcount
-                trace.append("member_deleted")
-            # Normal close commits only the preacquired trusted context. Success
-            # is recorded after it returns, before returning the real role.
-            self.trusted_stack.close()
-            state["trusted_closed"] = True
-            trace.append("trusted_closed")
+            state["role_attempts"] += 1
+            attempt = state["role_attempts"]
+            trace.append("role_attempted")
+            try:
+                actual_role = store.require_role(connection, org, uid, allowed)
+            except DomainError as denied:
+                state["role_denials"] += 1
+                state["denial_code"], state["denial_status"] = denied.code, denied.status
+                trace.append("role_denied")
+                raise  # Preserve the actual original denial, never synthesize it.
+            # Every success consumed the actual native membership row. Genuine
+            # later calls are delegated and return their own uncached scalar.
+            state["role_successes"] += 1
+            require(actual_role == "owner", "Calendar native role observation is unsupported.")
+            trace.append("role_accepted" if attempt == 1 else "role_rechecked")
+            if attempt == 1:
+                if mode == "revoke":
+                    deleted = self.trusted.execute(text("""
+                        delete from public.organization_members
+                        where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
+                    """), {"org": org_id, "uid": user_id})
+                    require(deleted.rowcount == 1, "Calendar membership mutation was inconclusive.")
+                    state["deleted"] = deleted.rowcount
+                    trace.append("member_deleted")
+                # One normal close, only after the initial actual role success.
+                # No second mutation, cached role or in-recheck checkout.
+                self.trusted_stack.close()
+                state["trusted_closed"] = True
+                trace.append("trusted_closed")
             return actual_role
 
         def __getattr__(self, name):
@@ -2034,17 +2047,21 @@ def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monke
         pytest.fail("Calendar native observation was inconclusive.", pytrace=False)
 
     require(state["trusted_closed"] and state["user_closed"] and state["lifecycle_closed"]
-            and state["user_contexts"] == 1 and state["role_calls"] == 1,
+            and state["user_contexts"] == 1 and state["role_attempts"] in (1, 2)
+            and state["role_successes"] + state["role_denials"] == state["role_attempts"],
             "Calendar native contexts or lifecycle did not complete.")
     require(state["deleted"] == (1 if mode == "revoke" else 0),
             "Calendar committed membership observation is incomplete.")
     expected = ["lifecycle_entered", "trusted_acquired", "user_acquired", "user_mode_confirmed",
-                "role_entered", "role_returned", "role_accepted"]
+                "role_attempted", "role_entered", "role_returned", "role_accepted"]
     if mode == "revoke":
         expected.append("member_deleted")
     expected += ["trusted_closed"]
     for phase in ("bookings", "holds", "blocks"):
         expected += [phase + "_entered", phase + "_returned"]
+    if state["role_attempts"] == 2:
+        expected += ["role_attempted", "role_entered", "role_returned",
+                     "role_denied" if state["role_denials"] else "role_rechecked"]
     expected += ["user_closed", "response_returned", "lifecycle_closed"]
     require(trace == expected, "Calendar post-role native payload trace was inconclusive.")
 
@@ -2060,16 +2077,44 @@ def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monke
                 "Calendar native observation exceeded its unchanged fixture scope.")
         outcome = "complete" if counts == (2, 0, 1) else "empty" if counts == (0, 0, 0) else "mixed"
     else:
-        require(mode == "revoke" and response.status_code in (401, 403),
+        require(mode == "revoke" and response.status_code == 403,
                 "Calendar native observation returned an unexpected HTTP result.")
         outcome, counts = "denied", None
     require(mode != "keep" or (response.status_code == 200 and counts == (2, 0, 1)),
             "Calendar unchanged-membership control failed.")
-    # Observation-green is not revocation/security acceptance. Zero holds does
-    # not qualify active-hold removal; no wire/hosted/deadline claim is made.
+    # Emit the actual baseline before the contract expectation: a genuine RED
+    # must be measured HTTP200/empty, not a fixture or missing-recheck assertion.
     cardinality = (" bookings=" + str(counts[0]) + " holds=" + str(counts[1]) + " blocks=" + str(counts[2])
                    if counts is not None else " collections=unreturned")
     with capsys.disabled():
         print("FILL_CALENDAR_POSTROLE_MEMBERSHIP_PG_OBSERVED case=" + mode + " outcome=" + outcome
               + " status=" + str(response.status_code) + cardinality
+              + " role_attempts=" + str(state["role_attempts"])
+              + " role_denials=" + str(state["role_denials"])
+              + " isolation=read_committed read_only=off trace=complete lifecycle=exited")
+    if mode == "revoke":
+        require(response.status_code == 403,
+                "Calendar revoked membership must return HTTP403 instead of a successful Calendar DTO.")
+        try:
+            denied_body = response.json()
+        except Exception:
+            pytest.fail("Calendar denial response was not supported JSON.", pytrace=False)
+        require(type(denied_body) is dict
+                and not any(key in denied_body for key in ("bookings", "holds", "blocks")),
+                "Calendar denial must not return a Calendar collections DTO.")
+        require(state["role_attempts"] == 2 and state["role_denials"] == 1
+                and state["denial_code"] == "FORBIDDEN" and state["denial_status"] == 403
+                and state["user_exit"] == "denial_unwound",
+                "Calendar denial did not originate from the final native membership check.")
+    else:
+        require(state["role_denials"] == 0 and state["user_exit"] == "normal",
+                "Calendar unchanged-membership control did not exit normally.")
+    # This final-check contract is not statement-atomic or a late-wire guarantee;
+    # zero holds still does not qualify active-hold removal or hosted F1.
+    with capsys.disabled():
+        print("FILL_CALENDAR_FINAL_MEMBERSHIP_PG_CONTRACT_PASS case=" + mode
+              + " status=" + str(response.status_code) + cardinality
+              + " role_attempts=" + str(state["role_attempts"])
+              + " role_denials=" + str(state["role_denials"])
+              + " user_exit=" + state["user_exit"]
               + " isolation=read_committed read_only=off trace=complete lifecycle=exited")
