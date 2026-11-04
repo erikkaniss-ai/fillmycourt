@@ -304,6 +304,22 @@
     return hour * 60 + minute;
   }
 
+  function validCalendarSnapshot(calendar) {
+    if (!calendar || typeof calendar !== "object" || Array.isArray(calendar) ||
+        !["bookings", "holds", "blocks"].every((key) => Array.isArray(calendar[key]))) return false;
+    const validRow = (row, booking) => {
+      if (!row || typeof row !== "object" || Array.isArray(row) ||
+          typeof row.court_id !== "string" || row.court_id.length === 0 ||
+          typeof row.starts_at !== "string" || typeof row.ends_at !== "string" ||
+          (booking && typeof row.status !== "string")) return false;
+      const start = Date.parse(row.starts_at), end = Date.parse(row.ends_at);
+      return Number.isFinite(start) && Number.isFinite(end) && end > start;
+    };
+    return calendar.bookings.every((row) => validRow(row, true)) &&
+      calendar.holds.every((row) => validRow(row, false)) &&
+      calendar.blocks.every((row) => validRow(row, false));
+  }
+
   async function loadCalendar() {
     const start = state.today?.day_start;
     const end = state.today?.day_end;
@@ -313,8 +329,7 @@
     let calendar;
     try {
       calendar = await api(`/api/fmc/${encodeURIComponent(org)}/calendar?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`, calendarEpoch);
-      if (!calendar || typeof calendar !== "object" || Array.isArray(calendar) ||
-          !["bookings", "holds", "blocks"].every((key) => Array.isArray(calendar[key])))
+      if (!validCalendarSnapshot(calendar))
         throw Error("Unable to load Calendar. Try again.");
     } catch (error) {
       // Network failures, unlike HTTP responses, bypass api()'s epoch check.

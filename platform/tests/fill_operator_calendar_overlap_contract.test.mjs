@@ -180,3 +180,84 @@ test("Valid current empty Calendar three-array snapshot still renders covered un
  assert.equal(fixture.el["#error"].hidden,true);
  assertCalendarSession(fixture);
 });
+
+const rowCourt="fictional-covered-court";
+const invalidBookingSnapshot=()=>({bookings:[{court_id:rowCourt,status:"confirmed",
+ starts_at:"FICTIONAL INVALID START",ends_at:today.day_end}],holds:[],blocks:[]});
+
+async function assertMalformedOccupancyRow(body){
+ const fixture=await calendarFixture(n=>ok(n===1?occupiedCalendar():body));
+ await fixture.visit();
+ assert.match(fixture.el["#calendarTimeline"].innerHTML,/lane-cell booked/);
+ await fixture.visit();
+ assertCurrentMalformedCalendar(fixture);
+ assert.equal(fixture.el["#error"].textContent,"Unable to load Calendar. Try again.");
+ assert.doesNotMatch(fixture.el["#error"].textContent,/FICTIONAL INVALID START|fictional-covered-court/);
+}
+
+test("Confirmed booking with invalid start cannot become unoccupied Calendar",async()=>{
+ await assertMalformedOccupancyRow(invalidBookingSnapshot());
+});
+
+test("Hold missing end cannot become unoccupied Calendar",async()=>{
+ await assertMalformedOccupancyRow({bookings:[],holds:[{
+  court_id:rowCourt,starts_at:today.day_start}],blocks:[]});
+});
+
+test("Block with nonpositive interval cannot become unoccupied Calendar",async()=>{
+ await assertMalformedOccupancyRow({bookings:[],holds:[],blocks:[{
+  court_id:rowCourt,starts_at:today.day_start,ends_at:today.day_start}]});
+});
+
+test("Old malformed occupancy row after newer valid Calendar preserves grid error and session",async()=>{
+ let completeOlder,notifyBodyStarted;
+ const olderBody=new Promise(done=>{completeOlder=done;});
+ const bodyStarted=new Promise(done=>{notifyBodyStarted=done;});
+ const fixture=await calendarFixture(n=>n===1?{
+  ok:true,status:200,json:()=>{notifyBodyStarted();return olderBody;}
+ }:ok(occupiedCalendar("FICTIONAL NEWER ROW SNAPSHOT")));
+ const olderRequest=fixture.visit();
+ await bodyStarted;
+ await fixture.visit();
+ const newerGrid=fixture.el["#calendarTimeline"].innerHTML;
+ const newerError={hidden:fixture.el["#error"].hidden,text:fixture.el["#error"].textContent};
+ assert.match(newerGrid,/FICTIONAL NEWER ROW SNAPSHOT/);
+ assert.equal(newerError.hidden,true);
+ completeOlder(invalidBookingSnapshot());
+ await olderRequest;
+ assert.equal(fixture.el["#calendarTimeline"].innerHTML,newerGrid);
+ assert.equal(fixture.el["#error"].hidden,newerError.hidden);
+ assert.equal(fixture.el["#error"].textContent,newerError.text);
+ assertCalendarSession(fixture);
+});
+
+test("Valid mixed rows preserve cancelled history and day-boundary clipping semantics",async()=>{
+ const fixture=await calendarFixture(()=>ok({bookings:[
+  {court_id:rowCourt,status:"confirmed",starts_at:"2026-10-18T23:30:00+01:00",
+   ends_at:"2026-10-19T00:30:00+01:00",source:"FICTIONAL CLIPPED START"},
+  {court_id:rowCourt,status:"pending_payment",starts_at:"2026-10-19T23:30:00+01:00",
+   ends_at:"2026-10-20T00:30:00+01:00",source:"FICTIONAL CLIPPED END"},
+  {court_id:rowCourt,status:"cancelled",starts_at:"2026-10-19T02:00:00+01:00",
+   ends_at:"2026-10-19T03:00:00+01:00",source:"FICTIONAL CANCELLED HISTORY"},
+  {court_id:rowCourt,status:"fictional_history",starts_at:"2026-10-19T04:00:00+01:00",
+   ends_at:"2026-10-19T05:00:00+01:00",source:"FICTIONAL OTHER HISTORY"},
+  {court_id:rowCourt,status:"confirmed",starts_at:"2026-10-18T22:00:00+01:00",
+   ends_at:"2026-10-18T23:00:00+01:00",source:"FICTIONAL OUTSIDE HISTORY"}
+ ],holds:[{court_id:rowCourt,starts_at:"2026-10-19T00:30:00+01:00",
+  ends_at:"2026-10-19T01:00:00+01:00"}],blocks:[{court_id:rowCourt,
+  starts_at:"2026-10-19T01:00:00+01:00",ends_at:"2026-10-19T01:30:00+01:00",
+  reason:"FICTIONAL VALID BLOCK"}]}));
+ await fixture.visit();
+ const grid=fixture.el["#calendarTimeline"].innerHTML;
+ assert.match(grid,/court-grid/);
+ assert.match(grid,/grid-template-columns:repeat\(48,/);
+ assert.equal((grid.match(/class="lane-cell booked"/g)||[]).length,2);
+ assert.equal((grid.match(/class="lane-cell held"/g)||[]).length,1);
+ assert.equal((grid.match(/class="lane-cell blocked"/g)||[]).length,1);
+ assert.equal((grid.match(/class="lane-cell open"/g)||[]).length,44);
+ assert.match(grid,/00:00–00:30 · FICTIONAL CLIPPED START/);
+ assert.match(grid,/23:30–24:00 · FICTIONAL CLIPPED END/);
+ assert.doesNotMatch(grid,/FICTIONAL CANCELLED HISTORY|FICTIONAL OTHER HISTORY|FICTIONAL OUTSIDE HISTORY/);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
+});
