@@ -279,6 +279,99 @@ def test_fill_today_opportunity_quotes_follow_rate_priority(fill_today):
     assert r.json()["summary"]["highest_single_quote_minor"] == 6000
 
 
+@pytest.mark.parametrize("date,day_hours,capacity,starts60,starts90", [
+    ("2030-01-01", 24, 1410, 46, 45),
+    ("2030-03-31", 23, 1350, 44, 43),
+    ("2030-10-27", 25, 1470, 48, 47),
+])
+def test_fill_today_native_pg_day_boundaries(fill_today, date, day_hours, capacity, starts60, starts90):
+    # Existing disposable CI fixture only; no fake SQL rows or app factory.
+    # These dates qualify the installed timezone rules, not future legislation.
+    from fmc.fill_today_read import read_today
+    _, store, user_id, org_id, court_id = fill_today
+    day = datetime.fromisoformat(date).date()
+    with store.trusted() as c:
+        updated = c.execute(text("""
+            update public.court_rates
+            set start_minute=0,end_minute=1410,weekday=:weekday
+            where organization_id=cast(:org as uuid) and court_id=cast(:court as uuid)
+        """), {"org": org_id, "court": court_id, "weekday": day.weekday()})
+        assert updated.rowcount == 1
+
+    body = read_today(store, Actor(id=user_id), org_id, date, day)
+    local, utc = ZoneInfo("Europe/Lisbon"), ZoneInfo("UTC")
+    begin = datetime(day.year, day.month, day.day, tzinfo=local)
+    finish = begin + timedelta(days=1)
+    assert body["date"] == date and body["timezone"] == "Europe/Lisbon" and body["currency"] == "EUR"
+    day_start, day_end = (datetime.fromisoformat(body[key]).astimezone(utc) for key in ("day_start", "day_end"))
+    assert day_start == begin.astimezone(utc) and day_end == finish.astimezone(utc)
+    assert day_end - day_start == timedelta(hours=day_hours)
+    assert body["summary"] == {
+        "capacity_minutes": capacity, "booked_minutes": 0, "held_minutes": 0, "blocked_minutes": 0,
+        "empty_minutes": capacity, "utilization_pct": 0.0, "bookings": 0, "cancellations": 0,
+        "revenue_minor": 0, "active_courts": 1, "courts_with_rate_coverage": 1,
+        "courts_without_rate_coverage": 0, "bookable_60_starts": starts60, "bookable_90_starts": starts90,
+        "highest_single_quote_minor": 3600, "highest_single_quote_duration_minutes": 90,
+    }
+    court, = body["courts"]
+    assert court["court_id"] == court_id and court["has_rate_coverage"] is True
+    assert court["capacity_minutes"] == court["empty_minutes"] == capacity
+    assert court["booked_minutes"] == court["held_minutes"] == court["blocked_minutes"] == 0
+    sellable, = court["sellable_windows"]
+    empty, = body["empty_windows"]
+    assert (sellable["start_minute"], sellable["end_minute"]) == (0, 1410)
+    for window in (sellable, empty):
+        assert window["court_id"] == court_id
+        assert isinstance(window["starts_at"], datetime) and isinstance(window["ends_at"], datetime)
+        assert window["starts_at"].utcoffset() is not None and window["ends_at"].utcoffset() is not None
+        start, end = window["starts_at"].astimezone(utc), window["ends_at"].astimezone(utc)
+        assert start == begin.astimezone(utc) and end == (begin + timedelta(minutes=1410)).astimezone(utc)
+        assert end - start == timedelta(minutes=capacity)
+    assert empty["duration_minutes"] == capacity
+    assert empty["bookable_60_count"] == starts60 and empty["bookable_90_count"] == starts90
+    assert (empty["min_60_amount_minor"], empty["max_60_amount_minor"],
+            empty["min_90_amount_minor"], empty["max_90_amount_minor"]) == (2400, 2400, 3600, 3600)
+    assert empty["best_amount_minor"] == 3600 and empty["best_duration_minutes"] == 90 and empty["currency"] == "EUR"
+    print("FILL_TODAY_NATIVE_PG_PASS kind=day date=" + date)
+
+
+def test_fill_today_native_pg_hold_expiry_uses_database_now(fill_today):
+    from fmc.fill_today_read import read_today
+    _, store, user_id, org_id, court_id = fill_today
+    # Only disposable fixture rows; expiry is computed by PostgreSQL, not the
+    # Python clock or the requested day. No exact-now or blocked-expiry claim.
+    with store.trusted() as c:
+        inserted = c.execute(text("""
+            insert into public.booking_holds(organization_id,court_id,starts_at,ends_at,expires_at,idempotency_key)
+            values
+              (cast(:org as uuid),cast(:court as uuid),
+               '2026-10-05 15:00:00+01','2026-10-05 16:00:00+01',now()+interval '1 day','today-native-active-hold'),
+              (cast(:org as uuid),cast(:court as uuid),
+               '2026-10-05 16:00:00+01','2026-10-05 17:00:00+01',now()-interval '1 day','today-native-expired-hold')
+        """), {"org": org_id, "court": court_id})
+        assert inserted.rowcount == 2
+
+    date = "2026-10-05"
+    body = read_today(store, Actor(id=user_id), org_id, date, datetime.fromisoformat(date).date())
+    summary = body["summary"]
+    assert summary["capacity_minutes"] == 1050 and summary["booked_minutes"] == 90
+    assert summary["blocked_minutes"] == 60 and summary["held_minutes"] == 60 and summary["empty_minutes"] == 840
+    assert (summary["bookings"], summary["cancellations"], summary["revenue_minor"]) == (1, 1, 3600)
+    court, = body["courts"]
+    assert court["court_id"] == court_id and court["held_minutes"] == 60 and court["empty_minutes"] == 840
+    sellable, = court["sellable_windows"]
+    assert (sellable["start_minute"], sellable["end_minute"]) == (360, 1410)
+    local, utc = ZoneInfo("Europe/Lisbon"), ZoneInfo("UTC")
+    at = lambda hour, minute=0: datetime(2026, 10, 5, hour, minute, tzinfo=local).astimezone(utc)
+    assert sellable["starts_at"].astimezone(utc) == at(6) and sellable["ends_at"].astimezone(utc) == at(23, 30)
+    windows = body["empty_windows"]
+    assert windows and all(window["court_id"] == court_id for window in windows)
+    assert all(not (window["starts_at"].astimezone(utc) < at(16) and window["ends_at"].astimezone(utc) > at(15)) for window in windows)
+    expired_window, = [window for window in windows if window["starts_at"].astimezone(utc) == at(16)]
+    assert expired_window["ends_at"].astimezone(utc) == at(23, 30) and expired_window["duration_minutes"] == 450
+    print("FILL_TODAY_NATIVE_PG_PASS kind=holds date=" + date)
+
+
 
 def test_fill_demand_aware_opportunity_is_incremental_private_and_lifecycle_aware(fill_today):
     url, store, user_id, org_id, court_id = fill_today
