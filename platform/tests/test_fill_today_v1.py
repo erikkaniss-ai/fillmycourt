@@ -1865,3 +1865,211 @@ def test_f11_offline_ed25519_core_attestation_registry_and_security(fill_today):
     assert cancelled.status_code==200 and cancelled.json()["readiness"]=="BOOKING_NOT_ACTIVE"
     assert cancelled.json()["fixture_count"]==0
     assert cancelled.json()["billable"] is False
+@pytest.mark.parametrize("mode", ["keep", "revoke"])
+def test_fill_calendar_postrole_membership_observation(fill_today, capsys, monkeypatch, mode):
+    from contextlib import ExitStack, contextmanager
+    from threading import get_ident
+
+    from fmc import v1_app
+    from fmc.supabase_v1 import one
+
+    url, store, user_id, org_id, _ = fill_today
+
+    def require(condition, message):
+        if not condition:
+            pytest.fail(message, pytrace=False)
+
+    # Only these nonsecret mode keys are checked, only in disposable CI.
+    # Never enable, rewrite or unset a mode to make this observation run.
+    for key in ("FILL_UAT_GUARD", "FILL_UAT_BOOTSTRAP", "FILL_UAT_SERVER_VALIDATOR"):
+        require(os.environ.get(key, "off") == "off", "Calendar observation requires disabled UAT modes.")
+
+    trace = []
+    state = {
+        "constructor_calls": 0, "user_contexts": 0, "role_calls": 0,
+        "trusted_closed": False, "user_closed": False, "deleted": 0,
+        "lifecycle_closed": False, "thread": None,
+    }
+
+    class ConnectionObserver:
+        def __init__(self, native):
+            self.native = native
+
+        def execute(self, statement, params=None):
+            require(get_ident() == state["thread"], "Calendar native observer changed execution chain.")
+            query = " ".join(str(statement).lower().split())
+            if query.startswith("select role::text from public.organization_members "):
+                phase = "role"
+            elif " from public.bookings b " in query:
+                phase = "bookings"
+            elif " from public.booking_holds " in query:
+                phase = "holds"
+            elif " from public.court_blocks " in query:
+                phase = "blocks"
+            else:
+                pytest.fail("Calendar observation encountered unsupported native SQL.", pytrace=False)
+            require(type(params) is dict and params.get("org") == org_id,
+                    "Calendar native organization scope changed.")
+            if phase == "role":
+                require(params.get("uid") == user_id, "Calendar native membership scope changed.")
+            else:
+                require(state["role_calls"] == 1 and state["trusted_closed"],
+                        "Calendar payload preceded accepted role or committed hook.")
+            trace.append(phase + "_entered")
+            result = self.native.execute(statement, params)
+            trace.append(phase + "_returned")
+            # The original CursorResult goes to original one()/rows(). The next
+            # query/response demonstrates materialization; no result is wrapped.
+            return result
+
+    class StoreObserver:
+        engine = store.engine
+
+        @contextmanager
+        def user(self, uid):
+            require(uid == user_id, "Calendar user scope changed.")
+            state["user_contexts"] += 1
+            require(state["user_contexts"] == 1, "Calendar acquired an additional user context.")
+            state["thread"] = get_ident()
+            # Both original connections are acquired/used in this same handler
+            # chain. No connection crosses from the main test thread.
+            with ExitStack() as trusted_stack:
+                trusted = trusted_stack.enter_context(store.trusted())
+                trace.append("trusted_acquired")
+                trusted.execute(text("SET LOCAL lock_timeout='500ms'"))
+                trusted.execute(text("SET LOCAL statement_timeout='1000ms'"))
+                self.trusted, self.trusted_stack = trusted, trusted_stack
+                try:
+                    with store.user(uid) as native:
+                        require(native is not trusted, "Calendar native contexts were not distinct.")
+                        trace.append("user_acquired")
+                        native.execute(text("SET LOCAL lock_timeout='500ms'"))
+                        native.execute(text("SET LOCAL statement_timeout='1000ms'"))
+                        for query, expected in (("SHOW transaction_isolation", "read committed"),
+                                                ("SHOW transaction_read_only", "off")):
+                            row = one(native.execute(text(query)))
+                            require(type(row) is dict and len(row) == 1,
+                                    "Calendar native transaction mode shape is unsupported.")
+                            value, = row.values()
+                            require(type(value) is str and value == expected,
+                                    "Calendar native transaction mode is unsupported.")
+                        trace.append("user_mode_confirmed")
+                        yield ConnectionObserver(native)
+                except DomainError:
+                    # Preserve an actual handler denial after original context
+                    # unwinding, never substitute a role or an exception.
+                    state["user_closed"] = True
+                    trace.append("user_closed")
+                    raise
+                else:
+                    state["user_closed"] = True
+                    trace.append("user_closed")
+
+        def require_role(self, connection, org, uid, allowed=None):
+            require(get_ident() == state["thread"], "Calendar role changed execution chain.")
+            require(org == org_id and uid == user_id and allowed is None,
+                    "Calendar role arguments changed.")
+            actual_role = store.require_role(connection, org, uid, allowed)
+            # Original Store.role/one has consumed the actual native row.
+            state["role_calls"] += 1
+            require(state["role_calls"] == 1 and actual_role == "owner",
+                    "Calendar initial native role observation is unsupported.")
+            trace.append("role_accepted")
+            if mode == "revoke":
+                deleted = self.trusted.execute(text("""
+                    delete from public.organization_members
+                    where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
+                """), {"org": org_id, "uid": user_id})
+                require(deleted.rowcount == 1, "Calendar membership mutation was inconclusive.")
+                state["deleted"] = deleted.rowcount
+                trace.append("member_deleted")
+            # Normal close commits only the preacquired trusted context. Success
+            # is recorded after it returns, before returning the real role.
+            self.trusted_stack.close()
+            state["trusted_closed"] = True
+            trace.append("trusted_closed")
+            return actual_role
+
+        def __getattr__(self, name):
+            return getattr(store, name)
+
+    observer = StoreObserver()
+
+    def bind_existing(database):
+        state["constructor_calls"] += 1
+        require(state["constructor_calls"] == 1 and database == url,
+                "Calendar factory did not bind the existing fixture store.")
+        require(observer.engine is store.engine, "Calendar factory engine identity changed.")
+        return observer
+
+    monkeypatch.setattr(v1_app, "V1Store", bind_existing)
+    settings = Settings(
+        origin="https://fill.test", environment="test", database=url,
+        supabase_url="https://example.supabase.co", supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    try:
+        app = create_v1_app(settings, "operations", auth_override=StaticAuth(user_id))
+        require(state["constructor_calls"] == 1, "Calendar factory binding was not exercised.")
+        guard = app.state.fill_uat_guard
+        require(guard.lease is None and guard.ledger is None and guard.admin is None
+                and guard.bootstrap is None and guard.cleanup_error is False,
+                "Calendar observation requires the real disabled guard.")
+        with TestClient(app) as client:
+            trace.append("lifecycle_entered")
+            response = client.get(
+                f"/api/fmc/{org_id}/calendar",
+                params={"start": "2026-10-05T00:00:00+01:00", "end": "2026-10-06T00:00:00+01:00"},
+                headers={"Authorization": "Bearer ci-owner-token"},
+            )
+            trace.append("response_returned")
+        state["lifecycle_closed"] = True
+        trace.append("lifecycle_closed")
+    except Exception:
+        # Keep the native exception path intact through the real handler/client;
+        # fail at the test boundary without dumping SQL parameters or credentials.
+        with capsys.disabled():
+            print("FILL_CALENDAR_POSTROLE_MEMBERSHIP_PG_INCONCLUSIVE case=" + mode
+                  + " outcome=native_or_lifecycle_error")
+        pytest.fail("Calendar native observation was inconclusive.", pytrace=False)
+
+    require(state["trusted_closed"] and state["user_closed"] and state["lifecycle_closed"]
+            and state["user_contexts"] == 1 and state["role_calls"] == 1,
+            "Calendar native contexts or lifecycle did not complete.")
+    require(state["deleted"] == (1 if mode == "revoke" else 0),
+            "Calendar committed membership observation is incomplete.")
+    expected = ["lifecycle_entered", "trusted_acquired", "user_acquired", "user_mode_confirmed",
+                "role_entered", "role_returned", "role_accepted"]
+    if mode == "revoke":
+        expected.append("member_deleted")
+    expected += ["trusted_closed"]
+    for phase in ("bookings", "holds", "blocks"):
+        expected += [phase + "_entered", phase + "_returned"]
+    expected += ["user_closed", "response_returned", "lifecycle_closed"]
+    require(trace == expected, "Calendar post-role native payload trace was inconclusive.")
+
+    if response.status_code == 200:
+        try:
+            body = response.json()
+        except Exception:
+            pytest.fail("Calendar native response was not a supported JSON payload.", pytrace=False)
+        require(type(body) is dict and all(type(body.get(k)) is list for k in ("bookings", "holds", "blocks")),
+                "Calendar native response collection shape is unsupported.")
+        counts = tuple(len(body[k]) for k in ("bookings", "holds", "blocks"))
+        require(0 <= counts[0] <= 2 and counts[1] == 0 and 0 <= counts[2] <= 1,
+                "Calendar native observation exceeded its unchanged fixture scope.")
+        outcome = "complete" if counts == (2, 0, 1) else "empty" if counts == (0, 0, 0) else "mixed"
+    else:
+        require(mode == "revoke" and response.status_code in (401, 403),
+                "Calendar native observation returned an unexpected HTTP result.")
+        outcome, counts = "denied", None
+    require(mode != "keep" or (response.status_code == 200 and counts == (2, 0, 1)),
+            "Calendar unchanged-membership control failed.")
+    # Observation-green is not revocation/security acceptance. Zero holds does
+    # not qualify active-hold removal; no wire/hosted/deadline claim is made.
+    cardinality = (" bookings=" + str(counts[0]) + " holds=" + str(counts[1]) + " blocks=" + str(counts[2])
+                   if counts is not None else " collections=unreturned")
+    with capsys.disabled():
+        print("FILL_CALENDAR_POSTROLE_MEMBERSHIP_PG_OBSERVED case=" + mode + " outcome=" + outcome
+              + " status=" + str(response.status_code) + cardinality
+              + " isolation=read_committed read_only=off trace=complete lifecycle=exited")
