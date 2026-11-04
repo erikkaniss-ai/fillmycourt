@@ -261,3 +261,100 @@ test("Valid mixed rows preserve cancelled history and day-boundary clipping sema
  assert.equal(fixture.el["#error"].hidden,true);
  assertCalendarSession(fixture);
 });
+
+
+test("Current Calendar 403 clears prior occupied grid and preserves operator session",async()=>{
+ const permission="FICTIONAL CALENDAR PERMISSION DENIED";
+ const denial={ok:false,status:403,json:async()=>({error:permission})};
+ const fixture=await calendarFixture(n=>{
+  assert.ok(n===1||n===2,"Only two fictional Calendar requests are allowed");
+  return n===1?ok(occupiedCalendar("FICTIONAL PRE-DENIAL OCCUPANCY")):denial;
+ });
+ const bootstrapCalls=fixture.calls.slice();
+ assert.equal(bootstrapCalls.length,3);
+ assert.deepEqual(bootstrapCalls.map(call=>new URL(call.path,"https://fixture.invalid").pathname),
+  ["/api/me","/api/fmc/organizations","/api/fmc/fixture-org/today"]);
+ const originalSession=fixture.session.get("fill.access");
+ assert.equal(fixture.session.has("fill.access"),true);
+ const originalOrg=fixture.el["#orgSelect"].value;
+ const originalIdentity=fixture.el["#identity"].textContent;
+ await fixture.visit();
+ assert.match(fixture.el["#calendarTimeline"].innerHTML,/lane-cell booked/);
+ assert.match(fixture.el["#calendarTimeline"].innerHTML,/FICTIONAL PRE-DENIAL OCCUPANCY/);
+ assert.doesNotMatch(fixture.el["#calendarTimeline"].innerHTML,/lane-cell open/);
+ assert.equal(fixture.el["#error"].hidden,true);
+ await fixture.visit();
+ assert.equal(fixture.el["#calendarTimeline"].innerHTML,"");
+ assert.doesNotMatch(fixture.el["#calendarTimeline"].innerHTML,
+  /lane-cell booked|lane-cell held|lane-cell blocked|lane-cell open|court-grid|unoccupied in Core/);
+ assert.equal(fixture.el["#error"].hidden,false);
+ assert.match(fixture.el["#error"].textContent,/FICTIONAL CALENDAR PERMISSION DENIED/);
+ assert.equal(fixture.session.has("fill.access"),true);
+ assert.equal(fixture.session.get("fill.access")===originalSession,true);
+ assert.equal(fixture.el["#authGate"].hidden,true);
+ assert.equal(fixture.el["#workspace"].hidden,false);
+ assert.equal(fixture.el["#orgSelect"].value===originalOrg,true);
+ assert.equal(fixture.el["#identity"].textContent===originalIdentity,true);
+ const calendarPath="/api/fmc/fixture-org/calendar?"+new URLSearchParams({
+  start:today.day_start,end:today.day_end}).toString();
+ assert.deepEqual(fixture.calls.slice(bootstrapCalls.length),
+  [{path:calendarPath,method:"GET"},{path:calendarPath,method:"GET"}]);
+ assert.deepEqual(fixture.calls.slice(0,bootstrapCalls.length),bootstrapCalls);
+ assert.equal(fixture.calls.length,5,"No retry, fallback or additional request");
+ assert.ok(fixture.calls.every(call=>call.method==="GET"));
+});
+
+test("Older Calendar 403 after newer occupied 200 preserves grid error and operator session",async()=>{
+ const permission="FICTIONAL STALE CALENDAR PERMISSION DENIED";
+ const denial={ok:false,status:403,json:async()=>({error:permission})};
+ let completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});
+ const olderStarted=new Promise(done=>{notifyOlder=done;});
+ const fixture=await calendarFixture(n=>{
+  assert.ok(n===1||n===2,"Only two fictional Calendar requests are allowed");
+  if(n===1){notifyOlder();return older;}
+  return ok(occupiedCalendar("FICTIONAL NEWER PERMITTED SNAPSHOT"));
+ });
+ const bootstrapCalls=fixture.calls.slice();
+ assert.equal(bootstrapCalls.length,3);
+ assert.deepEqual(bootstrapCalls.map(call=>new URL(call.path,"https://fixture.invalid").pathname),
+  ["/api/me","/api/fmc/organizations","/api/fmc/fixture-org/today"]);
+ const originalSession=fixture.session.get("fill.access");
+ assert.equal(fixture.session.has("fill.access"),true);
+ const oldRequest=fixture.visit();
+ await olderStarted;
+ await fixture.visit();
+ const newer={
+  grid:fixture.el["#calendarTimeline"].innerHTML,
+  errorHidden:fixture.el["#error"].hidden,errorText:fixture.el["#error"].textContent,
+  authHidden:fixture.el["#authGate"].hidden,workspaceHidden:fixture.el["#workspace"].hidden,
+  org:fixture.el["#orgSelect"].value,identity:fixture.el["#identity"].textContent,
+ };
+ assert.match(newer.grid,/lane-cell booked/);
+ assert.match(newer.grid,/FICTIONAL NEWER PERMITTED SNAPSHOT/);
+ assert.doesNotMatch(newer.grid,/lane-cell open/);
+ assert.equal(newer.errorHidden,true);
+ assert.equal(newer.authHidden,true);
+ assert.equal(newer.workspaceHidden,false);
+ assert.equal(fixture.session.get("fill.access")===originalSession,true);
+ completeOlder(denial);
+ await oldRequest;
+ assert.equal(fixture.el["#calendarTimeline"].innerHTML,newer.grid);
+ assert.equal(fixture.el["#error"].hidden,newer.errorHidden);
+ assert.equal(fixture.el["#error"].textContent,newer.errorText);
+ assert.doesNotMatch(fixture.el["#error"].textContent,/FICTIONAL STALE CALENDAR PERMISSION DENIED/);
+ assert.equal(fixture.el["#authGate"].hidden,newer.authHidden);
+ assert.equal(fixture.el["#workspace"].hidden,newer.workspaceHidden);
+ assert.equal(fixture.el["#orgSelect"].value===newer.org,true);
+ assert.equal(fixture.el["#identity"].textContent===newer.identity,true);
+ assert.equal(fixture.session.has("fill.access"),true);
+ assert.equal(fixture.session.get("fill.access")===originalSession,true);
+ const calendarPath="/api/fmc/fixture-org/calendar?"+new URLSearchParams({
+  start:today.day_start,end:today.day_end}).toString();
+ assert.deepEqual(fixture.calls.slice(bootstrapCalls.length),
+  [{path:calendarPath,method:"GET"},{path:calendarPath,method:"GET"}]);
+ assert.deepEqual(fixture.calls.slice(0,bootstrapCalls.length),bootstrapCalls);
+ assert.equal(fixture.calls.length,5,"No stale retry, fallback or additional request");
+ assert.ok(fixture.calls.every(call=>call.method==="GET"));
+});
+
