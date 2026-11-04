@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 import threading
 from types import SimpleNamespace
 import uuid
@@ -1177,6 +1178,385 @@ def test_client_phase_real_timeout_keeps_unknown_cleanup_until_owned_stream_drai
     assert diagnostics[-1]["phase"] == "stream_exit" and diagnostics[-1]["outcome"] == "error"
     assert e.logs[-1] == {"kind":"PRIVATE_VALIDATOR_OWNERSHIP_DRAINED","owned_pending":0,"client_closed":True}
     assert len([x for x in e.http if x[0] == "GET"]) == 1 and not e.runner.jobs and not e.client.sessions
+
+
+class _CausalQualification:
+    """One in-process adapter over e; no listener, lifespan or real engine."""
+    tags = {"auth_initial", "auth_final", "guard_initial", "guard_final", "claims_setup", "query", "dispatch_wait", "response_wait"}
+
+    def __init__(self, e, monkeypatch, tag=None, outcome="success", manual=True):
+        from fmc import v1_app
+        from fmc.supabase_v1 import Actor, SupabaseAuth, V1Store
+        self.e, self.tag, self.outcome = e, tag, outcome
+        assert tag is None or tag in self.tags
+        self.loop = asyncio.get_running_loop()
+        self.entered, self.release = asyncio.Event(), threading.Event()
+        self.async_release = asyncio.Event()
+        self.primed = False
+        self.lock = threading.Lock()
+        self.auth_calls, self.ledger_calls = {"a": 0, "b": 0}, {"a": 0, "b": 0}
+        self.scopes, self.route_executes, self.operations = 0, [], []
+        self.factories = []
+        self.wire, self.app_tasks, self.trackers = {}, [], []
+        self.active_workers = 0
+        self.tokens = {"a": TOKEN + "-a", "b": TOKEN + "-b"}
+        self.actors = {label: Actor(id=e.ids[label], fill_f1_run=e.cfg.run_id, fill_f1_fictional=True) for label in ("a", "b")}
+        if manual:
+            e.clock.seconds = 200
+            e.port.initial = False
+            e.runner.ready = e.runner.root_ready = e.runner.operator_gate = True
+        owner = self
+
+        class Result:
+            def __init__(self, values=()): self.values = list(values)
+            def mappings(self): return self
+            def first(self): return self.values[0] if self.values else None
+            def __iter__(self): return iter(self.values)
+
+        class Connection:
+            def __init__(self): self.label, self.order = None, []
+            def execute(self, statement, params=None):
+                sql, params = str(statement), params or {}
+                if "from fill_private.uat_runs" in sql:
+                    label = owner.label_for_id(params["uid"])
+                    with owner.lock:
+                        owner.ledger_calls[label] += 1
+                        ordinal = owner.ledger_calls[label]
+                    owner.hold("guard_initial" if ordinal == 1 else "guard_final", label)
+                    return Result([{"spec": e.spec, "armed": True, "stopped": e.port.stopped,
+                        "isolated": True, "receipts": {}, "healthy_at": e.clock.wall(), "db_now": e.clock.wall()}])
+                if sql == "set local role authenticated":
+                    self.order.append("role")
+                    owner.route_executes.append("role")
+                    return Result()
+                if "set_config('request.jwt.claim.sub'" in sql:
+                    assert self.order == ["role"]
+                    self.label = owner.label_for_id(params["uid"])
+                    self.order.append("claims")
+                    owner.route_executes.append("claims")
+                    owner.hold("claims_setup", self.label)
+                    return Result()
+                assert self.label is not None and self.order[:2] == ["role", "claims"]
+                own = e.cfg.organizations[self.label]
+                assert str(params["org"]) == own
+                if "from public.organization_members" in sql:
+                    assert params["uid"] == e.ids[self.label]
+                    owner.route_executes.append("membership")
+                    return Result([{"role": "owner" if self.label == "a" else "manager"}])
+                table = next(name for name in ("bookings", "booking_holds", "court_blocks") if "from public." + name in sql)
+                owner.route_executes.append(table)
+                if table == "bookings": owner.hold("query", self.label)
+                return Result()
+
+        class Engine:
+            @contextmanager
+            def begin(self):
+                with owner.lock: owner.scopes += 1
+                yield Connection()
+
+        engine = Engine()
+        store = object.__new__(V1Store)
+        store.engine = engine
+        self.guard = g.Guard(g.Lease.parse(e.spec), g.SQLLedger(engine), clock=e.clock.wall, monotonic=e.clock.tick)
+        e.boot.guard = self.guard
+        s.attach(self.guard, e.runner)
+
+        def authority(request):
+            label = self.label_for_token(request.headers["authorization"])
+            with self.lock:
+                self.auth_calls[label] += 1
+                ordinal = self.auth_calls[label]
+            self.hold("auth_initial" if ordinal == 1 else "auth_final", label)
+            if label == "a" and self.release.is_set() and self.outcome == "deny" and self.tag in {"auth_initial", "auth_final"}:
+                return httpx.Response(401)
+            return httpx.Response(200, json={"id": e.ids[label], "app_metadata": {"fill_f1_run": e.cfg.run_id, "fictional": True}})
+
+        self.authority_http = httpx.Client(transport=httpx.MockTransport(authority), trust_env=False)
+        auth = SupabaseAuth("https://auth.invalid", "PUBLIC_AUTHORITY_SENTINEL", http=self.authority_http)
+        def store_factory(database):
+            assert database == "PUBLIC_FAKE_ENGINE"
+            self.factories.append("store")
+            return store
+        def guard_factory(settings, service, supplied_engine):
+            assert service == "operations" and supplied_engine is engine
+            self.factories.append("guard")
+            return self.guard
+        def validator_factory(*args):
+            self.factories.append("validator")
+            return None
+        def forbidden_authority_factory(*args):
+            pytest.fail("Application must use the explicitly injected fictional authority")
+        monkeypatch.setattr(v1_app, "V1Store", store_factory)
+        monkeypatch.setattr(v1_app, "fill_guard_from_environment", guard_factory)
+        monkeypatch.setattr(v1_app, "SupabaseAuth", forbidden_authority_factory)
+        monkeypatch.setattr(s, "from_environment", validator_factory)
+        # Unrelated registrations are inert before application construction.
+        # No wider module inspection or config factory is needed for calendar.
+        for module, function in (("crm_delivery", "register_crm_delivery"), ("revenue_finance", "register_financial_foundation"), ("revenue_evidence", "register_shadow_evidence")):
+            monkeypatch.setitem(sys.modules, "fmc." + module, SimpleNamespace(**{function: lambda *args: None}))
+        settings = SimpleNamespace(database="PUBLIC_FAKE_ENGINE", environment="staging", origin=e.cfg.operations_origin,
+            supabase_url="https://auth.invalid", supabase_publishable_key=PUBLIC_KEY, booking_enabled=False)
+        self.app = v1_app.create_v1_app(settings, "operations", auth_override=auth)
+        if tag == "response_wait":
+            router = self.app.router
+            async def delayed_router(scope, receive, send):
+                async def before_body(message):
+                    if message["type"] == "http.response.body" and not message.get("more_body", False):
+                        await self.async_hold("response_wait", self.label_for_token(dict(scope["headers"])[b"authorization"].decode()))
+                    await send(message)
+                await router(scope, receive, before_body)
+            self.app.router = delayed_router
+        self.client = e.runner.client_factory()
+        self.client.sessions.update({label: (token, START + timedelta(hours=1)) for label, token in self.tokens.items()})
+        self.client.ops._transport = httpx.MockTransport(self.operations_transport)
+        e.runner.client = self.client
+        bounded = e.runner.bounded
+        async def observe(awaitable, seconds, **context):
+            if context["stage"] == "user_get":
+                assert seconds == s.CONTROL_SECONDS == 2.0
+                self.trackers.append(context.get("phase"))
+            return await bounded(awaitable, seconds, **context)
+        monkeypatch.setattr(e.runner, "bounded", observe)
+        e.runner.read_pool = s.ThreadPoolExecutor(max_workers=1)
+
+    def label_for_id(self, uid):
+        return next(label for label in ("a", "b") if self.e.ids[label] == uid)
+
+    def label_for_token(self, bearer):
+        # Existing full-run fixture uses its public TOKEN for all sessions.
+        if bearer == "Bearer " + TOKEN: return "a"
+        return next(label for label, token in self.tokens.items() if bearer == "Bearer " + token)
+
+    def hold(self, tag, label):
+        if tag != self.tag or label != "a": return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            pytest.fail("Worker barrier reached event loop before blocking")
+        assert self.primed, "Loop heartbeat must be primed before blocking"
+        with self.lock: self.active_workers += 1
+        self.loop.call_soon_threadsafe(self.entered.set)
+        try:
+            assert self.release.wait(5), "Qualification barrier was not released"
+            if self.outcome == "authority_error": raise httpx.ReadTimeout(PASSWORD + TOKEN)
+            if self.outcome == "deny" and tag in {"claims_setup", "query"}:
+                from fmc.common import DomainError
+                raise DomainError("QUALIFICATION_UNAVAILABLE", "Fictional dependency unavailable.", 503)
+        finally:
+            with self.lock: self.active_workers -= 1
+
+    async def async_hold(self, tag, label):
+        if tag != self.tag or label != "a": return
+        assert self.primed
+        self.entered.set()
+        await self.async_release.wait()
+
+    def unblock(self):
+        self.release.set()
+        self.async_release.set()
+
+    async def prime(self):
+        await asyncio.sleep(0)
+        self.primed = True
+
+    async def operations_transport(self, request):
+        label = self.label_for_token(request.headers["authorization"])
+        self.operations.append(label)
+        self.wire[label] = []
+        await self.async_hold("dispatch_wait", label)
+        complete = asyncio.Event()
+        sent_request = False
+        async def receive():
+            nonlocal sent_request
+            if not sent_request:
+                sent_request = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await complete.wait()
+            return {"type": "http.disconnect"}
+        async def send(message):
+            self.wire[label].append(dict(message))
+            if message["type"] == "http.response.body" and not message.get("more_body", False): complete.set()
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+            "scheme": "https", "path": request.url.path, "raw_path": request.url.path.encode(),
+            "query_string": request.url.query, "root_path": "", "headers": [(name.lower(), value) for name, value in request.headers.raw],
+            "server": ("fixture.invalid", 443), "client": ("fixture.invalid", 1), "state": {}}
+        task = asyncio.create_task(self.app(scope, receive, send))
+        self.app_tasks.append(task)
+        await asyncio.shield(task)
+        start = next(message for message in self.wire[label] if message["type"] == "http.response.start")
+        body = b"".join(message.get("body", b"") for message in self.wire[label] if message["type"] == "http.response.body")
+        return httpx.Response(start["status"], headers=start["headers"], content=body)
+
+    async def close(self):
+        self.unblock()
+        results = await asyncio.gather(*self.app_tasks, return_exceptions=True)
+        await asyncio.gather(*list(self.e.runner.jobs), return_exceptions=True)
+        await self.client.close()
+        self.authority_http.close()
+        self.e.runner.read_pool.shutdown()
+        assert self.active_workers == 0 and all(task.done() for task in self.app_tasks)
+        assert all(not isinstance(result, BaseException) for result in results)
+
+
+@pytest.mark.parametrize("tag", [None, "auth_initial", "auth_final", "guard_initial", "guard_final", "claims_setup", "query", "dispatch_wait", "response_wait"])
+def test_offline_causal_calendar_boundary_qualification(e, monkeypatch, tag):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, tag)
+        await probe.prime()
+        task = asyncio.create_task(e.runner.action("a", "own_calendar"))
+        try:
+            if tag is not None:
+                await asyncio.wait_for(probe.entered.wait(), 1)
+                await asyncio.sleep(0)  # heartbeat still runs while the worker is held
+                assert not task.done() and not probe.wire.get("a")
+                assert probe.trackers[-1].checkpoint[0] == "headers"
+                probe.unblock()
+            try:
+                await asyncio.wait_for(task, 2)
+            except s.Closed:
+                statuses = [message["status"] for message in probe.wire.get("a", []) if message["type"] == "http.response.start"]
+                pytest.fail(str((statuses, probe.auth_calls, probe.ledger_calls, probe.route_executes)))
+            assert probe.operations == ["a"]
+            assert probe.auth_calls["a"] == probe.ledger_calls["a"] == 2
+            assert probe.scopes == 3
+            assert probe.factories == ["store", "guard", "validator"]
+            assert probe.route_executes == ["role", "claims", "membership", "bookings", "booking_holds", "court_blocks"]
+            assert probe.wire["a"][-1]["type"] == "http.response.body"
+            assert not e.logs and len(e.runner.events) == 1
+        finally:
+            probe.unblock()
+            await asyncio.gather(task, return_exceptions=True)
+            await probe.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("tag", ["auth_final", "guard_final", "query"])
+def test_offline_causal_denial_never_releases_calendar_data(e, monkeypatch, tag):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, tag, outcome="deny")
+        await probe.prime()
+        task = asyncio.create_task(e.runner.action("a", "own_calendar"))
+        try:
+            await asyncio.wait_for(probe.entered.wait(), 1)
+            assert not probe.wire.get("a")
+            if tag == "guard_final": probe.guard.cleanup_error = True
+            probe.unblock()
+            with pytest.raises(s.Closed): await asyncio.wait_for(task, 2)
+            assert probe.operations == ["a"] and probe.auth_calls["a"] == 2
+            assert not e.runner.events and not e.logs
+            body = b"".join(message.get("body", b"") for message in probe.wire["a"])
+            assert b'"bookings"' not in body and TOKEN.encode() not in body and PASSWORD.encode() not in body
+        finally:
+            probe.unblock()
+            await asyncio.gather(task, return_exceptions=True)
+            await probe.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("outcome,terminal", [("authority_error", "failed"), ("cancelled", "finished")])
+def test_offline_causal_ab_ownership_and_global_terminal_closure(e, monkeypatch, outcome, terminal):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, "auth_initial", outcome=outcome)
+        await probe.prime()
+        first = asyncio.create_task(e.runner.action("a", "own_calendar"))
+        second = None
+        try:
+            await asyncio.wait_for(probe.entered.wait(), 1)
+            second = asyncio.create_task(e.runner.action("b", "own_calendar"))
+            await asyncio.wait_for(second, 2)
+            assert probe.operations == ["a", "b"] and not probe.wire.get("a")
+            assert probe.auth_calls["b"] == probe.ledger_calls["b"] == 2
+            assert probe.trackers[0] is not probe.trackers[1]
+            assert probe.trackers[0].checkpoint[0] == "headers"
+            assert probe.trackers[1].checkpoint[0] == "validate"
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError): await first
+            assert len(e.runner.jobs) == 1 and probe.active_workers == 1
+            if outcome == "cancelled":
+                owned = next(iter(e.runner.jobs))
+                owned.cancel()
+                await asyncio.gather(owned, return_exceptions=True)
+                await asyncio.sleep(0)
+                # Client drain does not cancel the shielded ASGI worker.
+                assert not e.runner.jobs and probe.active_workers == 1
+                assert any(not task.done() for task in probe.app_tasks)
+            probe.unblock()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+            assert probe.trackers[1].checkpoint[0] == "validate"
+            assert not e.runner.jobs and len(e.runner.events) == 1
+            late = [event for event in e.logs if event["kind"] == "PRIVATE_VALIDATOR_LATE_STAGE"]
+            assert len(late) == 1 and late[0]["outcome"] == ("error" if outcome == "authority_error" else "cancelled")
+            setattr(e.runner, terminal, True)
+            from fmc.common import DomainError
+            before_terminal_checks = dict(probe.ledger_calls)
+            for actor in probe.actors.values():
+                with pytest.raises(DomainError): probe.guard.check(actor)
+            assert probe.ledger_calls == before_terminal_checks
+            assert probe.operations == ["a", "b"]
+            encoded = s.canonical(e.logs)
+            for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, "https://", "/api/", e.ids["a"], e.ids["b"]):
+                assert sentinel not in encoded
+        finally:
+            probe.unblock()
+            await asyncio.gather(*[task for task in (first, second) if task is not None], return_exceptions=True)
+            await probe.close()
+    asyncio.run(exercise())
+
+
+def test_offline_causal_real_bound_late_delivery_stays_closed_until_server_settles(e, monkeypatch):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, "auth_final", manual=False)
+        await probe.prime()
+        # Retain all earlier public fixture actions. Only the first operator's
+        # calendar request enters the reviewed guarded ASGI chain.
+        previous_transport = probe.client.ops._transport
+        fixture_client = e.runner.client_factory()
+        fixture_transport = fixture_client.ops._transport
+        await fixture_client.close()
+        async def dispatch(request):
+            if request.url.path.endswith("/calendar"):
+                return await previous_transport.handle_async_request(request)
+            return await fixture_transport.handle_async_request(request)
+        probe.client.ops._transport = httpx.MockTransport(dispatch)
+        # Existing fixture login returns the public TOKEN; normal get methods
+        # remain intact so the operation keeps its real phase tracker.
+        e.runner.client_factory = lambda: probe.client
+        startup_pool = e.runner.read_pool
+        startup_pool.shutdown()
+        task = asyncio.create_task(e.runner.run())
+        try:
+            await asyncio.wait_for(probe.entered.wait(), 2)
+            assert not probe.wire.get("a") and probe.active_workers == 1
+            await asyncio.wait_for(task, 4)
+            stopped = next(value for value in e.logs if value["kind"] == "PRIVATE_VALIDATOR_TASK_STOPPED")
+            assert stopped["status"] == "TIMEOUT" and stopped["durable_stop"] and stopped["client_closed"]
+            assert stopped["owned_pending"] == 1 and stopped["cleanup"]["status"] == "UNKNOWN"
+            assert probe.operations == ["a"] and not probe.wire.get("a")
+            assert e.runner.failed and not e.runner.admission_ready
+            assert not any(value["kind"] == "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED" for value in e.logs)
+            probe.unblock()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+            assert e.logs[-1] == {"kind": "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED", "owned_pending": 0, "client_closed": True}
+            assert probe.operations == ["a"] and not probe.client.sessions
+            statuses = [value["status"] for value in probe.wire["a"] if value["type"] == "http.response.start"]
+            assert statuses == [403]
+            with pytest.raises(s.Closed) as replay:
+                await e.runner.action("a", "own_calendar")
+            assert replay.value.code == "REPLAY" and probe.operations == ["a"]
+            body = b"".join(value.get("body", b"") for value in probe.wire["a"])
+            assert b'"bookings"' not in body
+            target = [value for value in e.logs if value.get("stage") == "user_get" and value.get("route") == "own_calendar"]
+            assert target[0]["phase"] == "headers" and target[0]["elapsed_ms"] >= 1900
+            assert target[-1]["outcome"] == "error" and not e.runner.jobs
+        finally:
+            probe.unblock()
+            await asyncio.gather(task, return_exceptions=True)
+            await probe.close()
+    asyncio.run(exercise())
 
 
 def snapshot_fixture_engine(url, opt_in):
