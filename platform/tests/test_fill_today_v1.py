@@ -372,6 +372,35 @@ def test_fill_today_native_pg_hold_expiry_uses_database_now(fill_today):
     print("FILL_TODAY_NATIVE_PG_PASS kind=holds date=" + date)
 
 
+def test_fill_today_user_transaction_mode_prerequisite(fill_today, capsys):
+    from fmc.supabase_v1 import one
+    _, store, user_id, _, _ = fill_today
+    # Query-only added body; the unchanged disposable fixture still seeds and
+    # cleans up SQL rows. Observe inherited mode without changing any setting.
+    with store.user(user_id) as c:
+        isolation_row = one(c.execute(text("SHOW transaction_isolation")))
+        read_only_row = one(c.execute(text("SHOW transaction_read_only")))
+    if type(isolation_row) is not dict or len(isolation_row) != 1:
+        pytest.fail("Native transaction isolation result shape is unrecognized.", pytrace=False)
+    if type(read_only_row) is not dict or len(read_only_row) != 1:
+        pytest.fail("Native transaction read-only result shape is unrecognized.", pytrace=False)
+    isolation, = isolation_row.values()
+    read_only, = read_only_row.values()
+    allowed_isolation = {
+        "read uncommitted": "read_uncommitted",
+        "read committed": "read_committed",
+        "repeatable read": "repeatable_read",
+        "serializable": "serializable",
+    }
+    # Fail closed without printing arbitrary database values or row metadata.
+    if type(isolation) is not str or isolation not in allowed_isolation:
+        pytest.fail("Native transaction isolation value is unrecognized.", pytrace=False)
+    if type(read_only) is not str or read_only not in ("on", "off"):
+        pytest.fail("Native transaction read-only value is unrecognized.", pytrace=False)
+    with capsys.disabled():
+        print("FILL_TODAY_USER_TX_MODE_OBSERVED isolation=" + allowed_isolation[isolation] + " read_only=" + read_only)
+
+
 
 def test_fill_demand_aware_opportunity_is_incremental_private_and_lifecycle_aware(fill_today):
     url, store, user_id, org_id, court_id = fill_today
