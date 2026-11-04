@@ -175,22 +175,64 @@ export async function writeStaticPackage({sourceRoot,sourceSha,output}){
   return {files:entries.size,functions:0,sourceSha};
 }
 export function approved(pr,sha){
-  const marks=[...(pr?.body??'').matchAll(/<!-- GET_STAGING_UAT_APPROVED_SHA:([a-f0-9]{40}) -->/g)];
+  const body=typeof pr?.body==='string'?pr.body:'';
+  const marks=[...body.matchAll(/<!-- GET_STAGING_UAT_APPROVED_SHA:([a-f0-9]{40}) -->/g)];
   return SHA.test(sha??'')&&pr?.number===5&&pr.state==='open'&&pr.draft===true&&
     pr.head?.sha===sha&&pr.head?.ref==='get/release-candidate-mvp-qa-04'&&
     pr.head?.repo?.full_name===REPO&&pr.base?.ref==='getacourt-staging'&&
     pr.base?.repo?.full_name===REPO&&pr.title?.includes('[skip netlify]')&&
+    (body.match(/<!--\s*GET_STAGING_UAT_APPROVED_SHA\b/g)??[]).length===1&&
     marks.length===1&&marks[0][1]===sha;
+}
+const SOURCE_BRANCH='get/release-candidate-mvp-qa-04';
+export function invocationCandidate(context){
+  const c=context,sha=c?.sourceSha;
+  if(!SHA.test(sha??'')||!SHA.test(c?.workflowSha??'')||c?.repository!==REPO||
+    c?.browserResult!=='success')throw Error('READER_INVOCATION_REJECTED');
+  if(c.eventName==='workflow_dispatch'){
+    const inputs=c.event?.inputs;
+    if(!inputs||typeof inputs!=='object'||Array.isArray(inputs)||
+      Object.keys(inputs).sort().join(',')!=='candidate_sha,scope'||
+      inputs.scope!=='pr5-reader-static'||inputs.candidate_sha!==sha||
+      c.workflowSha!==sha||c.ref!=='refs/heads/'+SOURCE_BRANCH)throw Error('READER_INVOCATION_REJECTED');
+  }else if(c.eventName==='pull_request'){
+    if(c.ref!=='refs/pull/5/merge'||c.event?.number!==5||
+      !approved(c.event?.pull_request,sha))throw Error('READER_INVOCATION_REJECTED');
+  }else throw Error('READER_INVOCATION_REJECTED');
+  return sha;
+}
+function latestSuccessful(runs,sha,path){
+  const latest=runs.filter(r=>r.path===path&&r.head_sha===sha&&r.event==='pull_request'&&
+    r.head_branch===SOURCE_BRANCH&&r.head_repository?.full_name===REPO)
+    .sort((a,b)=>b.run_number-a.run_number||b.run_attempt-a.run_attempt)[0];
+  return latest?.status==='completed'&&latest.conclusion==='success';
 }
 export function ciState(runs,sha){
   const paths=['.github/workflows/platform-ci.yml','.github/workflows/getacourt-a11y-ci.yml',
     '.github/workflows/getacourt-offline-safety-ci.yml'];
-  return paths.every(path=>{
-    const latest=runs.filter(r=>r.path===path&&r.head_sha===sha&&r.event==='pull_request'&&
-      r.head_branch==='get/release-candidate-mvp-qa-04'&&r.head_repository?.full_name===REPO)
-      .sort((a,b)=>b.run_number-a.run_number||b.run_attempt-a.run_attempt)[0];
-    return latest?.status==='completed'&&latest.conclusion==='success';
-  });
+  return paths.every(path=>latestSuccessful(runs,sha,path));
+}
+// Adapters are injected only for offline qualification. The CLI below supplies
+// the real runner event/API/protection adapters, never a synthetic environment.
+export async function qualifyReaderInvocation({context,loadPr,loadRuns,checkProtection,
+  wait=ms=>new Promise(r=>setTimeout(r,ms)),attempts=20}){
+  const sha=invocationCandidate(context);
+  if(!approved(await loadPr(),sha))throw Error('EXACT_OWNER_UAT_GO_MISSING_OR_STALE');
+  for(let i=0;i<attempts;i++){
+    const runs=await loadRuns(sha);
+    const complete=ciState(runs,sha)&&(context.eventName!=='workflow_dispatch'||
+      latestSuccessful(runs,sha,'.github/workflows/getacourt-federated-search-ci.yml'));
+    if(complete){
+      if(!approved(await loadPr(),sha))throw Error('PR_CHANGED');
+      if(await checkProtection('https://deploy-preview-5--getacourt-preview.netlify.app/')!==401)
+        throw Error('EXISTING_NONPRODUCTION_PROTECTION_UNVERIFIED');
+      if(!approved(await loadPr(),sha))throw Error('PR_CHANGED');
+      return sha;
+    }
+    if(i===attempts-1)throw Error('REQUIRED_CI_NOT_GREEN');
+    await wait(15000);
+  }
+  throw Error('REQUIRED_CI_NOT_GREEN');
 }
 async function api(path){
   if(!process.env.GITHUB_TOKEN)throw Error('GITHUB_READ_TOKEN_MISSING');
@@ -200,21 +242,18 @@ async function api(path){
   if(!r.ok)throw Error('GITHUB_READ_FAILED');return r.json();
 }
 async function gate(){
-  const sha=process.env.SOURCE_SHA;
-  if(!approved(await api('/pulls/5'),sha))throw Error('EXACT_OWNER_UAT_GO_MISSING_OR_STALE');
-  for(let i=0;i<20;i++){
-    const result=await api('/actions/runs?head_sha='+sha+'&event=pull_request&per_page=100');
-    if(ciState(result.workflow_runs??[],sha)){
-      if(!approved(await api('/pulls/5'),sha))throw Error('PR_CHANGED');
-      // The staging branch alias is the published branch, not the protected PR
-      // preview. Use the previously established, actual PR5 Deploy Preview.
-      const r=await fetch('https://deploy-preview-5--getacourt-preview.netlify.app/',{redirect:'manual',signal:AbortSignal.timeout(15000)});
-      if(r.status!==401)throw Error('EXISTING_NONPRODUCTION_PROTECTION_UNVERIFIED');
-      console.log('Exact PR5 approval, required CI and existing protected preview verified.');return;
-    }
-    if(i===19)throw Error('REQUIRED_CI_NOT_GREEN');
-    await new Promise(r=>setTimeout(r,15000));
-  }
+  if(process.env.GITHUB_ACTIONS!=='true'||!process.env.GITHUB_EVENT_PATH)throw Error('READER_INVOCATION_REJECTED');
+  const context={eventName:process.env.GITHUB_EVENT_NAME,repository:process.env.GITHUB_REPOSITORY,
+    ref:process.env.GITHUB_REF,workflowSha:process.env.GITHUB_SHA,sourceSha:process.env.SOURCE_SHA,
+    browserResult:process.env.READER_BROWSER_RESULT,
+    event:JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH,'utf8'))};
+  await qualifyReaderInvocation({context,loadPr:()=>api('/pulls/5'),
+    loadRuns:async sha=>(await api('/actions/runs?head_sha='+sha+'&event=pull_request&per_page=100')).workflow_runs??[],
+    checkProtection:async url=>{
+      const r=await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(15000)});
+      await r.body?.cancel();return r.status;
+    }});
+  console.log('Exact invocation, live PR5 approval, required CI and protected preview verified.');
 }
 async function prepare(){
   const sha=process.env.SOURCE_SHA,temp=process.env.RUNNER_TEMP;

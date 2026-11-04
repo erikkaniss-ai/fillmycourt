@@ -7,6 +7,15 @@ on:
       - 'netlify/**'
       - '.github/workflows/getacourt-federated-search-ci.yml'
   workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: 'Exact reviewed PR5 head SHA (40 lowercase hex); no branch fallback'
+        required: true
+        type: string
+      scope:
+        description: 'Explicit scope: pr5-reader-static'
+        required: true
+        type: string
 permissions:
   contents: read
   actions: read
@@ -65,19 +74,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
   private-reader-draft:
-    # Reader work is parked. Only an explicit exact-head Reader scope may run
-    # its old static acceptance draft; release-path changes do not revive it.
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 5 && contains(github.event.pull_request.body, format('<!-- GET_STAGING_UAT_APPROVED_SHA:{0} -->', github.event.pull_request.head.sha))
+    # Both paths still need the live exact-head owner gate before credentials.
+    # Manual checkout must be the workflow's own assigned-branch immutable SHA.
+    if: github.repository == 'erikkaniss-ai/fillmycourt' && ((github.event_name == 'pull_request' && github.event.pull_request.number == 5 && github.event.pull_request.head.ref == 'get/release-candidate-mvp-qa-04' && github.event.pull_request.head.repo.full_name == 'erikkaniss-ai/fillmycourt' && contains(github.event.pull_request.body, format('<!-- GET_STAGING_UAT_APPROVED_SHA:{0} -->', github.event.pull_request.head.sha))) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/get/release-candidate-mvp-qa-04' && inputs.scope == 'pr5-reader-static' && inputs.candidate_sha == github.sha))
     needs: search-contract-and-browser
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+      SOURCE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_sha || github.event.pull_request.head.sha }}
+      READER_BROWSER_RESULT: ${{ needs.search-contract-and-browser.result }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ env.SOURCE_SHA }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
