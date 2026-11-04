@@ -401,6 +401,111 @@ def test_fill_today_user_transaction_mode_prerequisite(fill_today, capsys):
         print("FILL_TODAY_USER_TX_MODE_OBSERVED isolation=" + allowed_isolation[isolation] + " read_only=" + read_only)
 
 
+@pytest.mark.parametrize("mode", ["keep", "revoke"])
+def test_fill_today_preacquired_membership_snapshot(fill_today, capsys, mode):
+    from contextlib import ExitStack, contextmanager
+    from fmc.fill_today_read import SCOPE, SNAPSHOT, read_today
+    from fmc.supabase_v1 import one
+    _, store, user_id, org_id, court_id = fill_today
+    trace, state = [], {"trusted_closed": False, "user_closed": False, "deleted": 0, "user_contexts": 0}
+    body = None
+
+    # Pre-acquire the existing trusted context before user setup/SCOPE. The
+    # dedicated stack holds only this context; there is no in-hook checkout.
+    with ExitStack() as trusted_stack:
+        trusted = trusted_stack.enter_context(store.trusted())
+        trace.append("trusted_acquired")
+        trusted.execute(text("SET LOCAL lock_timeout='500ms'"))
+        trusted.execute(text("SET LOCAL statement_timeout='1000ms'"))
+
+        class ConnectionObserver:
+            def __init__(self, native):
+                self.native = native
+
+            def execute(self, statement, params):
+                if statement is SCOPE:
+                    assert not state["trusted_closed"]
+                    result = self.native.execute(statement, params)
+                    trace.append("scope_returned")
+                    if mode == "revoke":
+                        deleted = trusted.execute(text("""
+                            delete from public.organization_members
+                            where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
+                        """), {"org": org_id, "uid": user_id})
+                        assert deleted.rowcount == 1
+                        state["deleted"] = deleted.rowcount
+                        trace.append("member_deleted")
+                    # Record success only AFTER actual trusted-context close
+                    # returns. Native SCOPE rows are never consumed/replaced.
+                    trusted_stack.close()
+                    state["trusted_closed"] = True
+                    trace.append("trusted_closed")
+                    return result
+                assert statement is SNAPSHOT and state["trusted_closed"]
+                trace.append("snapshot_entered")
+                result = self.native.execute(statement, params)
+                trace.append("snapshot_returned")
+                return result
+
+        class UserObserver:
+            @contextmanager
+            def user(self, uid):
+                assert uid == user_id
+                state["user_contexts"] += 1
+                try:
+                    with store.user(uid) as native:
+                        assert native is not trusted
+                        trace.append("user_acquired")
+                        native.execute(text("SET LOCAL lock_timeout='500ms'"))
+                        native.execute(text("SET LOCAL statement_timeout='1000ms'"))
+                        for query, expected in (("SHOW transaction_isolation", "read committed"),
+                                                ("SHOW transaction_read_only", "off")):
+                            row = one(native.execute(text(query)))
+                            if type(row) is not dict or len(row) != 1:
+                                pytest.fail("Native membership transaction mode shape is unsupported.", pytrace=False)
+                            value, = row.values()
+                            if type(value) is not str or value != expected:
+                                pytest.fail("Native membership transaction mode is unsupported.", pytrace=False)
+                        trace.append("user_mode_confirmed")
+                        yield ConnectionObserver(native)
+                except DomainError:
+                    # The original user context has unwound before this point;
+                    # preserve the real helper exception, without suppression.
+                    state["user_closed"] = True
+                    trace.append("user_closed")
+                    raise
+                else:
+                    state["user_closed"] = True
+                    trace.append("user_closed")
+
+        if mode == "revoke":
+            with pytest.raises(DomainError) as denied:
+                body = read_today(UserObserver(), Actor(id=user_id), org_id, "2026-10-05", datetime(2026, 10, 5).date())
+            assert denied.value.code == "FORBIDDEN" and denied.value.status == 403 and body is None
+        else:
+            body = read_today(UserObserver(), Actor(id=user_id), org_id, "2026-10-05", datetime(2026, 10, 5).date())
+            assert body["date"] == "2026-10-05" and body["timezone"] == "Europe/Lisbon" and body["currency"] == "EUR"
+            summary = body["summary"]
+            assert (summary["capacity_minutes"], summary["booked_minutes"], summary["held_minutes"],
+                    summary["blocked_minutes"], summary["empty_minutes"]) == (1050, 90, 0, 60, 900)
+            assert (summary["bookings"], summary["cancellations"], summary["revenue_minor"]) == (1, 1, 3600)
+            court, = body["courts"]
+            assert court["court_id"] == court_id and court["has_rate_coverage"] is True
+            window, = court["sellable_windows"]
+            assert (window["start_minute"], window["end_minute"]) == (360, 1410) and body["empty_windows"]
+
+    assert state["trusted_closed"] and state["user_closed"] and state["user_contexts"] == 1
+    assert state["deleted"] == (1 if mode == "revoke" else 0)
+    assert trace == ["trusted_acquired", "user_acquired", "user_mode_confirmed", "scope_returned"] + (
+        ["member_deleted"] if mode == "revoke" else []
+    ) + ["trusted_closed", "snapshot_entered", "snapshot_returned", "user_closed"]
+    # Two completed pre-acquired contexts only; no claim about a client deadline,
+    # timeout cleanup, or undoing the separately committed member deletion.
+    result = "forbidden403" if mode == "revoke" else "dto"
+    with capsys.disabled():
+        print("FILL_TODAY_PREACQUIRED_MEMBERSHIP_PG_PASS case=" + mode + " result=" + result)
+
+
 
 def test_fill_demand_aware_opportunity_is_incremental_private_and_lifecycle_aware(fill_today):
     url, store, user_id, org_id, court_id = fill_today
