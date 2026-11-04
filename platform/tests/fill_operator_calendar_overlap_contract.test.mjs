@@ -357,3 +357,221 @@ test("Older Calendar 403 after newer occupied 200 preserves grid error and opera
  assert.equal(fixture.calls.length,5,"No stale retry, fallback or additional request");
  assert.ok(fixture.calls.every(call=>call.method==="GET"));
 });
+
+test("Current Calendar 403 evicts populated cached Today and Revenue readouts",{timeout:2000},async()=>{
+ const permission="FICTIONAL READOUT PERMISSION DENIED";
+ let calendarRequests=0;
+ const reply=number=>{
+  assert.equal(number<=2,true,"Only two fictional Calendar reads are permitted");
+  return number===1?ok(occupiedCalendar("FICTIONAL PRIOR OCCUPANCY")):
+   {ok:false,status:403,json:async()=>({error:permission})};
+ };
+ const el=Object.fromEntries(ids.map(id=>[id,make()]));
+ const nav=["today","calendar","revenue"].map(view=>make({view}));
+ const session=new Map([["fill.access",String(Symbol())]]),local=new Map(),calls=[];
+ const readoutIds=["#kpis","#courtUtilisation","#emptyCapacity",
+  "#revenueKpis","#opportunityQueue","#courtComparison"];
+ for(const id of [...readoutIds,"#calendarTimeline"]){
+  const node=el[id];let visibleText=node.textContent;
+  Object.defineProperty(node,"textContent",{enumerable:true,configurable:true,
+   get:()=>visibleText,set:value=>{visibleText=value;if(value==="")node.innerHTML="";}});
+ }
+ const courtLabel="FICTIONAL CACHED READOUT COURT";
+ const data={...coveredToday,summary:{...coveredToday.summary,
+  booked_minutes:60,empty_minutes:1380,revenue_minor:2400,bookings:1,utilization_pct:100/24},
+  courts:coveredToday.courts.map(court=>({...court,court_name:courtLabel,
+   booked_minutes:60,empty_minutes:1380,revenue_minor:2400,bookings:1,utilization_pct:100/24}))};
+ let notifyReadout,notifyAuthenticated;
+ const readoutReady=new Promise(done=>{notifyReadout=done;});
+ const authenticated=new Promise(done=>{notifyAuthenticated=done;});
+ let publicKpis="",publicAuthHidden=el["#authGate"].hidden;
+ Object.defineProperty(el["#kpis"],"innerHTML",{enumerable:true,configurable:true,
+  get:()=>publicKpis,set:value=>{publicKpis=value;if(String(value).length)notifyReadout();}});
+ Object.defineProperty(el["#authGate"],"hidden",{enumerable:true,configurable:true,
+  get:()=>publicAuthHidden,set:value=>{publicAuthHidden=value;if(value===true)notifyAuthenticated();}});
+ const ctx={URLSearchParams,Intl,Date,Map,Number,String,Error,Headers,encodeURIComponent,
+  location:{hostname:"fixture.invalid",hash:"",search:"",pathname:"/fill/"},
+  history:{replaceState(){}},
+  document:{querySelector:key=>el[key],querySelectorAll:key=>key===".nav-item"?nav:[]},
+  sessionStorage:{getItem:key=>session.get(key)||null,setItem:(key,value)=>session.set(key,value),
+   removeItem:key=>session.delete(key)},
+  localStorage:{getItem:key=>local.get(key)||null,setItem:(key,value)=>local.set(key,value),
+   removeItem:key=>local.delete(key)},
+  fetch:async(path,options={})=>{
+   assert.equal((options.method||"GET")==="GET",true,"Only fictional reads are permitted");
+   calls.push({path,method:options.method||"GET"});
+   if(path==="/api/me")return ok({user:{email:"qa@example.invalid"}});
+   if(path==="/api/fmc/organizations")return ok({items:[{
+    id:"fixture-org",name:"FICTIONAL READOUT CLUB",role:"support"}]});
+   if(path.startsWith("/api/fmc/fixture-org/today"))return ok(data);
+   if(path.startsWith("/api/fmc/fixture-org/calendar"))return reply(++calendarRequests);
+   throw Error("Unexpected fictional readout request");
+  }};
+ vm.runInNewContext(app,ctx);
+ await Promise.all([readoutReady,authenticated]);
+ const visit=async view=>{
+  const listener=nav.find(item=>item.dataset.view===view).listener("click");
+  assert.equal(typeof listener==="function",true,"Original navigation handler must be registered");
+  await listener();
+ };
+ assert.equal(el["#workspace"].hidden,false,"Fictional operator bootstrap must complete");
+ const originalSession=session.get("fill.access");
+ const originalOrg=el["#orgSelect"].value,originalIdentity=el["#identity"].textContent;
+ await visit("today");
+ assert.equal(el["#todayView"].hidden,false,"Original Today navigation must expose the readout");
+ assert.equal(el["#kpis"].innerHTML.length>0,true,"Today readout precondition must be populated");
+ assert.equal(el["#courtUtilisation"].innerHTML.includes(courtLabel),true,
+  "Today readout precondition must contain the fictional court");
+ await visit("revenue");
+ assert.equal(el["#revenueView"].hidden,false,"Original Revenue navigation must expose the readout");
+ assert.equal(el["#revenueKpis"].innerHTML.length>0,true,"Revenue readout precondition must be populated");
+ assert.equal(el["#courtComparison"].innerHTML.includes(courtLabel),true,
+  "Revenue readout precondition must contain the fictional court");
+ const bootstrapCalls=calls.slice();
+ assert.equal(bootstrapCalls.length,3,"Exactly three fictional bootstrap reads are expected");
+ assert.equal(JSON.stringify(bootstrapCalls.map(call=>new URL(call.path,"https://fixture.invalid").pathname))===
+  JSON.stringify(["/api/me","/api/fmc/organizations","/api/fmc/fixture-org/today"]),true);
+ await visit("calendar");
+ assert.equal(el["#calendarTimeline"].innerHTML.includes("lane-cell booked"),true,
+  "An occupied Calendar snapshot must precede the denial");
+ await visit("calendar");
+ assert.equal(el["#calendarTimeline"].innerHTML==="",true,"Denied Calendar must clear its timeline");
+ assert.equal(/lane-cell open|court-grid|unoccupied in Core/.test(el["#calendarTimeline"].innerHTML),false);
+ assert.equal(el["#error"].hidden,false);
+ assert.equal(el["#error"].textContent.includes(permission),true,"The current permission error must remain observable");
+ await visit("today");
+ assert.equal(el["#todayView"].hidden,false);
+ const todayCleared=readoutIds.slice(0,3).every(id=>el[id].innerHTML==="");
+ await visit("revenue");
+ assert.equal(el["#revenueView"].hidden,false);
+ const revenueCleared=readoutIds.slice(3).every(id=>el[id].innerHTML==="");
+ assert.equal(session.has("fill.access"),true);
+ assert.equal(session.get("fill.access")===originalSession,true);
+ assert.equal(el["#authGate"].hidden,true);
+ assert.equal(el["#workspace"].hidden,false);
+ assert.equal(el["#orgSelect"].value===originalOrg,true);
+ assert.equal(el["#identity"].textContent===originalIdentity,true);
+ const calendarPath="/api/fmc/fixture-org/calendar?"+new URLSearchParams({
+  start:today.day_start,end:today.day_end}).toString();
+ assert.equal(JSON.stringify(calls.slice(bootstrapCalls.length))===
+  JSON.stringify([{path:calendarPath,method:"GET"},{path:calendarPath,method:"GET"}]),true);
+ assert.equal(calls.length,5,"No retry or fallback is permitted after the denial");
+ assert.equal(calendarRequests,2);
+ assert.equal(calls.every(call=>call.method==="GET"),true);
+ assert.equal(todayCleared&&revenueCleared,true,
+  "Current Calendar403 must evict cached Today and Revenue readouts");
+});
+
+test("Older Calendar 403 preserves newer populated Today Revenue and Calendar readouts",{timeout:2000},async()=>{
+ const permission="FICTIONAL STALE READOUT PERMISSION DENIED";
+ let calendarRequests=0,completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});
+ const olderStarted=new Promise(done=>{notifyOlder=done;});
+ const reply=number=>{
+  assert.equal(number<=2,true,"Only two fictional Calendar reads are permitted");
+  if(number===1){notifyOlder();return older;}
+  return ok(occupiedCalendar("FICTIONAL NEWER READOUT SNAPSHOT"));
+ };
+ const el=Object.fromEntries(ids.map(id=>[id,make()]));
+ const nav=["today","calendar","revenue"].map(view=>make({view}));
+ const session=new Map([["fill.access",String(Symbol())]]),local=new Map(),calls=[];
+ const readoutIds=["#kpis","#courtUtilisation","#emptyCapacity",
+  "#revenueKpis","#opportunityQueue","#courtComparison"];
+ for(const id of [...readoutIds,"#calendarTimeline"]){
+  const node=el[id];let visibleText=node.textContent;
+  Object.defineProperty(node,"textContent",{enumerable:true,configurable:true,
+   get:()=>visibleText,set:value=>{visibleText=value;if(value==="")node.innerHTML="";}});
+ }
+ const courtLabel="FICTIONAL CACHED READOUT COURT";
+ const data={...coveredToday,summary:{...coveredToday.summary,
+  booked_minutes:60,empty_minutes:1380,revenue_minor:2400,bookings:1,utilization_pct:100/24},
+  courts:coveredToday.courts.map(court=>({...court,court_name:courtLabel,
+   booked_minutes:60,empty_minutes:1380,revenue_minor:2400,bookings:1,utilization_pct:100/24}))};
+ let notifyReadout,notifyAuthenticated;
+ const readoutReady=new Promise(done=>{notifyReadout=done;});
+ const authenticated=new Promise(done=>{notifyAuthenticated=done;});
+ let publicKpis="",publicAuthHidden=el["#authGate"].hidden;
+ Object.defineProperty(el["#kpis"],"innerHTML",{enumerable:true,configurable:true,
+  get:()=>publicKpis,set:value=>{publicKpis=value;if(String(value).length)notifyReadout();}});
+ Object.defineProperty(el["#authGate"],"hidden",{enumerable:true,configurable:true,
+  get:()=>publicAuthHidden,set:value=>{publicAuthHidden=value;if(value===true)notifyAuthenticated();}});
+ const ctx={URLSearchParams,Intl,Date,Map,Number,String,Error,Headers,encodeURIComponent,
+  location:{hostname:"fixture.invalid",hash:"",search:"",pathname:"/fill/"},
+  history:{replaceState(){}},
+  document:{querySelector:key=>el[key],querySelectorAll:key=>key===".nav-item"?nav:[]},
+  sessionStorage:{getItem:key=>session.get(key)||null,setItem:(key,value)=>session.set(key,value),
+   removeItem:key=>session.delete(key)},
+  localStorage:{getItem:key=>local.get(key)||null,setItem:(key,value)=>local.set(key,value),
+   removeItem:key=>local.delete(key)},
+  fetch:async(path,options={})=>{
+   assert.equal((options.method||"GET")==="GET",true,"Only fictional reads are permitted");
+   calls.push({path,method:options.method||"GET"});
+   if(path==="/api/me")return ok({user:{email:"qa@example.invalid"}});
+   if(path==="/api/fmc/organizations")return ok({items:[{
+    id:"fixture-org",name:"FICTIONAL READOUT CLUB",role:"support"}]});
+   if(path.startsWith("/api/fmc/fixture-org/today"))return ok(data);
+   if(path.startsWith("/api/fmc/fixture-org/calendar"))return reply(++calendarRequests);
+   throw Error("Unexpected fictional readout request");
+  }};
+ vm.runInNewContext(app,ctx);
+ await Promise.all([readoutReady,authenticated]);
+ const visit=async view=>{
+  const listener=nav.find(item=>item.dataset.view===view).listener("click");
+  assert.equal(typeof listener==="function",true,"Original navigation handler must be registered");
+  await listener();
+ };
+ assert.equal(el["#workspace"].hidden,false,"Fictional operator bootstrap must complete");
+ const originalSession=session.get("fill.access");
+ const originalOrg=el["#orgSelect"].value,originalIdentity=el["#identity"].textContent;
+ await visit("today");
+ assert.equal(el["#todayView"].hidden,false,"Original Today navigation must expose the readout");
+ assert.equal(el["#kpis"].innerHTML.length>0,true,"Today readout precondition must be populated");
+ assert.equal(el["#courtUtilisation"].innerHTML.includes(courtLabel),true,
+  "Today readout precondition must contain the fictional court");
+ await visit("revenue");
+ assert.equal(el["#revenueView"].hidden,false,"Original Revenue navigation must expose the readout");
+ assert.equal(el["#revenueKpis"].innerHTML.length>0,true,"Revenue readout precondition must be populated");
+ assert.equal(el["#courtComparison"].innerHTML.includes(courtLabel),true,
+  "Revenue readout precondition must contain the fictional court");
+ const bootstrapCalls=calls.slice();
+ assert.equal(bootstrapCalls.length,3,"Exactly three fictional bootstrap reads are expected");
+ assert.equal(JSON.stringify(bootstrapCalls.map(call=>new URL(call.path,"https://fixture.invalid").pathname))===
+  JSON.stringify(["/api/me","/api/fmc/organizations","/api/fmc/fixture-org/today"]),true);
+ const oldRequest=visit("calendar");
+ await olderStarted;
+ await visit("calendar");
+ const newerReadouts=readoutIds.map(id=>el[id].innerHTML);
+ const newerGrid=el["#calendarTimeline"].innerHTML;
+ const newerError={hidden:el["#error"].hidden,text:el["#error"].textContent};
+ assert.equal(newerGrid.includes("lane-cell booked"),true);
+ assert.equal(newerGrid.includes("FICTIONAL NEWER READOUT SNAPSHOT"),true);
+ assert.equal(newerError.hidden,true);
+ completeOlder({ok:false,status:403,json:async()=>({error:permission})});
+ await oldRequest;
+ assert.equal(readoutIds.every((id,index)=>el[id].innerHTML===newerReadouts[index]),true,
+  "Stale403 must preserve every newer shared readout");
+ assert.equal(el["#calendarTimeline"].innerHTML===newerGrid,true);
+ assert.equal(el["#error"].hidden===newerError.hidden,true);
+ assert.equal(el["#error"].textContent===newerError.text,true);
+ assert.equal(el["#error"].textContent.includes(permission),false);
+ await visit("today");
+ assert.equal(el["#todayView"].hidden,false);
+ assert.equal(el["#courtUtilisation"].innerHTML.includes(courtLabel),true);
+ await visit("revenue");
+ assert.equal(el["#revenueView"].hidden,false);
+ assert.equal(el["#courtComparison"].innerHTML.includes(courtLabel),true);
+ assert.equal(readoutIds.every((id,index)=>el[id].innerHTML===newerReadouts[index]),true);
+ assert.equal(session.has("fill.access"),true);
+ assert.equal(session.get("fill.access")===originalSession,true);
+ assert.equal(el["#authGate"].hidden,true);
+ assert.equal(el["#workspace"].hidden,false);
+ assert.equal(el["#orgSelect"].value===originalOrg,true);
+ assert.equal(el["#identity"].textContent===originalIdentity,true);
+ const calendarPath="/api/fmc/fixture-org/calendar?"+new URLSearchParams({
+  start:today.day_start,end:today.day_end}).toString();
+ assert.equal(JSON.stringify(calls.slice(bootstrapCalls.length))===
+  JSON.stringify([{path:calendarPath,method:"GET"},{path:calendarPath,method:"GET"}]),true);
+ assert.equal(calls.length,5,"A stale denial must not retry or fall back");
+ assert.equal(calendarRequests,2);
+ assert.equal(calls.every(call=>call.method==="GET"),true);
+});

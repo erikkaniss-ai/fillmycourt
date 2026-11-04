@@ -337,6 +337,12 @@
       if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
           calendarEpoch !== state.calendarEpoch || state.view !== "calendar" ||
           state.org !== org || state.today !== day) return;
+      if (error.status === 403) {
+      state.today = null;
+      [el.kpis, el.util, el.empty, el.revenueKpis, el.opportunityQueue,
+        el.courtComparison].forEach((node) => { node.textContent = ""; });
+      el.utilBadge.textContent = "—";
+      }
       state.calendar = null;
       el.timeline.innerHTML = "";
       throw error;
