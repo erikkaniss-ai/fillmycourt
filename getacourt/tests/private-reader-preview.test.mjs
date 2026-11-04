@@ -139,6 +139,41 @@ test('exact-attempt job proof refuses unknown, duplicate, partial and unlinked e
     loadRunJobs:async()=>({total_count:1,jobs:[{...(await sourceJobs(4,1)).jobs[0],conclusion}]})}),/CI/);
 });
 
+test('newer relevant ambiguous head identity cannot fall through to an older genuine green',async()=>{
+  const older={...greenRuns()[3],id:10,run_number:10};
+  const mutations=[r=>delete r.head_repository,r=>r.head_repository=null,r=>r.head_repository=false,
+    r=>r.head_repository=repo.full_name,r=>r.head_repository=[],r=>r.head_repository={},
+    ...[null,42,false,[],{},'', ' '].map(value=>r=>r.head_repository={full_name:value}),
+    r=>delete r.head_branch,...[null,42,false,[],{},'', ' '].map(value=>r=>r.head_branch=value)];
+  for(const mutate of mutations){
+    const newer={...older,id:11,run_number:11,conclusion:'failure'};mutate(newer);
+    const jobs=[],protection=[];
+    await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+      loadRuns:async()=>[...greenRuns().slice(0,3),older,newer],
+      loadRunJobs:async(id,a)=>{jobs.push(id);return sourceJobs(id,a);},
+      checkProtection:async()=>{protection.push(true);return 401;}}),/CI_RUN_PROOF_INVALID/);
+    assert.deepEqual(jobs,[]);assert.deepEqual(protection,[]);
+  }
+});
+
+test('explicit complete foreign identities stay unrelated and exact current approval identity stays excluded',async()=>{
+  const older={...greenRuns()[3],id:10,run_number:10};
+  for(const foreign of [{...older,id:11,run_number:11,conclusion:'failure',head_repository:{full_name:'other/repo'}},
+    {...older,id:11,run_number:11,conclusion:'failure',head_branch:'another-branch'}]){
+    const reads=[];
+    assert.equal(await readerGate.qualifyReaderInvocation({...adapters(),
+      loadRuns:async()=>[...greenRuns().slice(0,3),older,foreign],
+      loadRunJobs:async(id,a)=>{reads.push(id);return sourceJobs(id,a);}}),sha);
+    assert.deepEqual(reads,[10]);
+  }
+  const current={...older,id:99,run_number:12,status:'in_progress',conclusion:null};
+  delete current.head_repository;delete current.head_branch;
+  assert.equal(await readerGate.qualifyReaderInvocation({...adapters(),
+    loadRuns:async()=>[...greenRuns().slice(0,3),older,current]}),sha);
+  await assert.rejects(readerGate.qualifyReaderInvocation({...adapters(),
+    loadRuns:async()=>[...greenRuns().slice(0,3),older,{...current,run_attempt:2}]}),/CI_RUN_PROOF_INVALID/);
+});
+
 test('classification has a 16-candidate bound and caches only complete exact attempts',async()=>{
   const candidates=Array.from({length:17},(_,i)=>({...greenRuns()[3],id:20+i,run_number:20+i}));
   let calls=0;

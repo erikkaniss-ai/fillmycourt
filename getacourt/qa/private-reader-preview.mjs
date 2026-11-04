@@ -249,9 +249,17 @@ export function ciState(runs,sha){
 export async function genuineFederatedCi(runs,sha,context,loadRunJobs,cache=new Map()){
   if(!runnerInteger(context.runId)||typeof loadRunJobs!=='function')throw Error('CI_JOB_PROOF_REQUIRED');
   const candidates=runs.filter(r=>r.path===FEDERATED_PATH&&r.head_sha===sha&&r.event==='pull_request'&&
-    r.head_branch===SOURCE_BRANCH&&r.head_repository?.full_name===REPO&&
     !(approvalEvent(context)&&positiveInteger(r.id)&&String(r.id)===context.runId&&
-      r.run_attempt===Number(context.runAttempt)));
+      r.run_attempt===Number(context.runAttempt))).filter(r=>{
+    // A relevant record with missing/ill-typed identity is unknown, not foreign.
+    // Validate before excluding explicit unrelated heads, so an ambiguous newer
+    // failure cannot disappear and expose an older green.
+    const head=r.head_repository,name=head?.full_name,branch=r.head_branch;
+    if(!head||typeof head!=='object'||Array.isArray(head)||typeof name!=='string'||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(name)||typeof branch!=='string'||
+      !branch||/\s|[\x00-\x1f\x7f]/.test(branch))throw Error('CI_RUN_PROOF_INVALID');
+    return name===REPO&&branch===SOURCE_BRANCH;
+  });
   const seen=new Set();
   for(const r of candidates){
     const key=r.id+'/'+r.run_attempt;
