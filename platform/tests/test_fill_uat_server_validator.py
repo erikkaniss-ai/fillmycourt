@@ -1182,25 +1182,30 @@ def test_client_phase_real_timeout_keeps_unknown_cleanup_until_owned_stream_drai
 
 class _CausalQualification:
     """One in-process adapter over e; no listener, lifespan or real engine."""
-    tags = {"auth_initial", "auth_final", "guard_initial", "guard_final", "claims_setup", "query", "dispatch_wait", "response_wait"}
+    tags = {"auth_initial", "auth_final", "guard_initial", "guard_final", "claims_setup", "query", "dispatch_wait", "response_wait", "today_scope", "today_snapshot"}
 
-    def __init__(self, e, monkeypatch, tag=None, outcome="success", manual=True):
+    def __init__(self, e, monkeypatch, tag=None, outcome="success", manual=True, *, today=False):
         from fmc import v1_app
+        from fmc import fill_today_read
         from fmc.supabase_v1 import Actor, SupabaseAuth, V1Store
         self.e, self.tag, self.outcome = e, tag, outcome
+        self.today = today
+        self.target = "canary" if today and not manual else "a"
+        labels = s.LABELS if today else ("a", "b")
         assert tag is None or tag in self.tags
         self.loop = asyncio.get_running_loop()
         self.entered, self.release = asyncio.Event(), threading.Event()
         self.async_release = asyncio.Event()
         self.primed = False
         self.lock = threading.Lock()
-        self.auth_calls, self.ledger_calls = {"a": 0, "b": 0}, {"a": 0, "b": 0}
+        self.auth_calls, self.ledger_calls = dict.fromkeys(labels, 0), dict.fromkeys(labels, 0)
         self.scopes, self.route_executes, self.operations = 0, [], []
         self.factories = []
         self.wire, self.app_tasks, self.trackers = {}, [], []
+        self.requests, self.today_params = [], []
         self.active_workers = 0
-        self.tokens = {"a": TOKEN + "-a", "b": TOKEN + "-b"}
-        self.actors = {label: Actor(id=e.ids[label], fill_f1_run=e.cfg.run_id, fill_f1_fictional=True) for label in ("a", "b")}
+        self.tokens = {label: TOKEN + "-" + label for label in labels}
+        self.actors = {label: Actor(id=e.ids[label], fill_f1_run=e.cfg.run_id, fill_f1_fictional=True) for label in labels}
         if manual:
             e.clock.seconds = 200
             e.port.initial = False
@@ -1237,7 +1242,24 @@ class _CausalQualification:
                     owner.hold("claims_setup", self.label)
                     return Result()
                 assert self.label is not None and self.order[:2] == ["role", "claims"]
-                own = e.cfg.organizations[self.label]
+                own = e.cfg.organizations["b" if self.label == "b" else "a"]
+                if owner.today and statement is fill_today_read.SCOPE:
+                    assert params["uid"] == e.ids[self.label] and self.order == ["role", "claims"]
+                    owner.route_executes.append("today_scope")
+                    owner.hold("today_scope", self.label)
+                    allowed = params["org"] == own and owner.outcome != "scope_denied"
+                    return Result([{"membership_role": ("manager" if self.label == "b" else "owner") if allowed else None,
+                                    "organization": {"timezone": "Europe/Lisbon", "currency": "EUR"}}])
+                if owner.today and statement is fill_today_read.SNAPSHOT:
+                    assert params["uid"] == e.ids[self.label] and params["org"] == own
+                    assert owner.route_executes[-1] == "today_scope"
+                    owner.route_executes.append("today_snapshot")
+                    owner.today_params.append(dict(params))
+                    owner.hold("today_snapshot", self.label)
+                    if owner.outcome == "snapshot_denied": return Result()
+                    snapshot = owner.today_snapshot(params["begin"])
+                    if owner.outcome == "malformed": snapshot["court_rows"][0]["booked_minutes"] = True
+                    return Result([snapshot])
                 assert str(params["org"]) == own
                 if "from public.organization_members" in sql:
                     assert params["uid"] == e.ids[self.label]
@@ -1257,6 +1279,7 @@ class _CausalQualification:
         engine = Engine()
         store = object.__new__(V1Store)
         store.engine = engine
+        self.store = store
         self.guard = g.Guard(g.Lease.parse(e.spec), g.SQLLedger(engine), clock=e.clock.wall, monotonic=e.clock.tick)
         e.boot.guard = self.guard
         s.attach(self.guard, e.runner)
@@ -1267,7 +1290,7 @@ class _CausalQualification:
                 self.auth_calls[label] += 1
                 ordinal = self.auth_calls[label]
             self.hold("auth_initial" if ordinal == 1 else "auth_final", label)
-            if label == "a" and self.release.is_set() and self.outcome == "deny" and self.tag in {"auth_initial", "auth_final"}:
+            if label == self.target and self.release.is_set() and self.outcome == "deny" and self.tag in {"auth_initial", "auth_final"}:
                 return httpx.Response(401)
             return httpx.Response(200, json={"id": e.ids[label], "app_metadata": {"fill_f1_run": e.cfg.run_id, "fictional": True}})
 
@@ -1291,7 +1314,7 @@ class _CausalQualification:
         monkeypatch.setattr(v1_app, "SupabaseAuth", forbidden_authority_factory)
         monkeypatch.setattr(s, "from_environment", validator_factory)
         # Unrelated registrations are inert before application construction.
-        # No wider module inspection or config factory is needed for calendar.
+        # No wider module inspection or config factory is needed for these reads.
         for module, function in (("crm_delivery", "register_crm_delivery"), ("revenue_finance", "register_financial_foundation"), ("revenue_evidence", "register_shadow_evidence")):
             monkeypatch.setitem(sys.modules, "fmc." + module, SimpleNamespace(**{function: lambda *args: None}))
         settings = SimpleNamespace(database="PUBLIC_FAKE_ENGINE", environment="staging", origin=e.cfg.operations_origin,
@@ -1320,15 +1343,15 @@ class _CausalQualification:
         e.runner.read_pool = s.ThreadPoolExecutor(max_workers=1)
 
     def label_for_id(self, uid):
-        return next(label for label in ("a", "b") if self.e.ids[label] == uid)
+        return next(label for label in self.actors if self.e.ids[label] == uid)
 
     def label_for_token(self, bearer):
         # Existing full-run fixture uses its public TOKEN for all sessions.
-        if bearer == "Bearer " + TOKEN: return "a"
+        if bearer == "Bearer " + TOKEN: return self.target
         return next(label for label, token in self.tokens.items() if bearer == "Bearer " + token)
 
     def hold(self, tag, label):
-        if tag != self.tag or label != "a": return
+        if tag != self.tag or label != self.target: return
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -1348,7 +1371,7 @@ class _CausalQualification:
             with self.lock: self.active_workers -= 1
 
     async def async_hold(self, tag, label):
-        if tag != self.tag or label != "a": return
+        if tag != self.tag or label != self.target: return
         assert self.primed
         self.entered.set()
         await self.async_release.wait()
@@ -1364,6 +1387,7 @@ class _CausalQualification:
     async def operations_transport(self, request):
         label = self.label_for_token(request.headers["authorization"])
         self.operations.append(label)
+        self.requests.append((label, request.url.path, request.url.query))
         self.wire[label] = []
         await self.async_hold("dispatch_wait", label)
         complete = asyncio.Event()
@@ -1388,6 +1412,30 @@ class _CausalQualification:
         start = next(message for message in self.wire[label] if message["type"] == "http.response.start")
         body = b"".join(message.get("body", b"") for message in self.wire[label] if message["type"] == "http.response.body")
         return httpx.Response(start["status"], headers=start["headers"], content=body)
+
+    @staticmethod
+    def today_snapshot(begin):
+        # Result rows derived from the existing Today CI fixture: 06:00-23:30,
+        # booked 10:00-11:30, blocked 12:00-13:00, hourly EUR2400. This adapter
+        # supplies SQL results; only the real helper decodes/builds the DTO.
+        common = {"court_id": ID(501), "court_name": "Today Court"}
+        at = lambda minutes: (begin + timedelta(minutes=minutes)).isoformat()
+        windows = []
+        for start, end in ((360, 600), (780, 1410)):
+            duration = end - start
+            windows.append(dict(common, starts_at=at(start), ends_at=at(end), duration_minutes=duration,
+                bookable_60_count=(duration-60)//30+1, bookable_90_count=(duration-90)//30+1,
+                min_60_amount_minor=2400, max_60_amount_minor=2400,
+                min_90_amount_minor=3600, max_90_amount_minor=3600,
+                best_amount_minor=3600, best_duration_minutes=90, best_starts_at=at(start), currency="EUR"))
+        return {
+            "court_rows": [dict(common, open_start_minute=360, open_end_minute=1410,
+                capacity_minutes=1050, booked_minutes=90, held_minutes=0, blocked_minutes=60,
+                bookings=1, cancellations=1, revenue_minor=3600, has_rate_coverage=True)],
+            "sellable_windows": [dict(common, starts_at=at(360), ends_at=at(1410), start_minute=360, end_minute=1410)],
+            "empty_windows": sorted(windows, key=lambda window: -window["duration_minutes"]),
+            "financial": {"bookings": 1, "cancellations": 1, "revenue_minor": 3600},
+        }
 
     async def close(self):
         self.unblock()
@@ -1552,6 +1600,157 @@ def test_offline_causal_real_bound_late_delivery_stays_closed_until_server_settl
             target = [value for value in e.logs if value.get("stage") == "user_get" and value.get("route") == "own_calendar"]
             assert target[0]["phase"] == "headers" and target[0]["elapsed_ms"] >= 1900
             assert target[-1]["outcome"] == "error" and not e.runner.jobs
+        finally:
+            probe.unblock()
+            await asyncio.gather(task, return_exceptions=True)
+            await probe.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("label,tag", [("a", None), ("b", None), ("a", "today_scope"), ("a", "today_snapshot")])
+def test_offline_causal_today_helper_and_worker_boundaries(e, monkeypatch, label, tag):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, tag, today=True)
+        await probe.prime()
+        task = asyncio.create_task(e.runner.action(label, "own_today"))
+        try:
+            if tag is not None:
+                await asyncio.wait_for(probe.entered.wait(), 1)
+                await asyncio.sleep(0)
+                assert probe.active_workers == 1 and not task.done() and not probe.wire.get(label)
+                assert probe.trackers[-1].checkpoint[0] == "headers"
+                assert probe.route_executes == ["role", "claims", "today_scope"] + (["today_snapshot"] if tag == "today_snapshot" else [])
+                probe.unblock()
+            await asyncio.wait_for(task, 2)
+            assert probe.operations == [label] and probe.auth_calls[label] == probe.ledger_calls[label] == 2
+            assert probe.scopes == 3 and probe.factories == ["store", "guard", "validator"]
+            assert probe.route_executes == ["role", "claims", "today_scope", "today_snapshot"]
+            assert probe.requests == [(label, f"/api/fmc/{e.cfg.organizations[label]}/today", b"date=2030-01-01")]
+            messages = probe.wire[label]
+            assert next(message["status"] for message in messages if message["type"] == "http.response.start") == 200
+            body = json.loads(b"".join(message.get("body", b"") for message in messages))
+            assert body["date"] == START.date().isoformat() and body["timezone"] == "Europe/Lisbon" and body["currency"] == "EUR"
+            assert body["summary"] == {
+                "capacity_minutes": 1050, "booked_minutes": 90, "held_minutes": 0, "blocked_minutes": 60,
+                "empty_minutes": 900, "utilization_pct": 8.6, "bookings": 1, "cancellations": 1,
+                "revenue_minor": 3600, "active_courts": 1, "courts_with_rate_coverage": 1,
+                "courts_without_rate_coverage": 0, "bookable_60_starts": 27, "bookable_90_starts": 25,
+                "highest_single_quote_minor": 3600, "highest_single_quote_duration_minutes": 90,
+            }
+            court, = body["courts"]
+            assert court["court_id"] == ID(501) and court["empty_minutes"] == 900 and court["utilization_pct"] == 8.6
+            window, = court["sellable_windows"]
+            assert (window["start_minute"], window["end_minute"]) == (360, 1410)
+            assert window["starts_at"] == "2030-01-01T06:00:00+00:00"
+            assert [window["duration_minutes"] for window in body["empty_windows"]] == [630, 240]
+            assert not e.logs and len(e.runner.events) == 1
+        finally:
+            probe.unblock()
+            await asyncio.gather(task, return_exceptions=True)
+            await probe.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("outcome,foreign,status,has_snapshot", [
+    ("success", True, 403, False), ("scope_denied", False, 403, False),
+    ("snapshot_denied", False, 403, True), ("malformed", False, 503, True),
+])
+def test_offline_causal_today_scope_snapshot_and_decode_denials(e, monkeypatch, outcome, foreign, status, has_snapshot):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, outcome=outcome, today=True)
+        await probe.prime()
+        try:
+            if foreign:
+                await e.runner.action("a", "foreign_today")
+                assert e.runner.events[-1]["denied"] and e.runner.events[-1]["status"] == 403
+                assert probe.requests[0][1] == f"/api/fmc/{e.cfg.organizations['b']}/today"
+            else:
+                with pytest.raises(s.Closed) as denied:
+                    await e.runner.action("a", "own_today")
+                assert denied.value.code == "HTTP" and not e.runner.events
+            assert probe.route_executes == ["role", "claims", "today_scope"] + (["today_snapshot"] if has_snapshot else [])
+            assert probe.auth_calls["a"] == probe.ledger_calls["a"] == 2 and probe.scopes == 3
+            assert next(message["status"] for message in probe.wire["a"] if message["type"] == "http.response.start") == status
+            body = b"".join(message.get("body", b"") for message in probe.wire["a"])
+            assert json.loads(body)["error"] == ("TODAY_UNAVAILABLE" if outcome == "malformed" else "FORBIDDEN")
+            assert b'"courts"' not in body and b'"summary"' not in body
+            assert PASSWORD.encode() not in body and TOKEN.encode() not in body and not e.logs
+        finally:
+            await probe.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("day,hours", [("2030-01-01", 24), ("2030-03-31", 23), ("2030-10-27", 25)])
+def test_offline_causal_today_python_day_arguments_only(e, monkeypatch, day, hours):
+    # Fake result rows do not execute PostgreSQL generate_series or test driver
+    # cancellation, session timezone, bucket performance or live hold expiry.
+    from fmc.fill_today_read import read_today
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, today=True)
+        try:
+            started_before = e.runner.started
+            result = read_today(probe.store, probe.actors["a"], e.cfg.organizations["a"], day, datetime.fromisoformat(day).date())
+            params, = probe.today_params
+            begin, finish = params["begin"], params["finish"]
+            assert params["tz"] == "Europe/Lisbon" and params["weekday"] == datetime.fromisoformat(day).weekday()
+            assert begin.isoformat() == result["day_start"] and finish.isoformat() == result["day_end"]
+            assert begin.hour == finish.hour == 0 and finish.date() == begin.date() + timedelta(days=1)
+            assert finish.astimezone(timezone.utc) - begin.astimezone(timezone.utc) == timedelta(hours=hours)
+            assert result["date"] == day and e.runner.started == started_before
+            assert probe.route_executes == ["role", "claims", "today_scope", "today_snapshot"] and probe.scopes == 1
+            assert not probe.operations and not any(probe.auth_calls.values()) and not any(probe.ledger_calls.values())
+        finally:
+            await probe.close()
+    asyncio.run(exercise())
+
+
+def test_offline_causal_first_canary_today_real_bound_and_owned_drain(e, monkeypatch):
+    async def exercise():
+        probe = _CausalQualification(e, monkeypatch, "auth_final", manual=False, today=True)
+        await probe.prime()
+        # Login retains e's fictional Auth transport. The original run's FIRST
+        # own_today goes through the actual helper; no preceding Calendar read.
+        e.runner.client_factory = lambda: probe.client
+        probe.e.runner.read_pool.shutdown()
+        task = asyncio.create_task(e.runner.run())
+        try:
+            await asyncio.wait_for(probe.entered.wait(), 2)
+            assert probe.active_workers == 1 and not probe.wire.get("canary")
+            assert probe.auth_calls["canary"] == 2 and probe.ledger_calls["canary"] == 1
+            assert probe.route_executes == ["role", "claims", "today_scope", "today_snapshot"]
+            assert [(event["label"], event["route"]) for event in e.runner.events] == [("canary", "login")]
+            assert len(e.http) == 1 and e.http[0][:2] == ("POST", "/auth/v1/token")
+            assert probe.trackers[-1].checkpoint[0] == "headers"
+            await asyncio.wait_for(task, 4)
+            stopped = next(value for value in e.logs if value["kind"] == "PRIVATE_VALIDATOR_TASK_STOPPED")
+            assert stopped["status"] == "TIMEOUT" and stopped["durable_stop"] and stopped["client_closed"]
+            assert stopped["cleanup"]["status"] == "UNKNOWN" and stopped["owned_pending"] == 1
+            assert e.port.stopped and e.runner.failed and not e.runner.admission_ready
+            assert not probe.client.sessions and not e.runner.operator_gate and not e.runner.proof
+            assert len(e.runner.jobs) == 1 and not probe.wire.get("canary")
+            assert probe.operations == ["canary"] and len(probe.requests) == 1
+            assert probe.requests[0][1:] == (f"/api/fmc/{e.cfg.organizations['a']}/today", b"date=2030-01-01")
+            assert not any(value["kind"] == "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED" for value in e.logs)
+            from fmc.common import DomainError
+            with pytest.raises(DomainError): probe.guard.check(probe.actors["canary"])
+            assert probe.ledger_calls["canary"] == 1  # closed authority never reaches ledger
+            probe.unblock()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+            assert e.logs[-1] == {"kind": "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED", "owned_pending": 0, "client_closed": True}
+            assert not e.runner.jobs and probe.operations == ["canary"] and not probe.client.sessions
+            assert [message["status"] for message in probe.wire["canary"] if message["type"] == "http.response.start"] == [403]
+            body = b"".join(message.get("body", b"") for message in probe.wire["canary"])
+            assert json.loads(body)["error"] == "FILL_UAT_CLOSED"
+            assert all(key not in body for key in (b'"courts"', b'"summary"', b'Today Court', TOKEN.encode(), PASSWORD.encode()))
+            with pytest.raises(s.Closed) as replay: await e.runner.action("canary", "own_today")
+            assert replay.value.code == "REPLAY" and len(probe.requests) == 1
+            target = [value for value in e.logs if value.get("stage") == "user_get"]
+            assert all(value["route"] == "own_today" for value in target)
+            assert target[0]["phase"] == "headers" and target[0]["elapsed_ms"] >= 1900
+            assert target[-1]["outcome"] == "error"
+            encoded = s.canonical(e.logs)
+            assert all(sentinel not in encoded for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, "/api/", "https://"))
         finally:
             probe.unblock()
             await asyncio.gather(task, return_exceptions=True)
