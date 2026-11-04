@@ -5,6 +5,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import math
 import os
 import threading
 from types import SimpleNamespace
@@ -677,7 +678,13 @@ def test_delayed_user_get_diagnostics_preserve_fixed_route_and_ownership(e, monk
     assert [x["kind"] for x in events] == [first, "PRIVATE_VALIDATOR_LATE_STAGE"]
     assert [x["route"] for x in events] == [route, route]
     assert events[-1]["outcome"] == outcome
-    assert all(set(x) <= {"kind", "stage", "elapsed_ms", "outcome", "route"} for x in events)
+    assert all(set(x) <= {"kind", "stage", "elapsed_ms", "outcome", "route", "phase", "phase_elapsed_ms"} for x in events)
+    for event in events:
+        assert ("phase" in event) == ("phase_elapsed_ms" in event)
+        if "phase" in event:
+            assert type(event["phase"]) is str and event["phase"] in {"prepare", "headers", "body", "decode", "stream_exit", "validate"}
+            assert type(event["phase_elapsed_ms"]) is float and math.isfinite(event["phase_elapsed_ms"])
+            assert 0 <= event["phase_elapsed_ms"] <= event["elapsed_ms"]
     assert all(type(x["elapsed_ms"]) in {int, float} and x["elapsed_ms"] >= 0 for x in events)
     encoded = s.canonical(events)
     for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, e.plan.digest, e.cfg.run_id, e.cfg.authorization_id,
@@ -838,6 +845,338 @@ def test_user_get_timeout_closes_task_without_false_cleanup_then_drains(e, outco
     assert not e.runner.jobs and not e.client.sessions and not e.runner.operator_gate
     assert all(x["kind"] != "PRIVATE_FINAL_CANARY" for x in e.logs)
     assert PASSWORD not in s.canonical(e.logs) and TOKEN not in s.canonical(e.logs)
+
+
+async def stalled_get_phase(e, boundary, *, trigger="interrupted", outcome="complete", real_wait=False):
+    """Public controlled transport/stream, exercised through normal action()."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    route = "foreign_today" if boundary == "stream_exit" else "own_today"
+    async def stall():
+        entered.set()
+        await release.wait()
+        if outcome == "error": raise httpx.ReadError(PASSWORD + TOKEN)
+        if outcome == "cancelled": raise asyncio.CancelledError()
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            assert boundary != "stream_exit", "denied response body must not be read"
+            if boundary == "body_first": await stall()
+            yield b'{"date":"2030-01-01",'
+            if boundary == "body_later": await stall()
+            yield b'"courts":[]}'
+        async def aclose(self):
+            if boundary in {"stream_exit", "body_close"}: await stall()
+    async def transport(request):
+        e.http.append((request.method, request.url.path, e.clock.seconds))
+        if boundary == "headers": await stall()
+        return httpx.Response(403 if boundary == "stream_exit" else 200, stream=Stream())
+    client = s.Clients(PUBLIC_KEY, e.plan, e.cfg.operations_origin, clock=e.clock.wall,
+        auth_transport=httpx.MockTransport(transport), ops_transport=httpx.MockTransport(transport))
+    client.sessions["canary"] = (TOKEN, START + timedelta(hours=1))
+    e.clock.seconds = 10
+    e.port.initial = False
+    e.runner.ready = True
+    e.runner.client = client
+    e.runner.read_pool = s.ThreadPoolExecutor(max_workers=1)
+    bounded = e.runner.bounded
+    async def controlled_wait(awaitable, seconds, **context):
+        if context["stage"] == "user_get":
+            assert seconds == s.CONTROL_SECONDS == 2.0
+            if trigger == "timeout" and not real_wait:
+                seconds = 0
+        return await bounded(awaitable, seconds, **context)
+    e.runner.bounded = controlled_wait
+    task = asyncio.create_task(e.runner.action("canary", route))
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        if trigger == "interrupted":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError): await task
+        else:
+            with pytest.raises(s.Closed) as failure: await asyncio.wait_for(task, 3)
+            assert failure.value.code == "TIMEOUT"
+        assert len(e.runner.jobs) == 1 and len(e.http) == 1 and not e.runner.events
+        with pytest.raises(s.Closed) as replay: await e.runner.action("canary", route)
+        assert replay.value.code == "REPLAY" and len(e.http) == 1
+    finally:
+        release.set()
+        await asyncio.gather(task, *list(e.runner.jobs), return_exceptions=True)
+        await asyncio.sleep(0)
+        await client.close()
+        e.runner.read_pool.shutdown()
+    assert not client.sessions and not e.runner.jobs and not e.runner.events
+    return [x for x in e.logs if x.get("stage") == "user_get"]
+
+
+@pytest.mark.parametrize("boundary", ["headers", "body_first", "body_later", "stream_exit"])
+@pytest.mark.parametrize("trigger", ["interrupted", "timeout"])
+@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled"])
+def test_client_phase_distinguishes_controlled_stream_stalls(e, boundary, trigger, outcome):
+    events = asyncio.run(stalled_get_phase(e, boundary, trigger=trigger, outcome=outcome))
+    kind = "PRIVATE_VALIDATOR_STAGE_INTERRUPTED" if trigger == "interrupted" else "PRIVATE_VALIDATOR_STAGE_TIMEOUT"
+    assert events[0]["kind"] == kind
+    expected = "body" if boundary.startswith("body_") else boundary
+    assert events[0]["phase"] == expected
+    late_phase = "validate" if outcome == "complete" else "headers" if boundary == "headers" else "stream_exit"
+    assert events[-1]["kind"] == "PRIVATE_VALIDATOR_LATE_STAGE" and events[-1]["phase"] == late_phase
+    assert events[-1]["outcome"] == outcome
+    for event in events:
+        assert 0 <= event["phase_elapsed_ms"] <= event["elapsed_ms"]
+        assert set(event) <= {"kind", "stage", "elapsed_ms", "outcome", "route", "phase", "phase_elapsed_ms"}
+    encoded = s.canonical(events)
+    for sentinel in (PASSWORD, TOKEN, PUBLIC_KEY, e.plan.digest, e.cfg.run_id, e.ids["canary"], "https://", "/api/", "canary"):
+        assert sentinel not in encoded
+
+
+def test_client_phase_body_includes_httpx_eof_close_wait(e):
+    events = asyncio.run(stalled_get_phase(e, "body_close"))
+    assert events[0]["phase"] == "body" and events[-1]["phase"] == "validate"
+
+
+@pytest.mark.parametrize("denied", [False, True])
+def test_client_phase_sync_checkpoints_share_monotonic_origin_without_success_logs(e, monkeypatch, denied):
+    samples = iter((100.01, 100.02, 100.03, 100.04, 100.05, 100.06))
+    monkeypatch.setattr(s, "time", SimpleNamespace(monotonic=lambda: next(samples)))
+    marks = []
+    mark = s._GetPhase.mark
+    def observe(phase, name):
+        mark(phase, name)
+        marks.append((name, phase.fields(100.0, 100.1)))
+    monkeypatch.setattr(s._GetPhase, "mark", observe)
+    phase = s._GetPhase()
+    phase.started = 100.0
+    calls = []
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            assert not denied, "denied response body must not be read"
+            yield b'{"date":"2030-01-01","courts":[]}'
+        async def aclose(self): pass
+    def transport(request):
+        calls.append(request.method)
+        return httpx.Response(403 if denied else 200, stream=Stream())
+    async def exercise():
+        client = s.Clients(PUBLIC_KEY, e.plan, e.cfg.operations_origin, clock=e.clock.wall,
+            auth_transport=httpx.MockTransport(transport), ops_transport=httpx.MockTransport(transport))
+        client.sessions["canary"] = (TOKEN, START + timedelta(hours=1))
+        try:
+            assert await client.get("canary", "foreign_today" if denied else "own_today", e.ids["canary"], e.cfg.organizations,
+                                    START.date().isoformat(), phase=phase) == (403 if denied else 200)
+        finally:
+            await client.close()
+    asyncio.run(exercise())
+    expected = ["prepare", "headers", "stream_exit", "validate"] if denied else ["prepare", "headers", "body", "decode", "stream_exit", "validate"]
+    assert [name for name, _ in marks] == expected and calls == ["GET"] and not e.logs
+    assert all(fields["phase"] == name and 0 <= fields["phase_elapsed_ms"] <= 100 for name, fields in marks)
+
+
+@pytest.mark.parametrize("fault", ["json", "not_dict", "size", "status", "dto"])
+def test_client_phase_preserves_existing_exception_and_exit_semantics(e, fault):
+    payload = {"json": b'{', "not_dict": b'[]', "size": b'x' * (s.MAX_BODY + 1),
+               "status": b'{"date":"2030-01-01","courts":[]}', "dto": b'{"date":"wrong","courts":[]}' }[fault]
+    outcomes = []
+    for tracked in (False, True):
+        calls, closed = [], []
+        phase = s._GetPhase() if tracked else None
+        if phase is not None: phase.started = 100.0
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self): yield payload
+            async def aclose(self): closed.append(True)
+        def transport(request):
+            calls.append(request.method)
+            return httpx.Response(500 if fault == "status" else 200, stream=Stream())
+        async def exercise():
+            client = s.Clients(PUBLIC_KEY, e.plan, e.cfg.operations_origin, clock=e.clock.wall,
+                auth_transport=httpx.MockTransport(transport), ops_transport=httpx.MockTransport(transport))
+            client.sessions["canary"] = (TOKEN, START + timedelta(hours=1))
+            try:
+                with pytest.raises((s.Closed, json.JSONDecodeError)) as raised:
+                    await client.get("canary", "own_today", e.ids["canary"], e.cfg.organizations, START.date().isoformat(), phase=phase)
+                outcomes.append((type(raised.value), getattr(raised.value, "code", None)))
+            finally:
+                await client.close()
+        asyncio.run(exercise())
+        assert calls == ["GET"] and closed == [True] and not e.logs
+        if phase is not None:
+            assert phase.checkpoint[0] == ("validate" if fault in {"status", "dto"} else "stream_exit")
+    assert outcomes[0] == outcomes[1]
+
+
+@pytest.mark.parametrize("checkpoint", [None, {}, [], ("body",), ("body", 1.0, 2.0),
+    (PASSWORD, 100.5), (TOKEN, 100.5), ("https://private.invalid/" + TOKEN, 100.5),
+    (ID(999), 100.5), ("body", None), ("body", True), ("body", 100), ("body", float("nan")),
+    ("body", float("inf")), ("body", 99.0), ("body", 102.0)])
+def test_client_phase_invalid_checkpoint_omits_both_fields(e, checkpoint):
+    phase = s._GetPhase()
+    phase.started = 100.0
+    phase.checkpoint = checkpoint
+    assert phase.fields(100.0, 101.0) == {}
+    assert phase.fields(99.0, 101.0) == {}
+
+
+@pytest.mark.parametrize("started,began,now", [(None,100.0,101.0), (True,100.0,101.0), (100.0,100.0,float("nan")),
+    (100.0,100.0,float("inf")), (100.0,100.0,99.0), (-1e308,-1e308,1e308)])
+def test_client_phase_invalid_clock_or_overflow_omits_pair(started, began, now):
+    phase = s._GetPhase()
+    phase.started = started
+    phase.checkpoint = ("body", began)
+    assert phase.fields(began, now) == {}
+
+
+@pytest.mark.parametrize("metadata", [None, PASSWORD, TOKEN, {"phase": "body"}, ["body"], 123])
+def test_client_phase_untrusted_tracker_never_serializes_or_invokes_it(e, metadata):
+    async def exercise():
+        release = asyncio.Event()
+        async def stalled(): await release.wait()
+        try:
+            with pytest.raises(s.Closed):
+                await e.runner.bounded(stalled(), 0, stage="user_get", route="own_today", phase=metadata)
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert len(e.logs) == 2 and all("phase" not in x and "phase_elapsed_ms" not in x for x in e.logs)
+    assert PASSWORD not in s.canonical(e.logs) and TOKEN not in s.canonical(e.logs) and not e.http
+
+
+@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled"])
+def test_client_phase_overlapping_jobs_keep_independent_checkpoint_history(e, outcome):
+    async def exercise():
+        a, b = s._GetPhase(), s._GetPhase()
+        release_a, release_b = asyncio.Event(), asyncio.Event()
+        async def first():
+            a.mark("headers")
+            await release_a.wait()
+            a.mark("stream_exit")
+            if outcome == "error": raise ValueError(PASSWORD + TOKEN)
+            if outcome == "cancelled": raise asyncio.CancelledError()
+            a.mark("validate")
+        async def second():
+            b.mark("body")
+            await release_b.wait()
+            b.mark("validate")
+        try:
+            for operation, phase, route in ((first(),a,"own_today"),(second(),b,"own_calendar")):
+                with pytest.raises(s.Closed): await e.runner.bounded(operation,0,stage="user_get",route=route,phase=phase)
+            jobs = list(e.runner.jobs)
+            release_b.set()
+            await asyncio.wait_for(asyncio.shield(next(job for job in jobs if job.get_coro().__name__ == "second")), 1)
+            await asyncio.sleep(0)
+            assert len(e.runner.jobs) == 1 and e.logs[-1]["route"] == "own_calendar"
+        finally:
+            release_a.set()
+            release_b.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert [(x["route"], x["phase"]) for x in e.logs] == [
+        ("own_today","headers"),("own_calendar","body"),("own_calendar","validate"),
+        ("own_today","validate" if outcome == "complete" else "stream_exit")]
+    assert not e.runner.jobs and not e.http
+
+
+@pytest.mark.parametrize("stage,route", [("user_login","own_today"),("durable_stop","own_today"),("control_snapshot","own_today"),("user_get","unknown")])
+def test_client_phase_non_get_or_unknown_route_ignores_tracker(e, stage, route):
+    phase = s._GetPhase()
+    async def exercise():
+        release = asyncio.Event()
+        async def stalled():
+            phase.mark("body")
+            await release.wait()
+        try:
+            with pytest.raises(s.Closed): await e.runner.bounded(stalled(),0,stage=stage,route=route,phase=phase)
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert all("phase" not in x and "phase_elapsed_ms" not in x for x in e.logs) and phase.started is None
+
+
+def test_client_phase_before_coroutine_checkpoint_is_unknown(e):
+    phase = s._GetPhase()
+    async def exercise():
+        release = asyncio.Event()
+        async def stalled(): await release.wait()
+        try:
+            with pytest.raises(s.Closed): await e.runner.bounded(stalled(),0,stage="user_get",route="own_today",phase=phase)
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs), return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    assert all("phase" not in x and "phase_elapsed_ms" not in x for x in e.logs)
+
+
+@pytest.mark.parametrize("replacement", ["get", "_request"])
+def test_client_phase_legacy_injected_callables_keep_existing_signature(e, replacement):
+    e.clock.seconds = 10
+    e.port.initial = False
+    e.runner.ready = True
+    async def exercise():
+        release, entered = asyncio.Event(), asyncio.Event()
+        client = e.runner.client_factory()
+        client.sessions["canary"] = (TOKEN, START + timedelta(hours=1))
+        async def legacy_get(label, route, identity, organizations, day, *, deny=False):
+            entered.set()
+            await release.wait()
+            return 200
+        async def legacy_request(client, method, path, *, headers, payload=None, body=True):
+            entered.set()
+            await release.wait()
+            return 200, {"date":"2030-01-01","courts":[]}
+        setattr(client, replacement, legacy_get if replacement == "get" else legacy_request)
+        e.runner.client = client
+        e.runner.read_pool = s.ThreadPoolExecutor(max_workers=1)
+        task = asyncio.create_task(e.runner.action("canary","own_today"))
+        try:
+            await asyncio.wait_for(entered.wait(),1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError): await task
+            assert len(e.runner.jobs) == 1
+        finally:
+            release.set()
+            await asyncio.gather(task,*list(e.runner.jobs),return_exceptions=True)
+            await asyncio.sleep(0)
+            await client.close()
+            e.runner.read_pool.shutdown()
+    asyncio.run(exercise())
+    assert [x["route"] for x in e.logs] == ["own_today","own_today"]
+    assert all("phase" not in x and "phase_elapsed_ms" not in x for x in e.logs) and not e.http
+
+
+def test_client_phase_real_timeout_keeps_unknown_cleanup_until_owned_stream_drains(e):
+    release = asyncio.Event()
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            await release.wait()
+            yield b'{"date":"2030-01-01","courts":[]}'
+        async def aclose(self): pass
+    def transport(request):
+        e.http.append((request.method,request.url.path,e.clock.seconds))
+        return httpx.Response(200,stream=Stream())
+    factory = e.runner.client_factory
+    def controlled_factory():
+        client = factory()
+        client.ops._transport = httpx.MockTransport(transport)
+        return client
+    e.runner.client_factory = controlled_factory
+    async def exercise():
+        try:
+            await asyncio.wait_for(e.runner.run(),4)
+            final = next(x for x in e.logs if x["kind"] == "PRIVATE_VALIDATOR_TASK_STOPPED")
+            assert final["status"] == "TIMEOUT" and final["durable_stop"] and final["client_closed"]
+            assert final["owned_pending"] == 1 and final["cleanup"]["status"] == "UNKNOWN"
+            assert not e.runner.operator_gate and not any(x["kind"] == "PRIVATE_VALIDATOR_OWNERSHIP_DRAINED" for x in e.logs)
+        finally:
+            release.set()
+            await asyncio.gather(*list(e.runner.jobs),return_exceptions=True)
+            await asyncio.sleep(0)
+    asyncio.run(exercise())
+    diagnostics = [x for x in e.logs if x.get("stage") == "user_get"]
+    assert diagnostics[0]["phase"] == "body" and diagnostics[0]["elapsed_ms"] >= 1900
+    assert diagnostics[-1]["phase"] == "stream_exit" and diagnostics[-1]["outcome"] == "error"
+    assert e.logs[-1] == {"kind":"PRIVATE_VALIDATOR_OWNERSHIP_DRAINED","owned_pending":0,"client_closed":True}
+    assert len([x for x in e.http if x[0] == "GET"]) == 1 and not e.runner.jobs and not e.client.sessions
 
 
 def snapshot_fixture_engine(url, opt_in):

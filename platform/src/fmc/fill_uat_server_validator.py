@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -205,6 +206,35 @@ class JournalPort:
         return row is None or row["stopped"] and row["reconciliation_required"]
 
 
+class _GetPhase:
+    """Private checkpoint owned by one bounded GET operation."""
+    __slots__ = ("started", "checkpoint")
+    names = ("prepare", "headers", "body", "decode", "stream_exit", "validate")
+
+    def __init__(self):
+        self.started = None
+        self.checkpoint = None
+
+    def mark(self, name):
+        self.checkpoint = (name, time.monotonic())
+
+    def fields(self, began, now):
+        checkpoint = self.checkpoint
+        if type(checkpoint) is not tuple or len(checkpoint) != 2:
+            return {}
+        name, entered = checkpoint
+        if type(name) is not str or name not in _GetPhase.names:
+            return {}
+        if not all(type(value) is float and math.isfinite(value) for value in (self.started, began, entered, now)):
+            return {}
+        if self.started != began or not began <= entered <= now:
+            return {}
+        elapsed_ms, phase_ms = (now - began) * 1000, (now - entered) * 1000
+        if not math.isfinite(elapsed_ms) or not math.isfinite(phase_ms):
+            return {}
+        return {"phase": name, "phase_elapsed_ms": round(phase_ms, 3)}
+
+
 class Clients:
     """User client only. No Admin credential, arbitrary destination or redirects."""
     def __init__(self, publishable_key, plan, operations_origin, *, auth_transport=None, ops_transport=None, clock=g.utcnow):
@@ -219,18 +249,29 @@ class Clients:
     def __repr__(self):
         return "<FillUserClients private>"
 
-    async def _request(self, client, method, path, *, headers, payload=None, body=True):
+    async def _request(self, client, method, path, *, headers, payload=None, body=True, phase=None):
+        phase = phase if method == "GET" and type(phase) is _GetPhase else None
         require(not self.closed, "HTTP")
+        if phase is not None:
+            phase.mark("headers")
         async with client.stream(method, path, headers=headers, json=payload) as response:
-            data = bytearray()
-            if body:
-                async for chunk in response.aiter_bytes():
-                    require(len(data) + len(chunk) <= MAX_BODY, "HTTP")
-                    data.extend(chunk)
-            status = response.status_code
-            parsed = json.loads(data) if body else {}
-            require(not self.closed and isinstance(parsed, dict), "HTTP")
-            return status, parsed
+            try:
+                data = bytearray()
+                if body:
+                    if phase is not None:
+                        phase.mark("body")
+                    async for chunk in response.aiter_bytes():
+                        require(len(data) + len(chunk) <= MAX_BODY, "HTTP")
+                        data.extend(chunk)
+                    if phase is not None:
+                        phase.mark("decode")
+                status = response.status_code
+                parsed = json.loads(data) if body else {}
+                require(not self.closed and isinstance(parsed, dict), "HTTP")
+                return status, parsed
+            finally:
+                if phase is not None:
+                    phase.mark("stream_exit")
 
     async def login(self, label, identity, t0, *, deny=False):
         status, body = await self._request(self.auth, "POST", "/auth/v1/token?grant_type=password",
@@ -252,7 +293,10 @@ class Clients:
         self.sessions[label] = (token, self.clock() + timedelta(seconds=expiry))
         return status
 
-    async def get(self, label, route, identity, organizations, day, *, deny=False):
+    async def get(self, label, route, identity, organizations, day, *, deny=False, phase=None):
+        phase = phase if type(phase) is _GetPhase else None
+        if phase is not None:
+            phase.mark("prepare")
         token, expiry = self.sessions[label]
         require(deny or self.clock() < expiry, "HTTP")
         own = organizations["b" if label == "b" else "a"]
@@ -266,7 +310,12 @@ class Clients:
             "foreign_calendar": f"/api/fmc/{foreign}/calendar?" + urlencode({"start": start, "end": end}),
             "provider_connections": f"/api/fmc/{own}/provider-provenance/connections"}
         expected_deny = deny or route.startswith("foreign_") or route == "provider_connections" and label == "b"
-        status, body = await self._request(self.ops, "GET", paths[route], headers={"Authorization": "Bearer " + token}, body=not expected_deny)
+        options = {"body": not expected_deny}
+        if phase is not None:
+            options["phase"] = phase
+        status, body = await self._request(self.ops, "GET", paths[route], headers={"Authorization": "Bearer " + token}, **options)
+        if phase is not None:
+            phase.mark("validate")
         if expected_deny:
             require(status in ((401, 403) if deny else (403,)), "HTTP")
         else:
@@ -335,14 +384,20 @@ class ServerValidator:
         require(not self.started or self.started <= wall < self.started + timedelta(seconds=1800), "CLOCK")
         return wall
 
-    async def bounded(self, awaitable, seconds, *, stage, route=None):
+    async def bounded(self, awaitable, seconds, *, stage, route=None, phase=None):
         require(stage in {"admission_snapshot", "control_snapshot", "cleanup_snapshot", "durable_stop", "client_close", "user_login", "user_get"})
         route = route if stage == "user_get" and type(route) is str and route in ROUTES else None
         began, abandoned = time.monotonic(), False
+        phase = phase if route is not None and type(phase) is _GetPhase else None
+        if phase is not None:
+            phase.started = began
         def evidence(kind, outcome=None):
-            value = {"kind": kind, "stage": stage, "elapsed_ms": round(max(0, time.monotonic() - began) * 1000, 3)}
+            observed = time.monotonic()
+            value = {"kind": kind, "stage": stage, "elapsed_ms": round(max(0, observed - began) * 1000, 3)}
             if route is not None:
                 value["route"] = route
+                if phase is not None:
+                    value.update(phase.fields(began, observed))
             if outcome is not None:
                 value["outcome"] = outcome
             self.emit(value)  # fixed enums/duration only; no IDs, SQL or exception
@@ -458,8 +513,16 @@ class ServerValidator:
         uid = data["ids"][label]
         if not deny:
             require(data["bans"].get(uid) is None or data["bans"][uid] <= self.now(), "IDENTITY")
-        operation = self.client.login(label, uid, self.started, deny=deny) if login else self.client.get(label, route, uid, self.binding.organizations, self.started.date().isoformat(), deny=deny)
-        status = await self.bounded(operation, CONTROL_SECONDS, stage="user_login" if login else "user_get", route=None if login else route)
+        phase = None
+        if (not login and type(route) is str and route in ROUTES
+                and getattr(self.client.get, "__func__", None) is Clients.get
+                and getattr(self.client._request, "__func__", None) is Clients._request):
+            phase = _GetPhase()
+        options = {"deny": deny}
+        if phase is not None:
+            options["phase"] = phase
+        operation = self.client.login(label, uid, self.started, deny=deny) if login else self.client.get(label, route, uid, self.binding.organizations, self.started.date().isoformat(), **options)
+        status = await self.bounded(operation, CONTROL_SECONDS, stage="user_login" if login else "user_get", route=None if login else route, phase=phase)
         after = await self.snapshot()
         require(after is not None and self.monotonic() - began <= READ_SECONDS, "STALE")
         age = (self.now() - self.started).total_seconds()
