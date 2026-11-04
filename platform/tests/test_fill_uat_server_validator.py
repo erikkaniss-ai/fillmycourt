@@ -1470,7 +1470,7 @@ def test_offline_causal_calendar_boundary_qualification(e, monkeypatch, tag):
             assert probe.auth_calls["a"] == probe.ledger_calls["a"] == 2
             assert probe.scopes == 3
             assert probe.factories == ["store", "guard", "validator"]
-            assert probe.route_executes == ["role", "claims", "membership", "bookings", "booking_holds", "court_blocks"]
+            assert probe.route_executes == ["role", "claims", "membership", "bookings", "booking_holds", "court_blocks", "membership"]
             assert probe.wire["a"][-1]["type"] == "http.response.body"
             assert not e.logs and len(e.runner.events) == 1
         finally:
