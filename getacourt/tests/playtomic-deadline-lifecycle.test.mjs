@@ -238,7 +238,7 @@ async function setup(plans, options = {}) {
   const backgroundMessages = chromeEvent();
   const local = {approvedSource: 'https://playtomic.com/clubs/fictional-club-1'};
   if (options.noApprovedSource) delete local.approvedSource;
-  const session = {approvedTab: 77};
+  const session = options.session || {approvedTab: 77};
   const area = store => ({
     async get(key) { return {[key]: store[key]}; },
     async set(values) { Object.assign(store, values); },
@@ -344,7 +344,7 @@ async function setup(plans, options = {}) {
     renderedOffers: renderCounts.at(-1)?.count || 0,
     autoBusy: vm.runInContext('autoBusy', background),
     ownedTabs: tabs.size, replies: responses.map(reply => ({at: reply.at, action: reply.action}))});
-  return {clock, trace, responses, snapshot, submit, form, send, controls, requests, pageWindow, chrome,
+  return {clock, trace, responses, snapshot, submit, form, send, controls, requests, pageWindow, chrome, session,
     normalizerCalls, renderCounts, background, pageContext};
 }
 
@@ -559,4 +559,21 @@ test('a reordered cancellation from a different tab cannot retire the request', 
   const start=run.send(message);await run.clock.advanceTo(10000);
   assert.equal((await start).sources[0].status,'observed');
   assert.equal(run.snapshot().ownedTabs,0);
+});
+
+test('a restarted worker cannot bypass unresolved ownership from the same browser session', async () => {
+  const original=await setup([{load:1000}],{pendingInjection:true});
+  await original.submit();await original.clock.advanceTo(70000);
+  const restarted=await setup([{load:1000}],{session:original.session});
+  await restarted.clock.advanceTo(70000);
+  const main=restarted.send(request(restarted));
+  await restarted.clock.advanceTo(80000);
+  assert.equal((await main).code,'READ_BUSY');
+  assert.equal((await restarted.send({action:'read'},false,
+    {url:'chrome-extension://fictional-reader/reader.html'})).code,'READ_BUSY');
+  const {location,...legacyQuery}=request(restarted).query;
+  assert.equal((await restarted.send({action:'autoSearchFromGet',query:legacyQuery})).code,'READ_BUSY');
+  assert.equal(restarted.trace.filter(row=>row.event==='tab-created').length,0);
+  original.controls.resolveCapture();await original.clock.flush();
+  assert.equal(original.session.playtomicMainOwnership,undefined);
 });

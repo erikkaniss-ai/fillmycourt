@@ -297,6 +297,7 @@ async function autoSearchFromGet(query) {
   autoBusy=true;
   const epoch=generation;
   try{
+    await requireMainOwnershipAvailable();
     await ensurePersonalProviderTab();
     if(epoch!==generation||consentPending)fail("CONSENT_WITHDRAWN");
     return await runSearch(query);
@@ -318,16 +319,28 @@ function multiPlaytomicQueryValid(query){
 // grant a new search until its own resources and outstanding work are settled.
 let mainOperation=null;
 const mainNonces=new Map();
+const MAIN_OWNERSHIP_KEY="playtomicMainOwnership";
 const MAIN_RESPONSE_MARGIN=2000;
 const MAIN_CLUB_BUDGET=15000+200+6000+6000+1080;
 const mainNonceAllowed=value=>typeof value==="string"&&/^[a-f0-9]{48}$/.test(value);
 function pruneMainNonces(now){
   for(const [key,expiry] of mainNonces)if(expiry<=now)mainNonces.delete(key);
 }
+async function requireMainOwnershipAvailable(){
+  const record=await chrome.storage.session.get(MAIN_OWNERSHIP_KEY);
+  if(record[MAIN_OWNERSHIP_KEY]!==undefined)fail("READ_BUSY");
+}
 function releaseMainOperation(operation){
   if(mainOperation===operation&&operation.retired&&!operation.uncertain&&
      !operation.pending.size&&!operation.cleaning.size&&
-     !operation.tabs.size&&!operation.windows.size){
+     !operation.tabs.size&&!operation.windows.size&&!operation.releasing){
+    if(operation.claimed){
+      operation.releasing=true;
+      Promise.resolve().then(()=>chrome.storage.session.remove(MAIN_OWNERSHIP_KEY)).then(()=>{
+        operation.claimed=false;operation.releasing=false;releaseMainOperation(operation);
+      }).catch(()=>{operation.uncertain=true;operation.releasing=false;});
+      return;
+    }
     mainOperation=null;autoBusy=false;
   }
 }
@@ -397,7 +410,7 @@ function beginMainOperation(message,sender){
   if(busy||autoBusy||consentPending||mainOperation||mainNonces.size>=32)fail("READ_BUSY");
   mainNonces.set(key,deadlineAt);
   const operation={nonce,page:sender.tab.id,cutoff:deadlineAt-MAIN_RESPONSE_MARGIN,
-    epoch:generation,retired:false,reason:null,uncertain:false,collector:null,
+    epoch:generation,retired:false,reason:null,uncertain:false,collector:null,claimed:false,releasing:false,
     pending:new Set(),cleaning:new Set(),attempted:new Set(),tabs:new Map(),windows:new Set()};
   operation.stopped=new Promise(resolve=>{operation.stop=resolve;});
   mainOperation=operation;autoBusy=true;
@@ -437,6 +450,7 @@ async function autoSearchPlaytomicClubsFromGet(message,sender){
     return partial();
   };
   try{
+    await awaitMainOperation(operation,requireMainOwnershipAvailable);
     const {approvedSource}=await awaitMainOperation(operation,()=>chrome.storage.local.get("approvedSource"));
     if(!sourceAllowed(approvedSource))fail("CONNECT_REQUIRED");
     if(!await awaitMainOperation(operation,()=>chrome.permissions.contains({origins:["https://playtomic.com/*"]})))
@@ -449,7 +463,9 @@ async function autoSearchPlaytomicClubsFromGet(message,sender){
     if(clubs.some(c=>!sourceAllowed(c.sourceUrl)))fail("CLUB_PAGE_REQUIRED");
     const {lastAttempt=0}=await awaitMainOperation(operation,()=>chrome.storage.session.get("lastAttempt"));
     if(Date.now()-lastAttempt<60000)fail("RATE_LIMITED");
-    await awaitMainOperation(operation,()=>chrome.storage.session.set({lastAttempt:Date.now()}));
+    await awaitMainOperation(operation,()=>chrome.storage.session.set({
+      lastAttempt:Date.now(),[MAIN_OWNERSHIP_KEY]:true
+    }),()=>{operation.claimed=true;});
     const providerQuery={date:query.date,sport:query.sport,from:query.from,to:query.to,
       durationMinutes:query.durationMinutes};
     for(const club of clubs){
@@ -547,6 +563,7 @@ async function runSearch(query){
   if(busy||mainOperation)fail("READ_BUSY");
   busy=true;const epoch=generation;
   try{
+    await requireMainOwnershipAvailable();
     const {lastAttempt=0}=await chrome.storage.session.get("lastAttempt");
     if(Date.now()-lastAttempt<60000)fail("RATE_LIMITED");
     const {tab,source}=await approvedTab();
