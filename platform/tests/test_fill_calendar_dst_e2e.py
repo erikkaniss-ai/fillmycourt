@@ -548,6 +548,7 @@ def _calendar_403_guard_negative_control(capsys, control):
     method, path, category = configurations[control]
     child = None
     evidence = None
+    diagnostic = {"abort_class": "unset"}
     expected_message = "Native DOM strict request boundary was violated."
     with _calendar_403_pytest.raises(
         _calendar_403_pytest.fail.Exception,
@@ -580,8 +581,15 @@ def _calendar_403_guard_negative_control(capsys, control):
                         )
                     request = failed.value
                     outcome = handle.evaluate("async box => await box.completion")
+                    reason = request.failure
+                    diagnostic["abort_class"] = {
+                        "net::ERR_BLOCKED_BY_CLIENT": "blocked_by_client",
+                        "net::ERR_FAILED": "failed",
+                        "net::ERR_ABORTED": "aborted",
+                        "net::ERR_INTERNET_DISCONNECTED": "offline",
+                    }.get(reason, "other")
                     return {
-                        "request_aborted": request.failure == "net::ERR_BLOCKED_BY_CLIENT",
+                        "request_aborted": reason == "net::ERR_BLOCKED_BY_CLIENT",
                         "same_fixture_target": request.url == target,
                         "expected_method": request.method == method,
                         "empty_payload": request.post_data in (None, ""),
@@ -602,6 +610,16 @@ def _calendar_403_guard_negative_control(capsys, control):
     check(set(evidence) == {"request_aborted", "same_fixture_target", "expected_method", "empty_payload",
                             "browser_rejected", "browser_not_fulfilled", "browser_type_error"},
           "Native DOM guard observation fields are incomplete.")
+    with capsys.disabled():
+        print("FILL_CALENDAR_REAL_DOM_GUARD_OBSERVED control=" + control
+              + " abort_class=" + diagnostic["abort_class"]
+              + " request_aborted=" + str(int(evidence["request_aborted"]))
+              + " same_target=" + str(int(evidence["same_fixture_target"]))
+              + " expected_method=" + str(int(evidence["expected_method"]))
+              + " empty_payload=" + str(int(evidence["empty_payload"]))
+              + " browser_rejected=" + str(int(evidence["browser_rejected"]))
+              + " browser_not_fulfilled=" + str(int(evidence["browser_not_fulfilled"]))
+              + " browser_type_error=" + str(int(evidence["browser_type_error"])))
     check(all(value is True for value in evidence.values()),
           "Native DOM guard did not prove an aborted empty request and rejected browser promise.")
     state = child["state"]
