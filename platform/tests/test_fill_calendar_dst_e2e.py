@@ -595,7 +595,7 @@ def _calendar_403_guard_negative_control(capsys, control):
                         "net::ERR_INTERNET_DISCONNECTED": "offline",
                     }.get(reason, "other")
                     return {
-                        "request_aborted": reason == "net::ERR_BLOCKED_BY_CLIENT",
+                        "request_aborted": reason in ("net::ERR_BLOCKED_BY_CLIENT", "net::ERR_BLOCKED_BY_CLIENT.Inspector"),
                         "same_fixture_target": request.url == target,
                         "expected_method": request.method == method,
                         "empty_payload": request.post_data in (None, ""),
