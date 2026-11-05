@@ -165,6 +165,7 @@ def test_operator_calendar_portugal_dst_repeated_and_missing_hours():
 
 # These two cases use only fresh, intercepted CI Chromium contexts.
 import pytest as _calendar_403_pytest
+from contextlib import contextmanager as _calendar_403_contextmanager
 
 
 def _calendar_403_dom_check(condition, message):
@@ -172,8 +173,8 @@ def _calendar_403_dom_check(condition, message):
         _calendar_403_pytest.fail(message, pytrace=False)
 
 
-@_calendar_403_pytest.fixture()
-def _calendar_403_native_dom(capsys):
+@_calendar_403_contextmanager
+def _calendar_403_native_dom_context(capsys):
     import hashlib
     import re
     import uuid
@@ -431,6 +432,12 @@ def _calendar_403_native_dom(capsys):
             _calendar_403_pytest.fail("Native DOM strict request boundary was violated.", pytrace=False)
 
 
+@_calendar_403_pytest.fixture()
+def _calendar_403_native_dom(capsys):
+    with _calendar_403_native_dom_context(capsys) as bundle:
+        yield bundle
+
+
 def _calendar_403_native_populated(bundle, mode):
     bundle["state"]["mode"] = mode
     page, check = bundle["page"], bundle["check"]
@@ -529,3 +536,93 @@ def test_calendar_stale403_real_dom_preserves_newer_readouts(_calendar_403_nativ
           "Native DOM stale403 purged authorized shared readouts.")
     bundle["traffic"]()
     bundle["state"]["passed"] = True
+
+
+def _calendar_403_guard_negative_control(capsys, control):
+    check = _calendar_403_dom_check
+    configurations = {
+        "unknown_get": ("GET", "/__fixture_guard__/unknown", "path"),
+        "empty_post": ("POST", "/__fixture_guard__/method", "method"),
+    }
+    check(control in configurations, "Native DOM guard control selection is unsupported.")
+    method, path, category = configurations[control]
+    child = None
+    evidence = None
+    expected_message = "Native DOM strict request boundary was violated."
+    with _calendar_403_pytest.raises(
+        _calendar_403_pytest.fail.Exception,
+        match=r"^Native DOM strict request boundary was violated\.$",
+    ) as rejected_child:
+        with _calendar_403_native_dom_context(capsys) as bundle:
+            child = bundle
+            # Run the complete protected positive body before the extra attempt.
+            # It alone sets its original positive-completion flag.
+            test_calendar_current403_real_dom_evicts_cached_readouts(bundle)
+            page = bundle["page"]
+            target = bundle["origin"] + path
+
+            def attempt():
+                handle = None
+                try:
+                    # A test-owned promise handle avoids blocking the request
+                    # event timeout if rejection is broken. No window export
+                    # or application state instrumentation is installed.
+                    with page.expect_event(
+                        "requestfailed",
+                        predicate=lambda request: request.url == target and request.method == method,
+                    ) as failed:
+                        handle = page.evaluate_handle(
+                            "configuration => ({completion: fetch(configuration.path, "
+                            "{method: configuration.method}).then("
+                            "() => ({fulfilled:true,rejected:false,type_error:false}), "
+                            "error => ({fulfilled:false,rejected:true,type_error:error instanceof TypeError}))})",
+                            {"path": path, "method": method},
+                        )
+                    request = failed.value
+                    outcome = handle.evaluate("async box => await box.completion")
+                    return {
+                        "request_aborted": request.failure == "net::ERR_BLOCKED_BY_CLIENT",
+                        "same_fixture_target": request.url == target,
+                        "expected_method": request.method == method,
+                        "empty_payload": request.post_data in (None, ""),
+                        "browser_rejected": type(outcome) is dict and outcome.get("rejected") is True,
+                        "browser_not_fulfilled": type(outcome) is dict and outcome.get("fulfilled") is False,
+                        "browser_type_error": type(outcome) is dict and outcome.get("type_error") is True,
+                    }
+                finally:
+                    if handle is not None:
+                        handle.dispose()
+
+            evidence = bundle["operation"]("guard_attempt", attempt)
+            # No manually assigned qualification/violation/cleanup flags here.
+            # The original context's late boundary check must reject the child.
+
+    check(child is not None and evidence is not None, "Native DOM guard attempt evidence is incomplete.")
+    check(str(rejected_child.value) == expected_message, "Native DOM child failed for an unrelated reason.")
+    check(set(evidence) == {"request_aborted", "same_fixture_target", "expected_method", "empty_payload",
+                            "browser_rejected", "browser_not_fulfilled", "browser_type_error"},
+          "Native DOM guard observation fields are incomplete.")
+    check(all(value is True for value in evidence.values()),
+          "Native DOM guard did not prove an aborted empty request and rejected browser promise.")
+    state = child["state"]
+    check(state["violations"] == [category], "Native DOM guard rejection category was not exact.")
+    check(state["passed"] is True, "Native DOM positive checks did not complete before the guard attempt.")
+    check(state["api"] == ["me", "organizations", "today", "calendar", "calendar"]
+          and len(state["static"]) == 4 and len(set(state["static"])) == 4 and state["calendar"] == 2,
+          "Native DOM rejected attempt contaminated the allowed ledger.")
+    check(not state["held"] and state["context_closed"] and state["browser_closed"] and state["driver_stopped"],
+          "Native DOM expected rejection did not complete real fixture cleanup.")
+    with capsys.disabled():
+        print("FILL_CALENDAR_REAL_DOM_GUARD_CONTROL_PASS control=" + control
+              + " proof=rejection_boundary child_qualification=not_accepted"
+              + " boundary=" + category + " exact_child_failure=1 request_aborted=1 browser_rejected=1"
+              + " browser_type_error=1 empty_payload=1 static=4 api=5 calendar=2 rejected=1"
+              + " held_pending=0 context_closed=1 browser_closed=1 driver_stopped=1")
+
+
+def test_calendar_native_dom_guard_rejects_unknown_get_after_positive(capsys):
+    _calendar_403_guard_negative_control(capsys, "unknown_get")
+
+
+def test_calendar_native_dom_guard_rejects_empty_post_after_positive(capsys):
+    _calendar_403_guard_negative_control(capsys, "empty_post")
