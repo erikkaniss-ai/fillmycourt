@@ -584,6 +584,9 @@ def _calendar_403_guard_negative_control(capsys, control):
                     reason = request.failure
                     diagnostic["abort_class"] = {
                         "net::ERR_BLOCKED_BY_CLIENT": "blocked_by_client",
+                        "net::ERR_BLOCKED_BY_CLIENT; Inspector": "blocked_by_client_inspector",
+                        "net::ERR_FAILED; Inspector": "failed_inspector",
+                        "net::ERR_ABORTED; Inspector": "aborted_inspector",
                         "net::ERR_FAILED": "failed",
                         "net::ERR_ABORTED": "aborted",
                         "net::ERR_INTERNET_DISCONNECTED": "offline",
