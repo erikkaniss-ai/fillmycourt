@@ -108,3 +108,46 @@ test("browser transfer is explicit, never network/server-side, and never include
   assert.match(extPage,/id="copyObservation"/);
   assert.doesNotMatch(source,/api\/gac\/search-all|provider token|customer_email/i);
 });
+
+
+function mixedDurationObservation() {
+  const value = structuredClone(observed);
+  value.offers = [
+    {court:'Court 60',startLabel:'2:00 PM',endLabel:'3:00 PM',durationMinutes:60,priceEur:24},
+    {court:'Court 90',startLabel:'3:30 PM',endLabel:'5:00 PM',durationMinutes:90,priceEur:36.5},
+    {court:'Court 120',startLabel:'5:30 PM',endLabel:'7:30 PM',durationMinutes:120,priceEur:48}
+  ];
+  return value;
+}
+
+test('combined 60 or 90 selection excludes a valid 120 minute personal offer without changing retained identity',()=>{
+  const value = mixedDurationObservation();
+  const result = normalize(value,{...query,duration:'any'});
+  assert.deepEqual(result.offers.map(offer=>offer.duration),[60,90]);
+  assert.deepEqual(result.offers,[
+    ...normalize(value,{...query,duration:'60'}).offers,
+    ...normalize(value,{...query,duration:'90'}).offers
+  ]);
+  assert.deepEqual(result.offers.map(offer=>({court:offer.courtName,price:offer.priceMinor,currency:offer.currency,
+    source:offer.sourceUrl,evidence:offer.evidence})),[
+    {court:'Court 60',price:2400,currency:'EUR',source:observed.sourceUrl,evidence:'user_ui_observation'},
+    {court:'Court 90',price:3650,currency:'EUR',source:observed.sourceUrl,evidence:'user_ui_observation'}
+  ]);
+  assert.deepEqual(value,mixedDurationObservation());
+});
+
+test('explicit 60 selection retains only the matching personal court and exact price',()=>{
+  const result = normalize(mixedDurationObservation(),{...query,duration:'60'});
+  assert.deepEqual(result.offers.map(offer=>[offer.courtName,offer.duration,offer.priceMinor]),[['Court 60',60,2400]]);
+});
+
+test('explicit 90 selection retains only the matching personal court and decimal price',()=>{
+  const result = normalize(mixedDurationObservation(),{...query,duration:'90'});
+  assert.deepEqual(result.offers.map(offer=>[offer.courtName,offer.duration,offer.priceMinor]),[['Court 90',90,3650]]);
+});
+
+test('combined selection rejects an otherwise matching 120 minute only observation as no matching observed offers',()=>{
+  const value = mixedDurationObservation();
+  value.offers = [value.offers[2]];
+  assert.throws(()=>normalize(value,{...query,duration:'any'}),/NO_MATCHING_OBSERVED_OFFERS/);
+});

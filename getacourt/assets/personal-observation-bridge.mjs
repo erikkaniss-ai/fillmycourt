@@ -49,7 +49,7 @@ export function normalizePersonalObservation(raw,query,{now=Date.now(),validator
  const offers=v.offers.flatMap((offer,i)=>{
    const start=minute(offer.startLabel),end=minute(offer.endLabel);
    if(start===null||end===null||start<qfrom||start>=qto||
-     (query.duration!=='any'&&Number(query.duration)!==offer.durationMinutes)||
+     (query.duration==='any'?![60,90].includes(offer.durationMinutes):Number(query.duration)!==offer.durationMinutes)||
      !Number.isSafeInteger(Math.round(offer.priceEur*100)))return [];
    // If duration does not fit the displayed start/end labels, it may be a
    // cross-midnight or inconsistent provider row. Never infer a free slot.
