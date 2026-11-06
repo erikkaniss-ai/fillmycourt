@@ -756,7 +756,7 @@ def test_eur_money_native_layout_synthetic_matrix(capsys, width, minor, expected
         bundle["frame"]()
         for region, selector in [
             ("recovery_highest_quote", "#revenueKpis .kpi strong"),
-            ("opportunity_best_quote", "#opportunityQueue .opportunity-value"),
+            ("opportunity_best_quote", "#opportunityQueue .opportunity-metrics strong"),
             ("comparison_revenue", "#courtComparison .comparison-row:not(.comparison-head) > span:nth-of-type(2)"),
             ("comparison_best_quote", "#courtComparison .comparison-row:not(.comparison-head) small")]:
             _eur_native_money_readable(bundle, capsys, width, minor, region, selector, expected)
