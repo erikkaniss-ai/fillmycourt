@@ -58,7 +58,7 @@
 
   function mon(amount, currency) {
     return new Intl.NumberFormat("en-IE", {
-      style: "currency", currency: currency || "EUR", maximumFractionDigits: 0,
+      style: "currency", currency: currency || "EUR", maximumFractionDigits: (currency || "EUR") === "EUR" ? 2 : 0,
     }).format(Number(amount || 0) / 100);
   }
 
@@ -244,7 +244,7 @@
       Number(right.duration_minutes || 0) - Number(left.duration_minutes || 0)
       || new Date(left.starts_at) - new Date(right.starts_at)
     ));
-    const highestQuote = summary.highest_single_quote_minor
+    const highestQuote = summary.highest_single_quote_minor || (currency === "EUR" && summary.highest_single_quote_minor === 0)
       ? mon(summary.highest_single_quote_minor, currency)
       : "—";
 

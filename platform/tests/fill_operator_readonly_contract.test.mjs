@@ -141,5 +141,18 @@ test("Money presentation preserves fictional court escaping and existing USD dis
   }
   assert.ok(elements["#courtComparison"].innerHTML.includes("&lt;img"), "Escaped court remains visible");
   assert.ok(calls.every((call) => call.method === "GET"), "Rendering remains read-only");
+  today.summary.highest_single_quote_minor = 0;
+  const zeroUsd = await renderMoneyFixture(today);
+  assert.ok(!zeroUsd.elements["#revenueKpis"].innerHTML.includes("US$0"), "Existing non-EUR zero quote policy remains unchanged");
   console.log("FILL_EUR_COMPATIBILITY_PASS usd_policy=1 escaping=1 readonly=1");
+});
+
+
+test("An absent EUR Recovery quote stays unavailable instead of becoming a zero price", async () => {
+  const today = structuredClone(fixtureToday);
+  today.summary.highest_single_quote_minor = null;
+  today.empty_windows = [];
+  const { elements } = await renderMoneyFixture(today);
+  assert.ok(!elements["#revenueKpis"].innerHTML.includes("\u20ac0.00"), "Missing source amount is not presented as zero");
+  console.log("FILL_EUR_ABSENT_QUOTE_PASS unavailable_preserved=1");
 });
