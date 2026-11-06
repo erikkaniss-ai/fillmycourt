@@ -69,3 +69,77 @@ test("Fill operator data use only Core GET contracts; password auth is separate"
   assert.match(calls.at(-1).path, /\/calendar\?/);
   assert.match(elements["#calendarTimeline"].innerHTML, /lane-cell booked/);
 });
+
+
+async function renderMoneyFixture(today) {
+  const elements = Object.fromEntries(["#authGate", "#workspace", "#orgSelect", "#identity", "#signOut", "#dateInput", "#refreshButton", "#error", "#pageTitle", "#todayView", "#calendarView", "#revenueView", "#kpis", "#courtUtilisation", "#utilisationBadge", "#emptyCapacity", "#calendarTimeline", "#revenueKpis", "#opportunityQueue", "#courtComparison", "#operatorSignIn", "#operatorEmail", "#operatorPassword", "#operatorLoginButton", "#operatorLoginError"].map((id) => [id, makeElement()]));
+  const navigation = [makeElement({ view: "today" }), makeElement({ view: "calendar" }), makeElement({ view: "revenue" })];
+  const calls = [];
+  const local = new Map([["fill.access", "stale-persistent-fixture"]]);
+  const session = new Map([["fill.access", "fixture-session"]]);
+  const response = (body) => ({ ok: true, status: 200, json: async () => body });
+  const context = {
+    URLSearchParams, Intl, Date, Map, Number, String, Error, Headers, encodeURIComponent,
+    document: { querySelector(selector) { return elements[selector]; }, querySelectorAll(selector) { return selector === ".nav-item" ? navigation : []; } },
+    location: { hash: "", pathname: "/fill/", search: "" }, history: { replaceState() {} },
+    localStorage: { getItem: (key) => local.get(key) || null, setItem: (key, value) => local.set(key, value), removeItem: (key) => local.delete(key) },
+    sessionStorage: { getItem: (key) => session.get(key) || null, setItem: (key, value) => session.set(key, value), removeItem: (key) => session.delete(key) },
+    fetch: async (path, options = {}) => {
+      calls.push({ path, method: options.method || "GET" });
+      if (path === "/api/me") return response({ user: { email: "operator@example.test" } });
+      if (path === "/api/fmc/organizations") return response({ items: [{ id: "org-fixture", name: "Fixture Club", role: "manager" }] });
+      if (path.startsWith("/api/fmc/org-fixture/today?")) return response(today);
+      if (path.startsWith("/api/fmc/org-fixture/calendar?")) return response({ bookings: [{ court_id: "court-fixture", status: "confirmed", starts_at: "2026-10-16T09:00:00+01:00", ends_at: "2026-10-16T12:00:00+01:00", source: "fixture" }], holds: [], blocks: [] });
+      throw new Error(`Unexpected request ${path}`);
+    },
+  };
+  vm.runInNewContext(appSource, context, { filename: "fill/app.js" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  return { elements, calls };
+}
+
+
+for (const [minor, visible] of [[0, "\u20ac0.00"], [1, "\u20ac0.01"], [99, "\u20ac0.99"], [100, "\u20ac1.00"], [12345, "\u20ac123.45"]]) {
+  test(`EUR minor-unit precision is visible across Today and Recovery: ${minor}`, async () => {
+    const today = structuredClone(fixtureToday);
+    today.currency = "EUR";
+    today.summary.revenue_minor = minor;
+    today.summary.highest_single_quote_minor = minor;
+    today.courts = [{ ...today.courts[0], revenue_minor: minor }];
+    today.empty_windows = [{ ...today.empty_windows[0], court_id: today.courts[0].court_id,
+      currency: "EUR", best_amount_minor: minor,
+      min_60_amount_minor: minor, max_60_amount_minor: minor,
+      min_90_amount_minor: minor, max_90_amount_minor: minor }];
+    const { elements, calls } = await renderMoneyFixture(today);
+    const regions = ["#kpis", "#revenueKpis", "#opportunityQueue", "#courtComparison"];
+    const missing = regions.filter((id) => !elements[id].innerHTML.includes(visible));
+    const comparisonOccurrences = elements["#courtComparison"].innerHTML.split(visible).length - 1;
+    if (missing.length || comparisonOccurrences < 2) {
+      console.log(`FILL_EUR_PRECISION_RED minor=${minor} missing_regions=${missing.length} comparison_both=${Number(comparisonOccurrences >= 2)}`);
+    }
+    assert.deepEqual(missing, [], "Every visible money region preserves the declared EUR hundredths");
+    assert.ok(comparisonOccurrences >= 2, "Court comparison preserves both revenue and best quote");
+    assert.ok(calls.every((call) => call.method === "GET"), "Rendering remains read-only");
+    console.log(`FILL_EUR_PRECISION_PASS minor=${minor} regions=4 comparison_both=1`);
+  });
+}
+
+test("Money presentation preserves fictional court escaping and existing USD display policy", async () => {
+  const today = structuredClone(fixtureToday);
+  today.currency = "USD";
+  today.summary.revenue_minor = 12345;
+  today.summary.highest_single_quote_minor = 12345;
+  const unsafeName = '<img src=x onerror="fictional">';
+  today.courts = [{ ...today.courts[0], court_name: unsafeName, revenue_minor: 12345 }];
+  today.empty_windows = [{ ...today.empty_windows[0], court_id: today.courts[0].court_id,
+    court_name: unsafeName, currency: "USD", best_amount_minor: 12345 }];
+  const { elements, calls } = await renderMoneyFixture(today);
+  for (const id of ["#kpis", "#revenueKpis", "#opportunityQueue", "#courtComparison"]) {
+    assert.ok(elements[id].innerHTML.includes("US$123"), "Existing USD visible amount remains unchanged");
+    assert.ok(!elements[id].innerHTML.includes(unsafeName), "Fictional court markup is escaped");
+  }
+  assert.ok(elements["#courtComparison"].innerHTML.includes("&lt;img"), "Escaped court remains visible");
+  assert.ok(calls.every((call) => call.method === "GET"), "Rendering remains read-only");
+  console.log("FILL_EUR_COMPATIBILITY_PASS usd_policy=1 escaping=1 readonly=1");
+});
