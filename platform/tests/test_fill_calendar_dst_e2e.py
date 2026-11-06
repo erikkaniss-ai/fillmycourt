@@ -174,7 +174,7 @@ def _calendar_403_dom_check(condition, message):
 
 
 @_calendar_403_contextmanager
-def _calendar_403_native_dom_context(capsys):
+def _calendar_403_native_dom_context(capsys, *, viewport_width=1280, money_minor=None):
     import hashlib
     import re
     import uuid
@@ -239,7 +239,7 @@ def _calendar_403_native_dom_context(capsys):
         begin = datetime.combine(selected, time.min, tzinfo=tz)
         finish = datetime.combine(selected + timedelta(days=1), time.min, tzinfo=tz)
         minutes = int((finish.astimezone(timezone.utc) - begin.astimezone(timezone.utc)).total_seconds() / 60)
-        return {
+        dto = {
             "date": selected.isoformat(), "day_start": begin.isoformat(), "day_end": finish.isoformat(),
             "timezone": "Europe/Lisbon", "currency": "EUR",
             "summary": {"active_courts": 1, "courts_with_rate_coverage": 1, "capacity_minutes": minutes,
@@ -254,6 +254,25 @@ def _calendar_403_native_dom_context(capsys):
                                               "start_minute": 0, "end_minute": minutes}]}],
             "empty_windows": [],
         }
+
+        if money_minor is not None:
+            dto["summary"].update(revenue_minor=money_minor, booked_minutes=0,
+                empty_minutes=minutes, utilization_pct=0, bookings=0,
+                bookable_60_starts=1, bookable_90_starts=0,
+                highest_single_quote_minor=money_minor,
+                highest_single_quote_duration_minutes=60)
+            dto["courts"][0].update(revenue_minor=money_minor, booked_minutes=0,
+                empty_minutes=minutes, utilization_pct=0, bookings=0)
+            dto["empty_windows"] = [{"court_id": dto["courts"][0]["court_id"],
+                "court_name": court_label, "starts_at": begin.isoformat(),
+                "ends_at": (begin + timedelta(minutes=60)).isoformat(),
+                "duration_minutes": 60, "bookable_60_count": 1,
+                "bookable_90_count": 0, "min_60_amount_minor": money_minor,
+                "max_60_amount_minor": money_minor, "min_90_amount_minor": None,
+                "max_90_amount_minor": None, "best_amount_minor": money_minor,
+                "best_duration_minutes": 60, "best_starts_at": begin.isoformat(),
+                "currency": "EUR"}]
+        return dto
 
     def occupied(source):
         day = state["today"]
@@ -370,7 +389,7 @@ def _calendar_403_native_dom_context(capsys):
         browser = operation("browser", lambda: driver.chromium.launch(headless=True))
         check(browser.browser_type.name == "chromium", "Native DOM fixture did not launch Chromium.")
         context = operation("context", lambda: browser.new_context(
-            viewport={"width": 1280, "height": 900}, timezone_id="Europe/Lisbon", service_workers="block"))
+            viewport={"width": viewport_width, "height": 900}, timezone_id="Europe/Lisbon", service_workers="block"))
         def guarded_intercept(route):
             try:
                 intercept(route)
@@ -416,12 +435,12 @@ def _calendar_403_native_dom_context(capsys):
             check(state["context_closed"] and state["browser_closed"] and state["driver_stopped"]
                   and not state["held"], "Native DOM fixture did not fully close.")
             with capsys.disabled():
-                print("FILL_CALENDAR_REAL_DOM_CI_PASS case=" + state["mode"]
+                print(("FILL_EUR_NATIVE_LAYOUT_SYNTHETIC_PASS width=" + str(viewport_width) + " minor=" + str(money_minor) + " regions=" + str(state.get("money_checks", 0)) + " case=" if money_minor is not None else "FILL_CALENDAR_REAL_DOM_CI_PASS case=") + state["mode"]
                       + " engine=chromium native_dom=1 static=4 api=5 calendar=2 unknown=0"
                       + " held_pending=0 context_closed=1 browser_closed=1 driver_stopped=1")
         else:
             with capsys.disabled():
-                print("FILL_CALENDAR_REAL_DOM_CI_NOT_PASS case=" + (state["mode"] or "unset")
+                print(("FILL_EUR_NATIVE_LAYOUT_SYNTHETIC_NOT_PASS width=" + str(viewport_width) + " minor=" + str(money_minor) + " regions=" + str(state.get("money_checks", 0)) + " case=" if money_minor is not None else "FILL_CALENDAR_REAL_DOM_CI_NOT_PASS case=") + (state["mode"] or "unset")
                       + " stage=" + state["stage"] + " unknown=" + str(len(state["violations"]))
                       + " boundary=" + (state["violations"][0] if state["violations"] else "none")
                       + " context_closed=" + str(int(state["context_closed"]))
@@ -650,3 +669,105 @@ def test_calendar_native_dom_guard_rejects_unknown_get_after_positive(capsys):
 
 def test_calendar_native_dom_guard_rejects_empty_post_after_positive(capsys):
     _calendar_403_guard_negative_control(capsys, "empty_post")
+
+
+
+def _eur_native_money_readable(bundle, capsys, width, minor, region, selector, expected):
+    """Read actual text range geometry after native scrolling; never alter DOM."""
+    check, operation, page = bundle["check"], bundle["operation"], bundle["page"]
+    target = page.locator(selector).filter(has_text=expected)
+    stage = "eur_money_" + region
+    check(operation(stage + "_count", target.count) == 1,
+          "Synthetic EUR money region did not contain one expected amount.")
+    operation(stage + "_scroll", target.scroll_into_view_if_needed)
+    bundle["frame"]()
+    metrics = operation(stage + "_measure", lambda: target.evaluate(r"""(el, expected) => {
+      const tolerance = 0.75;
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const matches = [];
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const offset = node.textContent.indexOf(expected);
+        if (offset < 0 || /[0-9.,]/.test(node.textContent[offset + expected.length] || '')) continue;
+        const range = document.createRange();
+        range.setStart(node, offset); range.setEnd(node, offset + expected.length);
+        matches.push(range);
+      }
+      const result = {exact_text: matches.length === 1, ranges: 0,
+        viewport: true, clip: '', ellipsis: false, occluded: false, shown: true};
+      if (matches.length !== 1) return result;
+      const rects = Array.from(matches[0].getClientRects()).filter(r => r.width > 0 && r.height > 0);
+      result.ranges = rects.length;
+      const selector = a => a.id ? '#' + a.id : a.tagName.toLowerCase() +
+        (a.classList.length ? '.' + Array.from(a.classList).join('.') : '');
+      const inside = (r, box, x, y) => (!x || (r.left >= box.left - tolerance && r.right <= box.right + tolerance)) &&
+        (!y || (r.top >= box.top - tolerance && r.bottom <= box.bottom + tolerance));
+      for (const r of rects) {
+        if (!inside(r, {left: 0, top: 0, right: innerWidth, bottom: innerHeight}, true, true)) result.viewport = false;
+        for (let a = el; a; a = a.parentElement) {
+          const style = getComputedStyle(a), bounds = a.getBoundingClientRect();
+          if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) result.shown = false;
+          const x = a === el || ['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowX);
+          const y = a === el || ['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY);
+          const box = a === el ? bounds : {left: bounds.left + a.clientLeft, top: bounds.top + a.clientTop,
+            right: bounds.left + a.clientLeft + a.clientWidth, bottom: bounds.top + a.clientTop + a.clientHeight};
+          if (!inside(r, box, x, y) && !result.clip) result.clip = selector(a);
+          if (style.textOverflow === 'ellipsis' && style.overflowX !== 'visible' && a.scrollWidth > a.clientWidth + tolerance) result.ellipsis = true;
+        }
+        for (const x of [r.left + Math.min(1, r.width / 4), r.left + r.width / 2, r.right - Math.min(1, r.width / 4)]) {
+          const hit = document.elementFromPoint(x, r.top + r.height / 2);
+          if (!hit || !(hit === el || el.contains(hit) || hit.contains(el))) result.occluded = true;
+        }
+      }
+      return result;
+    }""", expected))
+    passed = (metrics["exact_text"] and metrics["ranges"] > 0 and metrics["viewport"]
+              and not metrics["clip"] and not metrics["ellipsis"]
+              and not metrics["occluded"] and metrics["shown"])
+    with capsys.disabled():
+        if passed:
+            print("FILL_EUR_NATIVE_MONEY_REGION_PASS synthetic_only=1 width=" + str(width)
+                  + " minor=" + str(minor) + " region=" + region
+                  + " exact_text=1 unclipped=1 no_ellipsis=1 unobscured=1")
+        else:
+            print("FILL_EUR_NATIVE_MONEY_REGION_FINDING synthetic_only=1 width=" + str(width)
+                  + " minor=" + str(minor) + " region=" + region
+                  + " exact_text=" + str(int(metrics["exact_text"]))
+                  + " viewport=" + str(int(metrics["viewport"]))
+                  + " clip=" + (metrics["clip"] or "none")
+                  + " ellipsis=" + str(int(metrics["ellipsis"]))
+                  + " occluded=" + str(int(metrics["occluded"])))
+    check(passed, "Synthetic EUR amount failed real text-range readability.")
+    bundle["state"]["money_checks"] = bundle["state"].get("money_checks", 0) + 1
+
+
+@_calendar_403_pytest.mark.parametrize("width", [320, 390, 1440])
+@_calendar_403_pytest.mark.parametrize("minor,expected", [
+    (0, "\u20ac0.00"), (1, "\u20ac0.01"), (99, "\u20ac0.99"),
+    (100, "\u20ac1.00"), (12345, "\u20ac123.45")])
+def test_eur_money_native_layout_synthetic_matrix(capsys, width, minor, expected):
+    with _calendar_403_native_dom_context(capsys, viewport_width=width, money_minor=minor) as bundle:
+        _calendar_403_native_populated(bundle, "current403")
+        bundle["visit"]("today")
+        bundle["frame"]()
+        _eur_native_money_readable(bundle, capsys, width, minor, "today_revenue",
+                                   "#kpis .kpi strong", expected)
+        bundle["visit"]("revenue")
+        bundle["frame"]()
+        for region, selector in [
+            ("recovery_highest_quote", "#revenueKpis .kpi strong"),
+            ("opportunity_best_quote", "#opportunityQueue .opportunity-value"),
+            ("comparison_revenue", "#courtComparison .comparison-row:not(.comparison-head) > span:nth-of-type(2)"),
+            ("comparison_best_quote", "#courtComparison .comparison-row:not(.comparison-head) small")]:
+            _eur_native_money_readable(bundle, capsys, width, minor, region, selector, expected)
+        bundle["visit"]("calendar")
+        bundle["wait_dom"]("occupied_calendar", "() => document.querySelectorAll('#calendarTimeline .lane-cell.booked').length > 0")
+        bundle["visit"]("calendar")
+        bundle["wait_dom"]("permission",
+                          "message => !document.querySelector('#error').hidden && "
+                          "document.querySelector('#error').textContent.includes(message)", bundle["permission"])
+        bundle["session"]()
+        bundle["traffic"]()
+        bundle["check"](bundle["state"]["money_checks"] == 5,
+                        "Synthetic EUR money qualification matrix was incomplete.")
+        bundle["state"]["passed"] = True
