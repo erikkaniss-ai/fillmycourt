@@ -217,7 +217,9 @@ financial as (
 select
   count(*) filter (where status in ('confirmed','pending_payment'))::int bookings,
   count(*) filter (where status='cancelled')::int cancellations,
-  coalesce(sum(gross_amount_minor) filter (where status in ('confirmed','pending_payment')),0)::int revenue_minor
+  (case when coalesce(bool_and(currency = :report_currency) filter (where status in ('confirmed','pending_payment')), true)
+      then coalesce(sum(gross_amount_minor) filter (where status in ('confirmed','pending_payment')),0)
+      else null end)::int revenue_minor
 from public.bookings
 where organization_id=cast(:org as uuid)
   and starts_at>=:begin and starts_at<:finish
@@ -293,7 +295,7 @@ def read_today(db, actor, org, date, day):
         tz = ZoneInfo(orgrow["timezone"])
         begin = datetime(day.year, day.month, day.day, tzinfo=tz)
         finish = begin + timedelta(days=1)
-        snapshot = one(c.execute(SNAPSHOT, {"org": org, "uid": actor.id, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": day.weekday()}))
+        snapshot = one(c.execute(SNAPSHOT, {"org": org, "uid": actor.id, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": day.weekday(), "report_currency": orgrow["currency"]}))
         if snapshot is None:
             # Membership is fresh in the same data statement, not a cached role
             # from metadata lookup. RLS remains active throughout both reads.
