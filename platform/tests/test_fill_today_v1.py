@@ -2120,3 +2120,74 @@ def test_fill_calendar_final_membership_contract(fill_today, capsys, monkeypatch
               + " role_denials=" + str(state["role_denials"])
               + " user_exit=" + state["user_exit"]
               + " isolation=read_committed read_only=off trace=complete lifecycle=exited")
+
+
+@pytest.mark.parametrize("status", ["confirmed", "pending_payment"])
+@pytest.mark.parametrize("population", ["sole_foreign", "mixed", "same", "empty", "cancelled_foreign", "other_org_foreign", "before_day_foreign", "at_finish_foreign"])
+def test_fill_today_native_pg_revenue_denomination(fill_today, capsys, status, population):
+    """Exercise the existing disposable migrated-PG fixture, never booking routes.
+
+    The inherited SQL principal/Auth stub is local fixture setup, not supported
+    Supabase provisioning or full API admission evidence. All rows are fictional.
+    """
+    from fmc.fill_today_read import read_today
+
+    _, store, user_id, org_id, court_id = fill_today
+    day = datetime(2026, 10, 5, tzinfo=ZoneInfo("Europe/Lisbon"))
+    finish = day + timedelta(days=1)
+    extra_org, extra_venue, extra_court = (uuid.uuid4() for _ in range(3))
+    try:
+        with store.trusted() as c:
+            if c.dialect.name != "postgresql":
+                pytest.fail("DENOMINATION_REQUIRES_NATIVE_PG", pytrace=False)
+            c.execute(text("DELETE FROM public.bookings WHERE organization_id=:org"), {"org": org_id})
+            if population == "other_org_foreign":
+                c.execute(text("INSERT INTO public.organizations (id,slug,name,timezone,default_currency) VALUES (:org,:slug,'Fictional currency control','Europe/Lisbon','USD')"), {"org": extra_org, "slug": str(extra_org)})
+                c.execute(text("INSERT INTO public.venues (id,organization_id,name,timezone,currency,address) VALUES (:venue,:org,'Fictional control venue','Europe/Lisbon','USD','{}')"), {"venue": extra_venue, "org": extra_org})
+                c.execute(text("INSERT INTO public.courts (id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled) VALUES (:court,:venue,'Fictional control court','padel',false,'native',true)"), {"court": extra_court, "venue": extra_venue})
+            rows = []
+            if population not in ("sole_foreign", "empty"):
+                rows.append((org_id, court_id, day + timedelta(hours=10), "EUR", 1500, status))
+            if population not in ("same", "empty"):
+                starts_at = day + timedelta(hours=13)
+                row_org, row_court, row_status = org_id, court_id, status
+                if population == "before_day_foreign":
+                    starts_at = day - timedelta(hours=1)
+                elif population == "at_finish_foreign":
+                    starts_at = finish
+                elif population == "cancelled_foreign":
+                    row_status = "cancelled"
+                elif population == "other_org_foreign":
+                    row_org, row_court = extra_org, extra_court
+                rows.append((row_org, row_court, starts_at, "USD", 4200, row_status))
+            for index, (row_org, row_court, starts_at, currency, amount, row_status) in enumerate(rows):
+                c.execute(text("""INSERT INTO public.bookings
+                    (organization_id,venue_id,court_id,status,starts_at,ends_at,currency,gross_amount_minor,source,idempotency_key)
+                    SELECT :org,venue_id,id,:status,:starts,:ends,:currency,:amount,'getacourt',:key
+                    FROM public.courts WHERE id=:court"""),
+                    {"org": row_org, "court": row_court, "status": row_status,
+                     "starts": starts_at, "ends": starts_at + timedelta(minutes=30),
+                     "currency": currency, "amount": amount,
+                     "key": "denomination-" + str(uuid.uuid4()) + "-" + str(index)})
+        must_deny = population in ("sole_foreign", "mixed")
+        try:
+            result = read_today(store, Actor(id=user_id), org_id, "2026-10-05", day)
+        except DomainError as error:
+            if not must_deny or error.status != 503:
+                pytest.fail("DENOMINATION_UNEXPECTED_FAILURE", pytrace=False)
+            with capsys.disabled():
+                print("FILL_REVENUE_DENOMINATION_GREEN case=" + population + " status=" + status + " unavailable=1 native_pg=1")
+        else:
+            if must_deny:
+                wrong_pair = result["currency"] == "EUR" and result["summary"]["revenue_minor"] == (4200 if population == "sole_foreign" else 5700)
+                with capsys.disabled():
+                    print("FILL_REVENUE_DENOMINATION_RED case=" + population + " status=" + status + " original_success=1 wrong_unit=" + str(int(wrong_pair)) + " native_pg=1")
+                pytest.fail("DENOMINATION_EXPECTED_UNAVAILABLE", pytrace=False)
+            expected = 0 if population == "empty" else 1500
+            if result["currency"] != "EUR" or result["summary"]["revenue_minor"] != expected:
+                pytest.fail("DENOMINATION_CONTROL_CHANGED", pytrace=False)
+            with capsys.disabled():
+                print("FILL_REVENUE_DENOMINATION_CONTROL_PASS case=" + population + " status=" + status + " native_pg=1")
+    finally:
+        with store.trusted() as c:
+            c.execute(text("DELETE FROM public.organizations WHERE id=:org"), {"org": extra_org})
