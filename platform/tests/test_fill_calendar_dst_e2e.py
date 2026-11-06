@@ -189,7 +189,7 @@ def _calendar_403_native_dom_context(capsys):
     directory = Path(__file__).resolve().parents[1] / "public" / "fill"
     specifications = {
         "index.html": ("d11d4d6601dfe7eef0475845a27d6b40d39b993d", "text/html; charset=utf-8"),
-        "app.js": ("75ef57ff8592bb872e789a16142b8e72fb967a5f", "text/javascript; charset=utf-8"),
+        "app.js": ("37156a8f2fd3853e64ee59937396af931e8f3e71", "text/javascript; charset=utf-8"),
         "styles.css": ("981513c686c0db94e35511ef854d51c8b1efdc7c", "text/css; charset=utf-8"),
         "demo-fixture.js": ("24ca61105686a7e4130786f408371f0c3bd8f618", "text/javascript; charset=utf-8"),
     }
