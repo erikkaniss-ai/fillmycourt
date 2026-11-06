@@ -677,7 +677,12 @@ def _eur_native_money_readable(bundle, capsys, width, minor, region, selector, e
     check, operation, page = bundle["check"], bundle["operation"], bundle["page"]
     target = page.locator(selector).filter(has_text=expected)
     stage = "eur_money_" + region
-    check(operation(stage + "_count", target.count) == 1,
+    matched = operation(stage + "_count", target.count)
+    if matched != 1:
+        with capsys.disabled():
+            print("FILL_EUR_NATIVE_LOOKUP_NOT_PASS synthetic_only=1 width=" + str(width)
+                  + " minor=" + str(minor) + " region=" + region + " matched=" + str(matched))
+    check(matched == 1,
           "Synthetic EUR money region did not contain one expected amount.")
     operation(stage + "_scroll", target.scroll_into_view_if_needed)
     bundle["frame"]()
@@ -756,7 +761,7 @@ def test_eur_money_native_layout_synthetic_matrix(capsys, width, minor, expected
         bundle["frame"]()
         for region, selector in [
             ("recovery_highest_quote", "#revenueKpis .kpi strong"),
-            ("opportunity_best_quote", "#opportunityQueue .opportunity-metrics strong"),
+            ("opportunity_best_quote", "#opportunityQueue .opportunity-metrics b"),
             ("comparison_revenue", "#courtComparison .comparison-row:not(.comparison-head) > span:nth-of-type(2)"),
             ("comparison_best_quote", "#courtComparison .comparison-row:not(.comparison-head) > span:last-of-type")]:
             _eur_native_money_readable(bundle, capsys, width, minor, region, selector, expected)
