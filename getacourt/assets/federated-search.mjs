@@ -3,7 +3,7 @@ const SPORTS=new Set(['padel','tennis','squash','badminton','pickleball']);
 const STATES=new Set(['ok','not_configured','directory_only','personal_reader_only','needs_auth','timeout','error','invalid_response']);
 const TIME=/^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const ID=/^[a-zA-Z0-9_-]{1,80}$/;
-const INSTANT=/^\d{4}-\d\d-\d\dT\d\d:\d\d(?::\d\d(?:\.\d{1,3})?)?(?:Z|[+-]\d\d:\d\d)$/;
+const INSTANT=/^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d)(?:\.\d{1,3})?)?(?:Z|[+-]\d\d:\d\d)$/;
 function fail(){throw new Error('INVALID_SEARCH');}
 function text(v,max=160){return typeof v==='string' && v.length>0 && v.length<=max && !/[\u0000-\u001f\u007f]/.test(v);}
 export function localDay(now=new Date(),timeZone='Europe/Lisbon') {
@@ -28,7 +28,12 @@ export function normalizeCoreSlot(row,query,approved) {
   if(typeof row.id!=='string'||typeof row.venue_id!=='string'||!ID.test(row.id)||!ID.test(row.venue_id)||!text(row.name)||!text(row.venue_name)||row.sport!==query.sport)return null;
   if(!Number.isSafeInteger(row.amount_minor)||row.amount_minor<0||typeof row.currency!=='string'||!/^[A-Z]{3}$/.test(row.currency))return null;
   if(!Number.isInteger(row.duration_minutes)||![60,90].includes(row.duration_minutes)||(query.duration!=='any'&&row.duration_minutes!==Number(query.duration)))return null;
-  if(typeof row.starts_at!=='string'||!INSTANT.test(row.starts_at)||!Number.isFinite(Date.parse(row.starts_at))||!text(row.timezone,80))return null;
+  const instant=typeof row.starts_at==='string'&&INSTANT.exec(row.starts_at);
+  if(!instant||!Number.isFinite(Date.parse(row.starts_at))||!text(row.timezone,80))return null;
+  // Date.parse normalizes impossible days and 24:00; validate the written wall components first.
+  const [year,month,day,hour,minute,second]=instant.slice(1).map(v=>Number(v||0));
+  const monthDays=[31,year%4===0&&(year%100!==0||year%400===0)?29:28,31,30,31,30,31,31,30,31,30,31];
+  if(month<1||month>12||day<1||day>monthDays[month-1]||hour>23||minute>59||second>59)return null;
   let date,time,displayTime;
   try {
     const start=new Date(row.starts_at); date=localDay(start,row.timezone);

@@ -29,6 +29,55 @@ test('native parser requires explicit price, IDs, offset and venue timezone; zer
   for(const patch of [{amount_minor:null},{amount_minor:undefined},{amount_minor:'2650'},{amount_minor:-1},{amount_minor:1.5},{currency:null},{currency:'bad'},{id:undefined},{venue_id:'other'},{timezone:'Not/AZone'},{starts_at:'2026-10-25T18:00:00'},{duration_minutes:120},{sport:'tennis'},{starts_at:'2026-10-26T18:00:00Z'}])assert.equal(normalizeCoreSlot({...row,...patch},query,approved),null);
   assert.equal(normalizeCoreSlot(row,{...query,to:'18:00'},approved),null);
 });
+for(const [invalid,rolled] of [
+  ['2026-02-29T12:00:00Z','2026-03-01T12:00:00.000Z'],
+  ['2026-02-30T12:00:00Z','2026-03-02T12:00:00.000Z'],
+  ['2026-02-31T12:00:00Z','2026-03-03T12:00:00.000Z'],
+  ['2024-02-30T12:00:00Z','2024-03-01T12:00:00.000Z'],
+  ['1900-02-29T12:00:00Z','1900-03-01T12:00:00.000Z'],
+  ['2100-02-29T12:00:00Z','2100-03-01T12:00:00.000Z'],
+  ['2026-04-31T12:00:00Z','2026-05-01T12:00:00.000Z'],
+  ['2026-06-31T12:00:00Z','2026-07-01T12:00:00.000Z'],
+  ['2026-11-31T12:00:00Z','2026-12-01T12:00:00.000Z'],
+  ['2026-02-30T12:00:00+01:30','2026-03-02T10:30:00.000Z'],
+  ['2026-04-31T23:30:00-02:00','2026-05-02T01:30:00.000Z'],
+  ['2026-03-01T24:00Z','2026-03-02T00:00:00.000Z'],
+  ['2026-12-31T24:00:00Z','2027-01-01T00:00:00.000Z'],
+  ['2026-03-01T24:00:00.000+01:00','2026-03-01T23:00:00.000Z']
+])test(`native parser rejects impossible wall components instead of rolling ${invalid}`,()=>{
+  // Prove the old parser's rollover lands inside this query, not outside its date/time filter.
+  assert.equal(new Date(invalid).toISOString(),rolled);
+  const searched={...query,date:rolled.slice(0,10)};
+  assert.ok(normalizeCoreSlot({...row,starts_at:rolled,timezone:'UTC'},searched,approved));
+  assert.equal(normalizeCoreSlot({...row,starts_at:invalid,timezone:'UTC'},searched,approved),null);
+});
+
+test('native parser retains valid Gregorian boundaries, offset crossings and supported ISO precision',()=>{
+  for(const [starts_at,expected] of [
+    ['2024-02-29T12:00Z','2024-02-29T12:00:00.000Z'],
+    ['2000-02-29T12:00:00Z','2000-02-29T12:00:00.000Z'],
+    ['2400-02-29T12:00:00Z','2400-02-29T12:00:00.000Z'],
+    ['2026-02-28T12:59:59.9Z','2026-02-28T12:59:59.900Z'],
+    ['2026-04-30T12:00:00.09+00:00','2026-04-30T12:00:00.090Z'],
+    ['2026-12-31T12:00:00.009-00:00','2026-12-31T12:00:00.009Z'],
+    ['2026-01-31T23:30-01:00','2026-02-01T00:30:00.000Z'],
+    ['2024-02-29T23:30:00-01:00','2024-03-01T00:30:00.000Z'],
+    ['2026-03-01T00:00:00+01:00','2026-02-28T23:00:00.000Z'],
+    ['2026-12-31T23:59:59.999+01:00','2026-12-31T22:59:59.999Z'],
+    ['2026-10-25T01:30:00+01:00','2026-10-25T00:30:00.000Z'],
+    ['2026-10-25T01:30:00+00:00','2026-10-25T01:30:00.000Z']
+  ])for(const duration_minutes of [60,90]){
+    const offer=normalizeCoreSlot({...row,starts_at,timezone:'UTC',duration_minutes,amount_minor:3650},{...query,date:expected.slice(0,10),duration:String(duration_minutes)},approved);
+    assert.ok(offer,starts_at);assert.equal(offer.startsAt,expected);assert.equal(offer.duration,duration_minutes);assert.equal(offer.priceMinor,3650);
+  }
+});
+
+test('native parser continues rejecting out-of-range calendar, clock and offset fields',()=>{
+  for(const starts_at of ['2026-00-01T12:00:00Z','2026-13-01T12:00:00Z','2026-03-00T12:00:00Z','2026-03-32T12:00:00Z','2026-03-01T25:00:00Z','2026-03-01T24:01:00Z','2026-03-01T24:00:00.001Z','2026-03-01T12:60:00Z','2026-03-01T12:00:60Z','2026-03-01T12:00:00+24:00','2026-03-01T12:00:00+01:60']){
+    assert.equal(normalizeCoreSlot({...row,starts_at,timezone:'UTC'},{...query,date:'2026-03-01'},approved),null,starts_at);
+  }
+});
+
 test('known staging fixture remains excluded even when allowlisted',()=>{
   const id='d6dbceca-3cca-4053-bcb7-5491a9225cb0';assert.equal(normalizeCoreSlot({...row,venue_id:id},query,new Set([id])),null);
   assert.equal(normalizeCoreSlot({...row,venue_name:'GetACourt Cascais Test Venue'},query,approved),null);
