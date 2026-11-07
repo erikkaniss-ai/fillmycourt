@@ -10,7 +10,12 @@ const source = readFileSync("platform/public/fill/app.js", "utf8");
 const start = source.indexOf("  async function load() {");
 const end = source.indexOf("  async function init() {", start);
 assert.ok(start >= 0 && end > start, "actual tenant load implementation found");
-const implementation = source.slice(start, end);
+const instantStart = source.indexOf("  function calendarInstant(value) {");
+const instantEnd = source.indexOf("  function validCalendarSnapshot(", instantStart);
+const todayStart = source.indexOf("  function validTodaySnapshot(today) {");
+assert.ok(instantStart >= 0 && instantEnd > instantStart && todayStart >= 0 && todayStart < start,
+  "actual production Today and instant validator closures found");
+const implementation = source.slice(instantStart, instantEnd) + source.slice(todayStart, end);
 
 function pending() {
   let resolve;
@@ -69,7 +74,30 @@ test("org switch purges former tenant rendering before the new tenant read resol
   ]);
   assert.equal(rendered, 0, "new tenant view is not rendered before its read resolves");
 
-  request.resolve({summary: {}, courts: []});
+  const validEmptyToday = {
+    date: "2026-10-19", day_start: "2026-10-19T00:00:00+01:00",
+    day_end: "2026-10-20T00:00:00+01:00", timezone: "Europe/Lisbon", currency: "EUR",
+    summary: {capacity_minutes: 0, booked_minutes: 0, held_minutes: 0, blocked_minutes: 0,
+      empty_minutes: 0, utilization_pct: 0, bookings: 0, cancellations: 0, revenue_minor: 0,
+      active_courts: 0, courts_with_rate_coverage: 0, courts_without_rate_coverage: 0,
+      bookable_60_starts: 0, bookable_90_starts: 0, highest_single_quote_minor: 0,
+      highest_single_quote_duration_minutes: null},
+    courts: [], empty_windows: [],
+  };
+  request.resolve(validEmptyToday);
   await loading;
   assert.equal(rendered, 1, "only resolved new tenant data is rendered");
+  assert.equal(context.state.today, validEmptyToday);
+  assert.equal(context.state.readEpoch, 4);
+  assert.equal(context.state.authEpoch, 7);
+  assert.equal(context.state.token, "session-for-current-operator");
+
+  // The former incomplete fixture must fail the actual production boundary,
+  // proving this isolated loader did not replace its validator with a true stub.
+  context.api = async () => ({summary: {}, courts: []});
+  await assert.rejects(context.load(), /Unable to load Today\. Try again\./);
+  assert.equal(rendered, 1, "malformed follow-up must not call renderToday");
+  assert.equal(context.state.today, null);
+  assert.equal(context.state.calendar, null);
+  assert.equal(context.state.token, "session-for-current-operator");
 });

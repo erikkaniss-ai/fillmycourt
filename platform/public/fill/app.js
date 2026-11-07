@@ -1480,6 +1480,29 @@
   }
   goPackageCheck?.addEventListener("change", () => {clearGoPackage("get");syncGoPackages();});
 
+  function validTodaySnapshot(today) {
+    const record = (value) => value && typeof value === "object" && !Array.isArray(value);
+    if (!record(today) || !record(today.summary) ||
+        !Array.isArray(today.courts) || !Array.isArray(today.empty_windows) ||
+        !today.courts.every(record) || !today.empty_windows.every(record) ||
+        !["date", "day_start", "day_end", "timezone", "currency"].every((key) =>
+          typeof today[key] === "string" && today[key].length > 0)) return false;
+    // These existing Core summary values must be present, not fabricated by
+    // rendering defaults. Optional quote presence/denomination policy stays intact.
+    if (!["utilization_pct", "revenue_minor", "bookings", "empty_minutes",
+          "active_courts", "courts_with_rate_coverage"].every((key) =>
+            Number.isFinite(today.summary[key]))) return false;
+    const start = calendarInstant(today.day_start), end = calendarInstant(today.day_end);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(today.date) ||
+        !calendarInstant(today.date + "T00:00:00Z") || !start || !end ||
+        end.milliseconds <= start.milliseconds) return false;
+    try {
+      new Intl.DateTimeFormat("en-GB", {timeZone: today.timezone});
+      new Intl.NumberFormat("en-IE", {style: "currency", currency: today.currency});
+    } catch { return false; }
+    return true;
+  }
+
   async function load() {
     resetProvenance(true);
     if (!state.org) return;
@@ -1500,9 +1523,21 @@
       const today = await api(`/api/fmc/${encodeURIComponent(org)}/today?date=${encodeURIComponent(date)}`);
       if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
           state.org !== org || date !== el.date.value) return;
-      state.today = today;
-      state.calendar = null;
-      renderToday();
+      try {
+        if (!validTodaySnapshot(today)) throw Error("Invalid Today snapshot");
+        state.today = today;
+        state.calendar = null;
+        renderToday();
+      } catch {
+        // A malformed successful DTO (including a JSON decode failure) is not
+        // an authoritative empty club. Remove any partial private render too.
+        state.today = null;
+        state.calendar = null;
+        [el.kpis, el.util, el.empty, el.revenueKpis, el.opportunityQueue,
+          el.courtComparison, el.timeline].forEach((node) => { node.textContent = ""; });
+        el.utilBadge.textContent = "—";
+        throw Error("Unable to load Today. Try again.");
+      }
       if (state.view === "calendar") await loadCalendar();
     } catch (error) {
       if (authEpoch === state.authEpoch && readEpoch === state.readEpoch) fail(error);
