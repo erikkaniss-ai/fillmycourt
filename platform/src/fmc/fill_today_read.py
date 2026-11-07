@@ -159,7 +159,7 @@ free_windows as (
   group by court_id,court_name,grp
   having count(*) >= 2
 ),
-opportunities as (
+priced_opportunities as (
   select w.court_id,w.starts_at window_start,d.duration_minutes,gs starts_at,
          ((rate.price_minor*d.duration_minutes+59)/60)::int amount_minor,
          rate.currency::text currency
@@ -190,7 +190,15 @@ opportunities as (
     limit 1
   ) rate on true
 ),
-empty_windows as (
+-- Validate every selected priced opportunity before monetary aggregation or display LIMIT.
+opportunity_denomination as (
+  select coalesce(bool_and(currency is not distinct from :report_currency)
+                  filter (where amount_minor is not null), true) as compatible
+  from priced_opportunities
+), opportunities as (
+  select p.* from priced_opportunities p
+  where (select compatible from opportunity_denomination)
+), empty_windows as (
 select w.court_id::text,w.court_name,w.starts_at,w.ends_at,w.duration_minutes,
        count(*) filter (where o.duration_minutes=60)::int bookable_60_count,
        min(o.amount_minor) filter (where o.duration_minutes=60)::int min_60_amount_minor,
@@ -217,7 +225,8 @@ financial as (
 select
   count(*) filter (where status in ('confirmed','pending_payment'))::int bookings,
   count(*) filter (where status='cancelled')::int cancellations,
-  (case when coalesce(bool_and(currency = :report_currency) filter (where status in ('confirmed','pending_payment')), true)
+  (case when (select compatible from opportunity_denomination)
+                   and coalesce(bool_and(currency = :report_currency) filter (where status in ('confirmed','pending_payment')), true)
       then coalesce(sum(gross_amount_minor) filter (where status in ('confirmed','pending_payment')),0)
       else null end)::int revenue_minor
 from public.bookings
