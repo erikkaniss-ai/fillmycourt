@@ -62,6 +62,13 @@ test("Old club Calendar 401 cannot log out valid session after switching to club
    throw Error("INVALID_FIXTURE_ENDPOINT "+path);
   }
  };
+ // Keep the explicit fixture selection through the app's one boot date write;
+ // subsequent input writes and the host/global clock remain unchanged.
+ let fixtureSelectedDate=day.date,fixtureBootDateWrite=true;
+ Object.defineProperty(el["#dateInput"],"value",{
+  get:()=>fixtureSelectedDate,
+  set:value=>{if(fixtureBootDateWrite)fixtureBootDateWrite=false;else fixtureSelectedDate=value;}
+ });
  vm.runInNewContext(app,context);
  await pause();await pause();
  assert.equal(el["#workspace"].hidden,false,"Initial operator workspace visible");

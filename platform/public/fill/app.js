@@ -1524,7 +1524,7 @@
       if (authEpoch !== state.authEpoch || readEpoch !== state.readEpoch ||
           state.org !== org || date !== el.date.value) return;
       try {
-        if (!validTodaySnapshot(today)) throw Error("Invalid Today snapshot");
+        if (!validTodaySnapshot(today) || today.date !== date) throw Error("Invalid Today snapshot");
         state.today = today;
         state.calendar = null;
         renderToday();

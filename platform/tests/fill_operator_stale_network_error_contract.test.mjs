@@ -54,6 +54,13 @@ test("Late failed Calendar fetch from club A cannot show stale error in club B",
    throw Error("UNEXPECTED_GET "+path);
   }
  };
+ // Keep the explicit fixture selection through the app's one boot date write;
+ // subsequent input writes and the host/global clock remain unchanged.
+ let fixtureSelectedDate=today.date,fixtureBootDateWrite=true;
+ Object.defineProperty(el["#dateInput"],"value",{
+  get:()=>fixtureSelectedDate,
+  set:value=>{if(fixtureBootDateWrite)fixtureBootDateWrite=false;else fixtureSelectedDate=value;}
+ });
  vm.runInNewContext(app,ctx,{filename:"fill/app.js"});
  await tick();await tick();
  assert.equal(el["#workspace"].hidden,false);

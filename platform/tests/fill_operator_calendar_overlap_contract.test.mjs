@@ -24,6 +24,17 @@ const ok=body=>({ok:true,status:200,json:async()=>body});
 const unauthorized={ok:false,status:401,json:async()=>({error:"AUTH_REQUIRED"})};
 const tick=()=>new Promise(done=>setTimeout(done,0));
 
+// Seed the fictional initial selection before the app runs. Its one boot
+// assignment normally uses the host clock; retain this fixture selection for
+// that assignment only. Later input changes and the global clock stay real.
+function seedCalendarDate(elements, day){
+ let selected=day, bootAssignment=true;
+ Object.defineProperty(elements["#dateInput"],"value",{
+  get:()=>selected,
+  set:value=>{if(bootAssignment){bootAssignment=false;}else selected=value;}
+ });
+}
+
 test("Older Calendar 401 cannot revoke session after newer Calendar GET 200",async()=>{
  const el=Object.fromEntries(ids.map(id=>[id,make()]));
  const nav=["today","calendar","revenue"].map(view=>make({view}));
@@ -54,6 +65,7 @@ test("Older Calendar 401 cannot revoke session after newer Calendar GET 200",asy
    }
    throw Error("Unexpected fixture request: "+path);
  }};
+ seedCalendarDate(el,today.date);
  vm.runInNewContext(app,ctx);
  await tick();await tick();
  assert.equal(el["#workspace"].hidden,false);
@@ -107,6 +119,7 @@ async function calendarFixture(reply, day=coveredToday){
   if(path.startsWith("/api/fmc/fixture-org/calendar"))return reply(++requests);
   throw Error("Unexpected fictional request");
  }};
+ seedCalendarDate(el,day.date);
  vm.runInNewContext(app,ctx);
  await tick();await tick();
  assert.equal(el["#workspace"].hidden,false,"Fictional operator bootstrap completes");
@@ -407,6 +420,7 @@ test("Current Calendar 403 evicts populated cached Today and Revenue readouts",{
    if(path.startsWith("/api/fmc/fixture-org/calendar"))return reply(++calendarRequests);
    throw Error("Unexpected fictional readout request");
   }};
+ seedCalendarDate(el,data.date);
  vm.runInNewContext(app,ctx);
  await Promise.all([readoutReady,authenticated]);
  const visit=async view=>{
@@ -513,6 +527,7 @@ test("Older Calendar 403 preserves newer populated Today Revenue and Calendar re
    if(path.startsWith("/api/fmc/fixture-org/calendar"))return reply(++calendarRequests);
    throw Error("Unexpected fictional readout request");
   }};
+ seedCalendarDate(el,data.date);
  vm.runInNewContext(app,ctx);
  await Promise.all([readoutReady,authenticated]);
  const visit=async view=>{
