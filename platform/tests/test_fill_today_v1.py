@@ -2225,8 +2225,8 @@ def test_fill_today_native_pg_recovery_quote_denomination(fill_today, capsys, ca
                 identity = identity or uuid.uuid4()
                 c.execute(text("""INSERT INTO public.courts
                     (id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled,active)
-                    VALUES (:court,:venue,'Fictional quote court','padel',false,'native',true,:active)"""),
-                    {"court": identity, "venue": venue, "active": active})
+                    VALUES (:court,:venue,:name,'padel',false,'native',true,:active)"""),
+                    {"court": identity, "venue": venue, "active": active, "name": "Fictional quote court " + str(identity)})
                 return identity
 
             def add_rate(court, currency, price, start=600, end=840, priority=100, active=True, weekday=0, tenant=org_id):
@@ -2313,7 +2313,7 @@ def test_fill_today_native_pg_recovery_quote_denomination(fill_today, capsys, ca
             if r.status_code != 200:
                 pytest.fail("RECOVERY_DENOMINATION_CONTROL_UNAVAILABLE", pytrace=False)
             body = r.json()
-            expected = None if case == "no_opportunities" else 0 if case == "zero_eur" else 1500
+            expected = 0 if case in {"no_opportunities", "zero_eur"} else 1500
             if (set(body) != {"date", "day_start", "day_end", "timezone", "currency", "summary", "courts", "empty_windows"}
                     or body["currency"] != report_currency or body["summary"]["bookings"] != 0
                     or body["summary"]["revenue_minor"] != 0 or body["summary"]["highest_single_quote_minor"] != expected):
