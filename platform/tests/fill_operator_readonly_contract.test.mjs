@@ -20,7 +20,11 @@ const fixtureToday = {
 
 function makeElement(dataset = {}) {
   const listeners = new Map();
-  return { dataset, hidden: false, disabled: false, value: "", textContent: "", innerHTML: "", classList: { toggle() {} }, addEventListener(type, handler) { listeners.set(type, handler); }, listener(type) { return listeners.get(type); } };
+  let text = "";
+  return { dataset, hidden: false, disabled: false, value: "", innerHTML: "",
+    get textContent() { return text; },
+    set textContent(value) { text = value; this.innerHTML = ""; },
+    classList: { toggle() {} }, addEventListener(type, handler) { listeners.set(type, handler); }, listener(type) { return listeners.get(type); } };
 }
 
 test("Fill operator data use only Core GET contracts; password auth is separate", async () => {
@@ -71,13 +75,14 @@ test("Fill operator data use only Core GET contracts; password auth is separate"
 });
 
 
-async function renderMoneyFixture(today) {
+async function renderMoneyFixture(today, organizations = [{ id: "org-fixture", name: "Fixture Club", role: "manager" }]) {
   const elements = Object.fromEntries(["#authGate", "#workspace", "#orgSelect", "#identity", "#signOut", "#dateInput", "#refreshButton", "#error", "#pageTitle", "#todayView", "#calendarView", "#revenueView", "#kpis", "#courtUtilisation", "#utilisationBadge", "#emptyCapacity", "#calendarTimeline", "#revenueKpis", "#opportunityQueue", "#courtComparison", "#operatorSignIn", "#operatorEmail", "#operatorPassword", "#operatorLoginButton", "#operatorLoginError"].map((id) => [id, makeElement()]));
   const navigation = [makeElement({ view: "today" }), makeElement({ view: "calendar" }), makeElement({ view: "revenue" })];
   const calls = [];
   const local = new Map([["fill.access", "stale-persistent-fixture"]]);
   const session = new Map([["fill.access", "fixture-session"]]);
   const response = (body) => ({ ok: true, status: 200, json: async () => body });
+  let todayReply = () => response(today);
   const context = {
     URLSearchParams, Intl, Date, Map, Number, String, Error, Headers, encodeURIComponent,
     document: { querySelector(selector) { return elements[selector]; }, querySelectorAll(selector) { return selector === ".nav-item" ? navigation : []; } },
@@ -87,8 +92,8 @@ async function renderMoneyFixture(today) {
     fetch: async (path, options = {}) => {
       calls.push({ path, method: options.method || "GET" });
       if (path === "/api/me") return response({ user: { email: "operator@example.test" } });
-      if (path === "/api/fmc/organizations") return response({ items: [{ id: "org-fixture", name: "Fixture Club", role: "manager" }] });
-      if (path.startsWith("/api/fmc/org-fixture/today?")) return response(today);
+      if (path === "/api/fmc/organizations") return response({ items: organizations });
+      if (organizations.some(org => path.startsWith(`/api/fmc/${org.id}/today?`))) return todayReply(path);
       if (path.startsWith("/api/fmc/org-fixture/calendar?")) return response({ bookings: [{ court_id: "court-fixture", status: "confirmed", starts_at: "2026-10-16T09:00:00+01:00", ends_at: "2026-10-16T12:00:00+01:00", source: "fixture" }], holds: [], blocks: [] });
       throw new Error(`Unexpected request ${path}`);
     },
@@ -96,7 +101,9 @@ async function renderMoneyFixture(today) {
   vm.runInNewContext(appSource, context, { filename: "fill/app.js" });
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
-  return { elements, calls };
+  return { elements, calls, navigation, session,
+    setTodayReply(reply) { todayReply = reply; },
+    refresh: () => elements["#refreshButton"].listener("click")() };
 }
 
 
@@ -188,3 +195,148 @@ for (const [kind, duration, present] of [["core_empty", null, false], ["free_60"
     console.log(`FILL_QUOTE_PRESENCE_NODE_PASS case=${kind} duration=${duration === null ? "none" : duration} present=${Number(present)}`);
   });
 }
+
+
+const privateReadoutIds=["#kpis","#courtUtilisation","#emptyCapacity","#calendarTimeline",
+ "#revenueKpis","#opportunityQueue","#courtComparison"];
+const todayOk=body=>({ok:true,status:200,json:async()=>body});
+const copyToday=()=>structuredClone(fixtureToday);
+function withoutTodayField(field){const body=copyToday();delete body[field];return body;}
+const malformedToday=[
+ ["empty object",{}],["array",[]],["null",null],["number",42],
+ ["string","FICTIONAL BAD TODAY"],["boolean",false],
+ ...["date","day_start","day_end","timezone","currency","summary","courts","empty_windows"]
+  .map(field=>[`missing ${field}`,withoutTodayField(field)]),
+ ...[null,[],{},0,"FICTIONAL BAD SUMMARY",false].map((summary,index)=>
+  [`bad summary ${index}`,{...copyToday(),summary}]),
+ ...["revenue_minor","utilization_pct","bookings"].map(field=>{
+  const body=copyToday();body.summary[field]=null;return [`null summary ${field}`,body];}),
+ ...["courts","empty_windows"].flatMap(field=>[null,{}].map((value,index)=>
+  [`bad ${field} ${index}`,{...copyToday(),[field]:value}])),
+];
+function assertTodaySession(fixture){
+ assert.equal(fixture.session.get("fill.access"),"fixture-session");
+ assert.equal(fixture.elements["#authGate"].hidden,true);
+ assert.equal(fixture.elements["#workspace"].hidden,false);
+ assert.ok(fixture.calls.every(call=>call.method==="GET"),"Only fictional read requests are permitted");
+}
+function assertBadToday(fixture){
+ assertTodaySession(fixture);
+ assert.equal(fixture.elements["#error"].hidden,false);
+ assert.equal(fixture.elements["#error"].textContent,"Unable to load Today. Try again.");
+ for(const id of privateReadoutIds)assert.equal(fixture.elements[id].innerHTML,"",
+  `Malformed Today must clear private ${id} instead of inventing zero or capacity`);
+ assert.equal(fixture.elements["#utilisationBadge"].textContent,"—");
+}
+for(const [name,body] of malformedToday)test(`Current malformed Today ${name} clears all private readouts`,async()=>{
+ const fixture=await renderMoneyFixture(copyToday());
+ await fixture.navigation[1].listener("click")();
+ for(const id of privateReadoutIds)assert.ok(fixture.elements[id].innerHTML.length>0,
+  `Prior valid ${id} must actually be populated`);
+ const before=fixture.calls.length;
+ fixture.setTodayReply(()=>todayOk(body));await fixture.refresh();
+ assertBadToday(fixture);
+ assert.equal(fixture.calls.length,before+1,"No malformed-body retry or fallback Calendar request");
+});
+for(const [name,body] of [["object",{}],["array",[]],["null",null]])
+ test(`Initial Today ${name} cannot fabricate zero metrics or expose raw exceptions`,async()=>{
+  const fixture=await renderMoneyFixture(body);assertBadToday(fixture);
+ });
+
+test("Today 200 JSON decode failure is sanitized and clears prior readouts",async()=>{
+ const fixture=await renderMoneyFixture(copyToday());
+ await fixture.navigation[1].listener("click")();
+ fixture.setTodayReply(()=>({ok:true,status:200,json:async()=>{throw Error("FICTIONAL PRIVATE JSON DETAIL");}}));
+ await fixture.refresh();assertBadToday(fixture);
+});
+
+test("Valid authoritative empty Today preserves zero revenue and absent quote",async()=>{
+ const body=copyToday();
+ for(const key of Object.keys(body.summary))body.summary[key]=0;
+ body.summary.highest_single_quote_duration_minutes=null;body.courts=[];body.empty_windows=[];
+ const fixture=await renderMoneyFixture(body);assertTodaySession(fixture);
+ assert.equal(fixture.elements["#error"].hidden,true);
+ assert.match(fixture.elements["#kpis"].innerHTML,/<strong>€0.00<\/strong>/);
+ assert.match(fixture.elements["#courtUtilisation"].innerHTML,/No active courts/);
+ const card=[...fixture.elements["#revenueKpis"].innerHTML.matchAll(/<article class="kpi">([\s\S]*?)<\/article>/g)]
+  .map(match=>match[1]).find(value=>value.includes("Top slot quote"));
+ assert.match(card,/<strong>—<\/strong>/);
+});
+
+test("A valid Today after malformed response restores readouts without a new session",async()=>{
+ const fixture=await renderMoneyFixture(copyToday());
+ fixture.setTodayReply(()=>todayOk({}));await fixture.refresh();assertBadToday(fixture);
+ const body=copyToday();body.summary.revenue_minor=1;
+ fixture.setTodayReply(()=>todayOk(body));await fixture.refresh();
+ assertTodaySession(fixture);assert.equal(fixture.elements["#error"].hidden,true);
+ assert.match(fixture.elements["#kpis"].innerHTML,/<strong>€0.01<\/strong>/);
+ assert.match(fixture.elements["#opportunityQueue"].innerHTML,/Fixture Court/);
+});
+
+for(const failure of ["body","decode"])test(`Stale Today ${failure} failure cannot erase newer valid readouts`,async()=>{
+ const fixture=await renderMoneyFixture(copyToday());
+ let completeOlder,notifyOlder;
+ const started=new Promise(done=>{notifyOlder=done;});
+ const older=new Promise((resolve,reject)=>{completeOlder=failure==="decode"?()=>reject(Error("FICTIONAL OLD DECODE DETAIL")):()=>resolve(null);});
+ fixture.setTodayReply(()=>({ok:true,status:200,json:()=>{notifyOlder();return older;}}));
+ const pending=fixture.refresh();await started;
+ const body=copyToday();body.courts[0].court_name="FICTIONAL NEWER TODAY";
+ fixture.setTodayReply(()=>todayOk(body));await fixture.refresh();
+ const newer=privateReadoutIds.map(id=>fixture.elements[id].innerHTML);
+ assert.match(newer[0],/Revenue/);assert.ok(newer.some(html=>html.includes("FICTIONAL NEWER TODAY")));
+ completeOlder();await pending;
+ assert.deepEqual(privateReadoutIds.map(id=>fixture.elements[id].innerHTML),newer);
+ assert.equal(fixture.elements["#error"].hidden,true);assertTodaySession(fixture);
+});
+
+for(const navigation of ["date","tenant"])test(`Old malformed Today after ${navigation} change cannot overwrite newer club readout`,async()=>{
+ const orgs=[{id:"org-fixture",name:"FICTIONAL CLUB A",role:"manager"},
+  {id:"org-second",name:"FICTIONAL CLUB B",role:"support"}];
+ const fixture=await renderMoneyFixture(copyToday(),orgs);
+ let completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});const started=new Promise(done=>{notifyOlder=done;});
+ fixture.setTodayReply(()=>({ok:true,status:200,json:()=>{notifyOlder();return older;}}));
+ const pending=fixture.refresh();await started;
+ const body=copyToday();body.courts[0].court_name="FICTIONAL NEWER NAVIGATION";
+ fixture.setTodayReply(()=>todayOk(body));
+ if(navigation==="date"){
+  fixture.elements["#dateInput"].value="2026-10-17";
+  await fixture.elements["#dateInput"].listener("change")();
+ }else{
+  fixture.elements["#orgSelect"].value="org-second";
+  fixture.elements["#orgSelect"].listener("change")();
+  await new Promise(done=>setTimeout(done,0));await new Promise(done=>setTimeout(done,0));
+ }
+ const newer=privateReadoutIds.map(id=>fixture.elements[id].innerHTML);
+ assert.ok(newer.some(html=>html.includes("FICTIONAL NEWER NAVIGATION")));
+ completeOlder({});await pending;
+ assert.deepEqual(privateReadoutIds.map(id=>fixture.elements[id].innerHTML),newer);
+ assert.equal(fixture.elements["#error"].hidden,true);assertTodaySession(fixture);
+});
+
+test("Old malformed Today after logout cannot rehydrate metrics or report a private error",async()=>{
+ const fixture=await renderMoneyFixture(copyToday());
+ let completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});const started=new Promise(done=>{notifyOlder=done;});
+ fixture.setTodayReply(()=>({ok:true,status:200,json:()=>{notifyOlder();return older;}}));
+ const pending=fixture.refresh();await started;
+ fixture.elements["#signOut"].listener("click")();completeOlder(null);await pending;
+ assert.equal(fixture.session.has("fill.access"),false);
+ assert.equal(fixture.elements["#authGate"].hidden,false);
+ assert.equal(fixture.elements["#workspace"].hidden,true);
+ assert.equal(fixture.elements["#error"].hidden,true);
+ for(const id of privateReadoutIds)assert.equal(fixture.elements[id].innerHTML,"");
+});
+
+for(const status of [401,403])test(`Current Today HTTP ${status} preserves existing auth semantics`,async()=>{
+ const fixture=await renderMoneyFixture(copyToday());
+ fixture.setTodayReply(()=>({ok:false,status,json:async()=>({error:"FICTIONAL TODAY DENIED"})}));
+ await fixture.refresh();
+ for(const id of privateReadoutIds)assert.equal(fixture.elements[id].innerHTML,"");
+ if(status===401){
+  assert.equal(fixture.session.has("fill.access"),false);
+  assert.equal(fixture.elements["#authGate"].hidden,false);assert.equal(fixture.elements["#workspace"].hidden,true);
+ }else{
+  assertTodaySession(fixture);assert.equal(fixture.elements["#error"].textContent,"FICTIONAL TODAY DENIED");
+ }
+});
