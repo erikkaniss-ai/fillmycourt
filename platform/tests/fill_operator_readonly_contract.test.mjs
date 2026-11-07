@@ -156,3 +156,35 @@ test("An absent EUR Recovery quote stays unavailable instead of becoming a zero 
   assert.ok(!elements["#revenueKpis"].innerHTML.includes("\u20ac0.00"), "Missing source amount is not presented as zero");
   console.log("FILL_EUR_ABSENT_QUOTE_PASS unavailable_preserved=1");
 });
+
+
+for (const [kind, duration, present] of [["core_empty", null, false], ["free_60", 60, true], ["free_90", 90, true]]) {
+  test(`Recovery quote presence distinguishes Core empty from configured free quote: ${kind}`, async () => {
+    const today = structuredClone(fixtureToday);
+    today.summary.highest_single_quote_minor = 0;
+    today.summary.highest_single_quote_duration_minutes = duration;
+    if (kind === "core_empty") {
+      today.empty_windows = [];
+      today.summary.bookable_60_starts = 0;
+      today.summary.bookable_90_starts = 0;
+    } else {
+      today.empty_windows = [{ ...today.empty_windows[0], currency: "EUR",
+        best_amount_minor: 0, best_duration_minutes: duration,
+        min_60_amount_minor: 0, max_60_amount_minor: 0,
+        bookable_90_count: duration === 90 ? 1 : 0,
+        min_90_amount_minor: duration === 90 ? 0 : null,
+        max_90_amount_minor: duration === 90 ? 0 : null }];
+    }
+    const { elements, calls } = await renderMoneyFixture(today);
+    const cards = [...elements["#revenueKpis"].innerHTML.matchAll(/<article class="kpi">([\s\S]*?)<\/article>/g)]
+      .map((match) => match[1]).filter((card) => card.includes("<span>Top slot quote</span>"));
+    assert.equal(cards.length, 1, "Actual Recovery quote KPI is unique");
+    const zero = cards[0].includes("<strong>\u20ac0.00</strong>");
+    const absent = cards[0].includes("<strong>\u2014</strong>");
+    if (!present && zero) console.log("FILL_QUOTE_PRESENCE_NODE_RED case=core_empty actual_zero_quote=1");
+    assert.equal(zero, present, "Only configured quotes may show a monetary zero");
+    assert.equal(absent, !present, "The existing absent marker represents an empty Core quote");
+    assert.ok(calls.every((call) => call.method === "GET"), "Quote rendering remains read-only");
+    console.log(`FILL_QUOTE_PRESENCE_NODE_PASS case=${kind} duration=${duration === null ? "none" : duration} present=${Number(present)}`);
+  });
+}

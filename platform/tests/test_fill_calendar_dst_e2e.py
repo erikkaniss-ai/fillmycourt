@@ -174,7 +174,7 @@ def _calendar_403_dom_check(condition, message):
 
 
 @_calendar_403_contextmanager
-def _calendar_403_native_dom_context(capsys, *, viewport_width=1280, money_minor=None):
+def _calendar_403_native_dom_context(capsys, *, viewport_width=1280, money_minor=None, quote_presence_case=None):
     import hashlib
     import re
     import uuid
@@ -255,7 +255,7 @@ def _calendar_403_native_dom_context(capsys, *, viewport_width=1280, money_minor
             "empty_windows": [],
         }
 
-        if money_minor is not None:
+        if money_minor is not None and quote_presence_case != "core_empty":
             dto["summary"].update(revenue_minor=money_minor, booked_minutes=0,
                 empty_minutes=minutes, utilization_pct=0, bookings=0,
                 bookable_60_starts=1, bookable_90_starts=0,
@@ -272,6 +272,16 @@ def _calendar_403_native_dom_context(capsys, *, viewport_width=1280, money_minor
                 "max_90_amount_minor": None, "best_amount_minor": money_minor,
                 "best_duration_minutes": 60, "best_starts_at": begin.isoformat(),
                 "currency": "EUR"}]
+        if quote_presence_case == "core_empty":
+            dto["summary"].update(highest_single_quote_minor=0,
+                highest_single_quote_duration_minutes=None,
+                bookable_60_starts=0, bookable_90_starts=0)
+            dto["empty_windows"] = []
+        elif quote_presence_case == "free_90":
+            dto["summary"].update(highest_single_quote_duration_minutes=90, bookable_90_starts=1)
+            dto["empty_windows"][0].update(ends_at=(begin + timedelta(minutes=90)).isoformat(),
+                duration_minutes=90, best_duration_minutes=90, bookable_90_count=1,
+                min_90_amount_minor=0, max_90_amount_minor=0)
         return dto
 
     def occupied(source):
@@ -435,12 +445,12 @@ def _calendar_403_native_dom_context(capsys, *, viewport_width=1280, money_minor
             check(state["context_closed"] and state["browser_closed"] and state["driver_stopped"]
                   and not state["held"], "Native DOM fixture did not fully close.")
             with capsys.disabled():
-                print(("FILL_EUR_NATIVE_LAYOUT_SYNTHETIC_PASS width=" + str(viewport_width) + " minor=" + str(money_minor) + " regions=" + str(state.get("money_checks", 0)) + " case=" if money_minor is not None else "FILL_CALENDAR_REAL_DOM_CI_PASS case=") + state["mode"]
+                print((("FILL_QUOTE_PRESENCE_NATIVE_SYNTHETIC_PASS width=" + str(viewport_width) + " case=" + quote_presence_case + " checks=" + str(state.get("quote_presence_checks", 0)) + " current_case=" if quote_presence_case is not None else ("FILL_EUR_NATIVE_LAYOUT_SYNTHETIC_PASS width=" + str(viewport_width) + " minor=" + str(money_minor) + " regions=" + str(state.get("money_checks", 0)) + " case=" if money_minor is not None else "FILL_CALENDAR_REAL_DOM_CI_PASS case="))) + state["mode"]
                       + " engine=chromium native_dom=1 static=4 api=5 calendar=2 unknown=0"
                       + " held_pending=0 context_closed=1 browser_closed=1 driver_stopped=1")
         else:
             with capsys.disabled():
-                print(("FILL_EUR_NATIVE_LAYOUT_SYNTHETIC_NOT_PASS width=" + str(viewport_width) + " minor=" + str(money_minor) + " regions=" + str(state.get("money_checks", 0)) + " case=" if money_minor is not None else "FILL_CALENDAR_REAL_DOM_CI_NOT_PASS case=") + (state["mode"] or "unset")
+                print((("FILL_QUOTE_PRESENCE_NATIVE_SYNTHETIC_NOT_PASS width=" + str(viewport_width) + " case=" + quote_presence_case + " checks=" + str(state.get("quote_presence_checks", 0)) + " current_case=" if quote_presence_case is not None else ("FILL_EUR_NATIVE_LAYOUT_SYNTHETIC_NOT_PASS width=" + str(viewport_width) + " minor=" + str(money_minor) + " regions=" + str(state.get("money_checks", 0)) + " case=" if money_minor is not None else "FILL_CALENDAR_REAL_DOM_CI_NOT_PASS case="))) + (state["mode"] or "unset")
                       + " stage=" + state["stage"] + " unknown=" + str(len(state["violations"]))
                       + " boundary=" + (state["violations"][0] if state["violations"] else "none")
                       + " context_closed=" + str(int(state["context_closed"]))
@@ -672,7 +682,7 @@ def test_calendar_native_dom_guard_rejects_empty_post_after_positive(capsys):
 
 
 
-def _eur_native_money_readable(bundle, capsys, width, minor, region, selector, expected):
+def _eur_native_money_readable(bundle, capsys, width, minor, region, selector, expected, *, evidence_prefix=None):
     """Read actual text range geometry after native scrolling; never alter DOM."""
     check, operation, page = bundle["check"], bundle["operation"], bundle["page"]
     target = page.locator(selector).filter(has_text=expected)
@@ -680,7 +690,7 @@ def _eur_native_money_readable(bundle, capsys, width, minor, region, selector, e
     matched = operation(stage + "_count", target.count)
     if matched != 1:
         with capsys.disabled():
-            print("FILL_EUR_NATIVE_LOOKUP_NOT_PASS synthetic_only=1 width=" + str(width)
+            print((("FILL_EUR_NATIVE_LOOKUP_NOT_PASS" if evidence_prefix is None else evidence_prefix + "_LOOKUP_NOT_PASS") + " synthetic_only=1 width=") + str(width)
                   + " minor=" + str(minor) + " region=" + region + " matched=" + str(matched))
     check(matched == 1,
           "Synthetic EUR money region did not contain one expected amount.")
@@ -731,11 +741,11 @@ def _eur_native_money_readable(bundle, capsys, width, minor, region, selector, e
               and not metrics["occluded"] and metrics["shown"])
     with capsys.disabled():
         if passed:
-            print("FILL_EUR_NATIVE_MONEY_REGION_PASS synthetic_only=1 width=" + str(width)
+            print((("FILL_EUR_NATIVE_MONEY_REGION_PASS" if evidence_prefix is None else evidence_prefix + "_PASS") + " synthetic_only=1 width=") + str(width)
                   + " minor=" + str(minor) + " region=" + region
                   + " exact_text=1 unclipped=1 no_ellipsis=1 unobscured=1")
         else:
-            print("FILL_EUR_NATIVE_MONEY_REGION_FINDING synthetic_only=1 width=" + str(width)
+            print((("FILL_EUR_NATIVE_MONEY_REGION_FINDING" if evidence_prefix is None else evidence_prefix + "_FINDING") + " synthetic_only=1 width=") + str(width)
                   + " minor=" + str(minor) + " region=" + region
                   + " exact_text=" + str(int(metrics["exact_text"]))
                   + " viewport=" + str(int(metrics["viewport"]))
@@ -775,4 +785,48 @@ def test_eur_money_native_layout_synthetic_matrix(capsys, width, minor, expected
         bundle["traffic"]()
         bundle["check"](bundle["state"]["money_checks"] == 5,
                         "Synthetic EUR money qualification matrix was incomplete.")
+        bundle["state"]["passed"] = True
+
+
+
+@_calendar_403_pytest.mark.parametrize("width", [320, 390, 1440])
+@_calendar_403_pytest.mark.parametrize("case", ["core_empty", "free_60", "free_90"])
+def test_recovery_quote_presence_native_synthetic(capsys, width, case):
+    with _calendar_403_native_dom_context(capsys, viewport_width=width, money_minor=0,
+                                          quote_presence_case=case) as bundle:
+        _calendar_403_native_populated(bundle, "current403")
+        bundle["visit"]("revenue")
+        bundle["frame"]()
+        page, operation, check = bundle["page"], bundle["operation"], bundle["check"]
+        quote = page.locator("#revenueKpis .kpi").filter(has_text="Top slot quote").locator("strong")
+        check(operation("quote_presence_count", quote.count) == 1,
+              "Synthetic quote presence KPI was not unique.")
+        operation("quote_presence_scroll", quote.scroll_into_view_if_needed)
+        actual = operation("quote_presence_value", quote.inner_text).strip()
+        if case == "core_empty":
+            if actual == "\u20ac0.00":
+                with capsys.disabled():
+                    print("FILL_QUOTE_PRESENCE_NATIVE_RED synthetic_only=1 width=" + str(width)
+                          + " case=core_empty actual_zero_quote=1")
+            check(actual == "\u2014", "Core-shaped empty result exposed a monetary quote.")
+            _eur_native_money_readable(bundle, capsys, width, 0, case,
+                "#revenueKpis .kpi strong", "\u2014", evidence_prefix="FILL_QUOTE_PRESENCE_ABSENT")
+        else:
+            check(actual == "\u20ac0.00", "Configured free EUR quote lost its exact monetary zero.")
+            _eur_native_money_readable(bundle, capsys, width, 0, case,
+                "#revenueKpis .kpi strong", "\u20ac0.00", evidence_prefix="FILL_QUOTE_PRESENCE_ZERO")
+        check(operation("quote_presence_visible", quote.is_visible),
+              "Synthetic quote presence marker was not visible.")
+        bundle["state"]["quote_presence_checks"] = 1
+        with capsys.disabled():
+            print("FILL_QUOTE_PRESENCE_NATIVE_CASE_PASS synthetic_only=1 width=" + str(width)
+                  + " case=" + case + " monetary_quote=" + str(int(case != "core_empty")))
+        bundle["visit"]("calendar")
+        bundle["wait_dom"]("occupied_calendar", "() => document.querySelectorAll('#calendarTimeline .lane-cell.booked').length > 0")
+        bundle["visit"]("calendar")
+        bundle["wait_dom"]("permission",
+                          "message => !document.querySelector('#error').hidden && "
+                          "document.querySelector('#error').textContent.includes(message)", bundle["permission"])
+        bundle["session"]()
+        bundle["traffic"]()
         bundle["state"]["passed"] = True
