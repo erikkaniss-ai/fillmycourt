@@ -18,6 +18,25 @@ const fixtureToday = {
   empty_windows: [{ court_id: "court-fixture", court_name: "Fixture Court — not a partner", starts_at: "2026-10-16T12:00:00+01:00", ends_at: "2026-10-16T15:00:00+01:00", duration_minutes: 180, bookable_60_count: 5, min_60_amount_minor: 2400, max_60_amount_minor: 2400, bookable_90_count: 4, min_90_amount_minor: 3600, max_90_amount_minor: 3600, best_amount_minor: 3600, best_duration_minutes: 90, best_starts_at: "2026-10-16T12:00:00+01:00", currency: "EUR" }],
 };
 
+// Only the synthetic UI's initial selected day is fixed, independently of
+// the response body. Real request dates must not silently follow a bad reply.
+function fixtureClock(day) {
+  return class extends Date {
+    constructor(...args) { super(...(args.length ? args : [day + "T12:00:00Z"])); }
+  };
+}
+function todayForFixtureDate(day) {
+  const body = structuredClone(fixtureToday);
+  const next = {"2026-10-16": "2026-10-17", "2026-10-17": "2026-10-18"}[day];
+  assert.ok(next, "Only explicit fictional October fixture days are supported");
+  body.date = day;
+  body.day_start = day + "T00:00:00+01:00";
+  body.day_end = next + "T00:00:00+01:00";
+  for (const window of body.empty_windows) for (const key of ["starts_at", "ends_at", "best_starts_at"])
+    window[key] = day + window[key].slice(10);
+  return body;
+}
+
 function makeElement(dataset = {}) {
   const listeners = new Map();
   let text = "";
@@ -43,7 +62,7 @@ test("Fill operator data use only Core GET contracts; password auth is separate"
   const session = new Map([["fill.access", "fixture-session"]]);
   const response = (body) => ({ ok: true, status: 200, json: async () => body });
   const context = {
-    URLSearchParams, Intl, Date, Map, Number, String, Error, Headers, encodeURIComponent,
+    URLSearchParams, Intl, Date: fixtureClock(fixtureToday.date), Map, Number, String, Error, Headers, encodeURIComponent,
     document: { querySelector(selector) { return elements[selector]; }, querySelectorAll(selector) { return selector === ".nav-item" ? navigation : []; } },
     location: { hash: "", pathname: "/fill/", search: "" }, history: { replaceState() {} },
     localStorage: { getItem: (key) => local.get(key) || null, setItem: (key, value) => local.set(key, value), removeItem: (key) => local.delete(key) },
@@ -75,7 +94,7 @@ test("Fill operator data use only Core GET contracts; password auth is separate"
 });
 
 
-async function renderMoneyFixture(today, organizations = [{ id: "org-fixture", name: "Fixture Club", role: "manager" }]) {
+async function renderMoneyFixture(today, organizations = [{ id: "org-fixture", name: "Fixture Club", role: "manager" }], requestDate = fixtureToday.date) {
   const elements = Object.fromEntries(["#authGate", "#workspace", "#orgSelect", "#identity", "#signOut", "#dateInput", "#refreshButton", "#error", "#pageTitle", "#todayView", "#calendarView", "#revenueView", "#kpis", "#courtUtilisation", "#utilisationBadge", "#emptyCapacity", "#calendarTimeline", "#revenueKpis", "#opportunityQueue", "#courtComparison", "#operatorSignIn", "#operatorEmail", "#operatorPassword", "#operatorLoginButton", "#operatorLoginError"].map((id) => [id, makeElement()]));
   const navigation = [makeElement({ view: "today" }), makeElement({ view: "calendar" }), makeElement({ view: "revenue" })];
   const calls = [];
@@ -84,7 +103,7 @@ async function renderMoneyFixture(today, organizations = [{ id: "org-fixture", n
   const response = (body) => ({ ok: true, status: 200, json: async () => body });
   let todayReply = () => response(today);
   const context = {
-    URLSearchParams, Intl, Date, Map, Number, String, Error, Headers, encodeURIComponent,
+    URLSearchParams, Intl, Date: fixtureClock(requestDate), Map, Number, String, Error, Headers, encodeURIComponent,
     document: { querySelector(selector) { return elements[selector]; }, querySelectorAll(selector) { return selector === ".nav-item" ? navigation : []; } },
     location: { hash: "", pathname: "/fill/", search: "" }, history: { replaceState() {} },
     localStorage: { getItem: (key) => local.get(key) || null, setItem: (key, value) => local.set(key, value), removeItem: (key) => local.delete(key) },
@@ -297,7 +316,7 @@ for(const navigation of ["date","tenant"])test(`Old malformed Today after ${navi
  const older=new Promise(done=>{completeOlder=done;});const started=new Promise(done=>{notifyOlder=done;});
  fixture.setTodayReply(()=>({ok:true,status:200,json:()=>{notifyOlder();return older;}}));
  const pending=fixture.refresh();await started;
- const body=copyToday();body.courts[0].court_name="FICTIONAL NEWER NAVIGATION";
+ const body=navigation==="date"?todayForFixtureDate("2026-10-17"):copyToday();body.courts[0].court_name="FICTIONAL NEWER NAVIGATION";
  fixture.setTodayReply(()=>todayOk(body));
  if(navigation==="date"){
   fixture.elements["#dateInput"].value="2026-10-17";
@@ -340,3 +359,74 @@ for(const status of [401,403])test(`Current Today HTTP ${status} preserves exist
   assertTodaySession(fixture);assert.equal(fixture.elements["#error"].textContent,"FICTIONAL TODAY DENIED");
  }
 });
+
+
+function assertLatestTodayQuery(fixture,day){
+ const calls=fixture.calls.filter(call=>/\/today\?/.test(call.path));
+ assert.ok(calls.length>0);
+ assert.equal(new URL(calls.at(-1).path,"https://fixture.invalid").searchParams.get("date"),day);
+}
+for(const [requested,returned] of [["2026-10-17","2026-10-16"],["2026-10-16","2026-10-17"]]){
+ test(`Initial Today requested ${requested} rejects valid wrong-date ${returned}`,async()=>{
+  const body=todayForFixtureDate(returned);body.courts[0].court_name="FICTIONAL WRONG-DATE COURT";
+  const fixture=await renderMoneyFixture(body,undefined,requested);
+  assertLatestTodayQuery(fixture,requested);assertTodaySession(fixture);
+  if(fixture.elements["#error"].hidden)console.log(`FILL_TODAY_DATE_RED phase=initial requested=${requested} returned=${returned} wrong_private_render=${Number(fixture.elements["#courtComparison"].innerHTML.includes("FICTIONAL WRONG-DATE COURT"))}`);
+  assertBadToday(fixture);
+ });
+ test(`Current Today requested ${requested} rejects valid wrong-date ${returned} without fallback`,async()=>{
+  const fixture=await renderMoneyFixture(todayForFixtureDate(requested),undefined,requested);
+  await fixture.navigation[1].listener("click")();
+  for(const id of privateReadoutIds)assert.ok(fixture.elements[id].innerHTML.length>0);
+  const before=fixture.calls.length;
+  fixture.setTodayReply(()=>todayOk(todayForFixtureDate(returned)));await fixture.refresh();
+  assertLatestTodayQuery(fixture,requested);
+  if(fixture.elements["#error"].hidden)console.log(`FILL_TODAY_DATE_RED phase=refresh requested=${requested} returned=${returned}`);
+  assertBadToday(fixture);
+  assert.equal(fixture.calls.length,before+1,"Wrong-date body must not trigger Calendar, retry or fallback");
+ });
+}
+
+test("Matching Today can recover after a wrong-date reply without replacing the operator session",async()=>{
+ const fixture=await renderMoneyFixture(todayForFixtureDate("2026-10-16"));
+ fixture.setTodayReply(()=>todayOk(todayForFixtureDate("2026-10-17")));await fixture.refresh();
+ assertLatestTodayQuery(fixture,"2026-10-16");assertBadToday(fixture);
+ const body=todayForFixtureDate("2026-10-16");body.summary.revenue_minor=1;
+ fixture.setTodayReply(()=>todayOk(body));await fixture.refresh();
+ assertTodaySession(fixture);assert.equal(fixture.elements["#error"].hidden,true);
+ assert.match(fixture.elements["#kpis"].innerHTML,/<strong>€0.01<\/strong>/);
+});
+
+for(const navigation of ["sameclub","date","tenant","logout"])
+ test(`Stale wrong-date Today after ${navigation} cannot erase newer private state or auth`,async()=>{
+  const orgs=[{id:"org-fixture",name:"FICTIONAL CLUB A",role:"manager"},
+   {id:"org-second",name:"FICTIONAL CLUB B",role:"support"}];
+  const fixture=await renderMoneyFixture(todayForFixtureDate("2026-10-16"),orgs);
+  let completeOlder,notifyOlder;
+  const older=new Promise(done=>{completeOlder=done;});const started=new Promise(done=>{notifyOlder=done;});
+  fixture.setTodayReply(()=>({ok:true,status:200,json:()=>{notifyOlder();return older;}}));
+  const pending=fixture.refresh();await started;assertLatestTodayQuery(fixture,"2026-10-16");
+  const selected=navigation==="date"?"2026-10-17":"2026-10-16";
+  const body=todayForFixtureDate(selected);body.courts[0].court_name="FICTIONAL CURRENT-DATE COURT";
+  fixture.setTodayReply(()=>todayOk(body));
+  if(navigation==="date"){
+   fixture.elements["#dateInput"].value=selected;
+   await fixture.elements["#dateInput"].listener("change")();
+  }else if(navigation==="tenant"){
+   fixture.elements["#orgSelect"].value="org-second";fixture.elements["#orgSelect"].listener("change")();
+   await new Promise(done=>setTimeout(done,0));await new Promise(done=>setTimeout(done,0));
+  }else if(navigation==="logout")fixture.elements["#signOut"].listener("click")();
+  else await fixture.refresh();
+  const newer=privateReadoutIds.map(id=>fixture.elements[id].innerHTML);
+  if(navigation!=="logout"){
+   assertLatestTodayQuery(fixture,selected);assert.ok(newer.some(html=>html.includes("FICTIONAL CURRENT-DATE COURT")));
+  }
+  // This reply is wrong for its captured16 request, even when the new UI selected17.
+  completeOlder(todayForFixtureDate("2026-10-17"));await pending;
+  assert.deepEqual(privateReadoutIds.map(id=>fixture.elements[id].innerHTML),newer);
+  assert.equal(fixture.elements["#error"].hidden,true);
+  if(navigation==="logout"){
+   assert.equal(fixture.session.has("fill.access"),false);assert.equal(fixture.elements["#authGate"].hidden,false);
+   assert.equal(fixture.elements["#workspace"].hidden,true);assert.ok(newer.every(html=>html===""));
+  }else assertTodaySession(fixture);
+ });
