@@ -2191,3 +2191,148 @@ def test_fill_today_native_pg_revenue_denomination(fill_today, capsys, status, p
     finally:
         with store.trusted() as c:
             c.execute(text("DELETE FROM public.organizations WHERE id=:org"), {"org": extra_org})
+
+
+
+@pytest.mark.parametrize("case", [
+    "sole_foreign", "mixed_foreign_max", "mixed_foreign_not_max",
+    "foreign_beyond_window_limit", "foreign_zero", "uniform_eur", "uniform_usd",
+    "zero_eur", "no_opportunities", "inactive_foreign_rate", "unselected_foreign_rate",
+    "outside_weekday_foreign_rate", "other_tenant_foreign_rate", "inactive_foreign_court"])
+def test_fill_today_native_pg_recovery_quote_denomination(fill_today, capsys, case):
+    """Real read-only ASGI GET over disposable migrated PG, with fictional rows.
+
+    Inherited fixture SQL principal/Auth stub does not claim supported Supabase
+    provisioning or full booking/provider admission. No writer route is invoked.
+    """
+    url, store, user_id, org_id, court_id = fill_today
+    extra_org, extra_venue, extra_court = (uuid.uuid4() for _ in range(3))
+    client = None
+    hidden_court = None
+    deny = case in {"sole_foreign", "mixed_foreign_max", "mixed_foreign_not_max",
+                    "foreign_beyond_window_limit", "foreign_zero"}
+    report_currency = "USD" if case == "uniform_usd" else "EUR"
+    try:
+        with store.trusted() as c:
+            if c.dialect.name != "postgresql":
+                pytest.fail("RECOVERY_DENOMINATION_REQUIRES_NATIVE_PG", pytrace=False)
+            c.execute(text("DELETE FROM public.bookings WHERE organization_id=:org"), {"org": org_id})
+            c.execute(text("DELETE FROM public.court_blocks WHERE organization_id=:org"), {"org": org_id})
+            c.execute(text("DELETE FROM public.court_rates WHERE organization_id=:org"), {"org": org_id})
+            venue_id = c.execute(text("SELECT venue_id FROM public.courts WHERE id=:court"), {"court": court_id}).scalar_one()
+
+            def add_court(active=True, tenant=org_id, venue=venue_id, identity=None):
+                identity = identity or uuid.uuid4()
+                c.execute(text("""INSERT INTO public.courts
+                    (id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled,active)
+                    VALUES (:court,:venue,'Fictional quote court','padel',false,'native',true,:active)"""),
+                    {"court": identity, "venue": venue, "active": active})
+                return identity
+
+            def add_rate(court, currency, price, start=600, end=840, priority=100, active=True, weekday=0, tenant=org_id):
+                c.execute(text("""INSERT INTO public.court_rates
+                    (organization_id,court_id,weekday,start_minute,end_minute,price_minor,currency,priority,active)
+                    VALUES (:org,:court,:weekday,:start,:end,:price,:currency,:priority,:active)"""),
+                    {"org": tenant, "court": court, "weekday": weekday, "start": start,
+                     "end": end, "price": price, "currency": currency, "priority": priority, "active": active})
+
+            if case == "uniform_usd":
+                c.execute(text("UPDATE public.organizations SET default_currency='USD' WHERE id=:org"), {"org": org_id})
+                c.execute(text("UPDATE public.venues SET currency='USD' WHERE id=:venue"), {"venue": venue_id})
+            if case in {"sole_foreign", "foreign_zero"}:
+                add_rate(court_id, "USD", 0 if case == "foreign_zero" else 1000)
+            elif case == "mixed_foreign_max":
+                add_rate(court_id, "EUR", 1000, end=720)
+                add_rate(court_id, "USD", 2000, start=720)
+            elif case == "mixed_foreign_not_max":
+                add_rate(court_id, "USD", 100, end=660)
+                add_rate(court_id, "EUR", 2000, start=660)
+            elif case != "no_opportunities":
+                add_rate(court_id, report_currency, 0 if case == "zero_eur" else 1000)
+            if case == "foreign_beyond_window_limit":
+                for _ in range(29):
+                    add_rate(add_court(), "EUR", 1000)
+                hidden_court = add_court()
+                add_rate(hidden_court, "USD", 100, end=660)
+            elif case == "inactive_foreign_rate":
+                add_rate(court_id, "USD", 100, priority=0, active=False)
+            elif case == "unselected_foreign_rate":
+                add_rate(court_id, "USD", 100, priority=200)
+            elif case == "outside_weekday_foreign_rate":
+                add_rate(court_id, "USD", 100, weekday=1)
+            elif case == "inactive_foreign_court":
+                add_rate(add_court(active=False), "USD", 100)
+            elif case == "other_tenant_foreign_rate":
+                c.execute(text("INSERT INTO public.organizations (id,slug,name,timezone,default_currency) VALUES (:org,:slug,'Fictional quote control','Europe/Lisbon','USD')"), {"org": extra_org, "slug": str(extra_org)})
+                c.execute(text("INSERT INTO public.venues (id,organization_id,name,timezone,currency,address) VALUES (:venue,:org,'Fictional control venue','Europe/Lisbon','USD','{}')"), {"org": extra_org, "venue": extra_venue})
+                add_court(tenant=extra_org, venue=extra_venue, identity=extra_court)
+                add_rate(extra_court, "USD", 100, tenant=extra_org)
+        settings = Settings(
+            origin="https://fill.test",
+            environment="test",
+            database=url,
+            supabase_url="https://example.supabase.co",
+            supabase_publishable_key="sb_publishable_ci",
+            data_contract="supabase-v1",
+        )
+        client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+        r = client.get(
+            f"/api/fmc/{org_id}/today",
+            params={"date": "2026-10-05"},
+            headers={"Authorization": "Bearer ci-owner-token"},
+        )
+        if deny:
+            if r.status_code == 200:
+                body = r.json()
+                windows = body["empty_windows"]
+                no_revenue = body["summary"]["bookings"] == 0 and body["summary"]["revenue_minor"] == 0
+                if case in {"sole_foreign", "foreign_zero"}:
+                    witness = any(w["currency"] == "USD" for w in windows) and body["currency"] == "EUR"
+                elif case == "mixed_foreign_max":
+                    witness = body["summary"]["highest_single_quote_minor"] == 3000 and any(w["currency"] == "USD" for w in windows)
+                elif case == "mixed_foreign_not_max":
+                    witness = (body["summary"]["highest_single_quote_minor"] == 3000
+                               and any(w["currency"] == "EUR" and w["min_60_amount_minor"] == 100
+                                       and w["max_60_amount_minor"] == 2000 for w in windows))
+                else:
+                    witness = (len(windows) == 30 and all(w["currency"] == "EUR" for w in windows)
+                               and any(str(v["court_id"]) == str(hidden_court) and v["empty_minutes"] == 60
+                                       and v["has_rate_coverage"] for v in body["courts"]))
+                if not witness or not no_revenue:
+                    pytest.fail("RECOVERY_DENOMINATION_RED_PRECONDITION_MISSING", pytrace=False)
+                with capsys.disabled():
+                    print("FILL_RECOVERY_QUOTE_RED case=" + case + " actual_status=200 no_revenue=1 selected_foreign=1"
+                          + " foreign_not_numeric_max=" + str(int(case == "mixed_foreign_not_max"))
+                          + " before_display_limit=" + str(int(case == "foreign_beyond_window_limit")) + " native_pg=1")
+                pytest.fail("RECOVERY_DENOMINATION_EXPECTED_SANITIZED_503", pytrace=False)
+            if r.status_code != 503 or any(k in r.json() for k in ("summary", "empty_windows")) or "USD" in r.text:
+                pytest.fail("RECOVERY_DENOMINATION_UNSAFE_FAILURE", pytrace=False)
+            with capsys.disabled():
+                print("FILL_RECOVERY_QUOTE_GREEN case=" + case + " actual_status=503 sanitized=1 native_pg=1")
+        else:
+            if r.status_code != 200:
+                pytest.fail("RECOVERY_DENOMINATION_CONTROL_UNAVAILABLE", pytrace=False)
+            body = r.json()
+            expected = None if case == "no_opportunities" else 0 if case == "zero_eur" else 1500
+            if (set(body) != {"date", "day_start", "day_end", "timezone", "currency", "summary", "courts", "empty_windows"}
+                    or body["currency"] != report_currency or body["summary"]["bookings"] != 0
+                    or body["summary"]["revenue_minor"] != 0 or body["summary"]["highest_single_quote_minor"] != expected):
+                pytest.fail("RECOVERY_DENOMINATION_CONTROL_DTO_CHANGED", pytrace=False)
+            if case == "no_opportunities":
+                if body["empty_windows"]:
+                    pytest.fail("RECOVERY_DENOMINATION_EMPTY_CONTROL_CHANGED", pytrace=False)
+            else:
+                quote = body["empty_windows"][0]
+                base_amount = 0 if case == "zero_eur" else 1000
+                if (quote["currency"] != report_currency or quote["min_60_amount_minor"] != base_amount
+                        or quote["max_60_amount_minor"] != base_amount
+                        or quote["min_90_amount_minor"] != expected or quote["max_90_amount_minor"] != expected
+                        or quote["best_amount_minor"] != expected or quote["best_duration_minutes"] != 90):
+                    pytest.fail("RECOVERY_DENOMINATION_CONTROL_AMOUNT_CHANGED", pytrace=False)
+            with capsys.disabled():
+                print("FILL_RECOVERY_QUOTE_CONTROL_PASS case=" + case + " actual_status=200 native_pg=1")
+    finally:
+        if client is not None:
+            client.close()
+        with store.trusted() as c:
+            c.execute(text("DELETE FROM public.organizations WHERE id=:org"), {"org": extra_org})
