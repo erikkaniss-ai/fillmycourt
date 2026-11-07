@@ -1,0 +1,32 @@
+# PRIVATE FillMyCourt preview only. Configure EXISTING Netlify
+# fillmycourt-preview with Base directory = platform. Do not use on fillmycourt.com.
+[build]
+  publish = "public"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow, noarchive"
+    Cache-Control = "private, no-store"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none'"
+
+# This PRIVATE draft also contains platform/public/index.html (GetACourt).
+# Force the operator root to prevent that physical file shadowing the redirect.
+[[redirects]]
+  from = "/"
+  to = "/fill/"
+  status = 302
+  force = true
+
+[[redirects]]
+  from = "/fill"
+  to = "/fill/"
+  status = 301
