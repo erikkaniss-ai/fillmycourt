@@ -151,3 +151,51 @@ test('combined selection rejects an otherwise matching 120 minute only observati
   value.offers = [value.offers[2]];
   assert.throws(()=>normalize(value,{...query,duration:'any'}),/NO_MATCHING_OBSERVED_OFFERS/);
 });
+
+
+function priceObservation(prices) {
+  const value = structuredClone(observed);
+  value.offers = prices.map((priceEur,index)=>({...value.offers[0],court:'Price court '+index,priceEur}));
+  return value;
+}
+
+for(const amount of [36.005,39.999,1.001]) {
+  test('positive non-cent EUR amount '+amount+' is excluded instead of rounded into a price',()=>{
+    assert.throws(()=>normalize(priceObservation([amount])),/NO_MATCHING_OBSERVED_OFFERS/);
+  });
+}
+
+test('exact EUR cents preserve binary-floating values and the existing upper bound',()=>{
+  const prices = [0.01,1.10,2.30,19.99,39.50,36.50,0.29,2000];
+  const expectedCents = [1,110,230,1999,3950,3650,29,200000];
+  const value = priceObservation(prices),before = structuredClone(value);
+  const result = normalize(value);
+  assert.deepEqual(result.offers.map(offer=>offer.priceMinor),expectedCents);
+  assert.deepEqual(result.offers.map(offer=>offer.priceMinor/100),prices);
+  assert.deepEqual(value,before);
+});
+
+test('mixed exact and non-cent EUR offers retain original identity, provenance and frozen private output',()=>{
+  const value = priceObservation([36.005,39.50,39.999,19.99,1.001,0.01,2.30]);
+  const before = structuredClone(value);
+  const allRepresentable = structuredClone(value);
+  for(const index of [0,2,4]) allRepresentable.offers[index].priceEur = 13.37;
+  const reference = normalize(allRepresentable);
+  const result = normalize(value);
+  assert.deepEqual(result.offers,[1,3,5,6].map(index=>reference.offers[index]));
+  assert.deepEqual(result.offers.map(offer=>offer.courtName),['Price court 1','Price court 3','Price court 5','Price court 6']);
+  assert.deepEqual(result.offers.map(offer=>offer.priceMinor),[3950,1999,1,230]);
+  assert.equal(result.sourceId,reference.sourceId);
+  assert.ok(Object.isFrozen(result));
+  assert.ok(Object.isFrozen(result.offers));
+  for(const offer of result.offers) {
+    assert.ok(Object.isFrozen(offer));
+    assert.equal(offer.sourceUrl,observed.sourceUrl);
+    assert.equal(offer.evidence,'user_ui_observation');
+    assert.equal(offer.currency,'EUR');
+    assert.equal(offer.timezone,null);
+    assert.equal(offer.providerFreshness,'unknown');
+    assert.equal(offer.bookingEnabled,false);
+  }
+  assert.deepEqual(value,before);
+});
