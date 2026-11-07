@@ -280,8 +280,8 @@ test("no provider is searched without an explicit Get Find gesture, no repeated 
 
 // Run the real page event handlers against a minimal DOM. This exercises the
 // failed live path without accessing a real provider, extension or session.
-function pageRig(){
-  const pageQuery={...q,location:'Cascais'},handlers={},posted=[],nodes=new Map(),timers=new Map();
+function pageRig(queryPatch={}){
+  const pageQuery={...q,location:'Cascais',...queryPatch},handlers={},posted=[],nodes=new Map(),timers=new Map();
   const pageDocument={};
   let nextTimer=0,nonceByte=0;
   const element=()=>({children:[],options:[],events:{},dataset:{},attributes:{},value:'',textContent:'',ownerDocument:pageDocument,
@@ -575,4 +575,113 @@ test('the first compatible failure settles its group while another compatible so
   p.respond(nonce,{status:'partial',sources:[{provider:'racket_id',status:'observed',observation}],version:'0.4.3'});
   assert.match(p.text('offers'),/FICTIONAL compatible court/);
   assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,source2);
+});
+
+for(const provider of ['tiesports','racket_id','smashpro','matchi'])test(`page rejects a ${provider} wrapper carrying a valid Playtomic observation`,()=>{
+  const p=pageRig(),nonce=p.find(),observation=pageObservation('playtomic');
+  assert.equal(normalizePersonalObservation(JSON.stringify(observation),{...q,location:'Cascais'},{validator:validate}).sourceId,'playtomic');
+  p.respond(nonce,{status:'partial',sources:[{provider,status:'observed',observation}],version:'0.4.3'});
+  assert.deepEqual({card:p.text('offers').includes('FICTIONAL compatible court'),success:/Retrieved 1/.test(p.text('searchStatus')),fresh:/Fresh player-visible/.test(p.text('sourceStatus')),loaded:/Player-visible offer loaded/.test(p.text('sourceStatus'))},
+    {card:false,success:false,fresh:false,loaded:false});
+  assert.match(p.text('sourceStatus'),/Client observation rejected; availability unverified/);
+});
+
+test('single Playtomic channel rejects an otherwise valid Racket observation',()=>{
+  const p=pageRig(),nonce=p.find(),observation=pageObservation('racket_id');
+  assert.equal(normalizePersonalObservation(JSON.stringify(observation),{...q,location:'Cascais'},{validator:validate}).sourceId,'racket_id');
+  p.respond(nonce,{status:'observed',observation,version:'0.4.3'},'gac:auto-search-response');
+  assert.deepEqual({card:p.text('offers').includes('FICTIONAL compatible court'),success:/continue with Playtomic/.test(p.text('searchStatus')),loaded:/Player-visible offer loaded/.test(p.text('sourceStatus'))},
+    {card:false,success:false,loaded:false});
+  assert.match(p.text('personalStatus'),/rejected|does not match/i);
+});
+
+test('partial Playtomic channel rejects a matching wrapper with a Racket observation',()=>{
+  const p=pageRig(),nonce=p.find();
+  p.respond(nonce,{status:'partial',sources:[{provider:'playtomic',status:'observed',observation:pageObservation('racket_id')}],version:'0.4.3'},'gac:auto-search-response');
+  assert.deepEqual({card:p.text('offers').includes('FICTIONAL compatible court'),success:/1 supplied fresh/.test(p.text('searchStatus')),loaded:/Player-visible offer loaded/.test(p.text('sourceStatus'))},
+    {card:false,success:false,loaded:false});
+  assert.match(p.text('searchStatus'),/no complete priced offer was verified/);
+});
+
+test('mixed additional rows reject the mismatched source without losing independent valid observations',()=>{
+  for(const reverse of [false,true]){
+    const p=pageRig(),nonce=p.find(),wrong=pageObservation('playtomic'),good=pageObservation('racket_id');
+    wrong.offers[0].court='FICTIONAL wrong-provider court';good.offers[0].court='FICTIONAL independent Racket court';
+    const rows=[{provider:'tiesports',status:'observed',observation:wrong},{provider:'racket_id',status:'observed',observation:good}];
+    p.respond(nonce,{status:'partial',sources:reverse?rows.reverse():rows,version:'0.4.3'});
+    assert.equal(p.node('offers').children.length,1);assert.doesNotMatch(p.text('offers'),/wrong-provider/);
+    assert.match(p.text('offers'),/independent Racket/);assert.match(p.text('searchStatus'),/Retrieved 1 additional/);
+    assert.match(p.text('sourceStatus'),/TiePlayer \/ TieSports Client observation rejected/);
+    assert.match(p.text('sourceStatus'),/Racket ID Player-visible offer loaded/);
+    assert.doesNotMatch(p.text('sourceStatus'),/Playtomic Player-visible offer loaded/);
+    p.respond(nonce,{status:'observed',observation:pageObservation('playtomic'),version:'0.4.3'},'gac:auto-search-response');
+    assert.equal(p.node('offers').children.length,2);assert.match(p.text('sourceStatus'),/Playtomic Player-visible offer loaded/);
+  }
+});
+
+test('mixed Playtomic rows count only correctly bound observations in either order',()=>{
+  for(const reverse of [false,true]){
+    const p=pageRig(),nonce=p.find(),good=pageObservation('playtomic'),wrong=pageObservation('racket_id');
+    good.offers[0].court='FICTIONAL valid Playtomic court';wrong.offers[0].court='FICTIONAL wrong-provider court';
+    const rows=[{provider:'playtomic',status:'observed',observation:wrong},{provider:'playtomic',status:'observed',observation:good}];
+    p.respond(nonce,{status:'partial',sources:reverse?rows.reverse():rows,version:'0.4.3'},'gac:auto-search-response');
+    assert.equal(p.node('offers').children.length,1);assert.doesNotMatch(p.text('offers'),/wrong-provider/);
+    assert.match(p.text('offers'),/valid Playtomic/);assert.match(p.text('searchStatus'),/Compared 2 reviewed Playtomic club\(s\); 1 supplied/);
+    assert.match(p.text('personalStatus'),/1 club\(s\) incomplete or unverified/);
+    assert.doesNotMatch(p.text('sourceStatus'),/Racket ID Player-visible offer loaded/);
+  }
+});
+
+test('same-provider channels retain valid handoffs, exact EUR cents and source identities for every supported provider',()=>{
+  for(const [provider,reference,location] of [
+    ['playtomic',{url:'https://playtomic.com/clubs/cascais-padel-club',venue:'Cascais Padel Club'},'Cascais'],
+    ['tiesports',official.tiesports,'Lisboa'],['racket_id',official.racket_id,'Cascais'],
+    ['smashpro',official.smashpro,official.smashpro.venue],
+    ['matchi',{url:'https://www.matchi.se/facilities/fictional-club',venue:'FICTIONAL MATCHi club'},'FICTIONAL MATCHi club']
+  ])for(const partial of provider==='playtomic'?[false,true]:[true]){
+    const p=pageRig({location}),nonce=p.find(),observation={...pageObservation(provider),sourceUrl:reference.url,venue:reference.venue};
+    observation.offers[0].priceEur=36.5;
+    const result=partial?{status:'partial',sources:[{provider,status:'observed',observation}]}:{status:'observed',observation};
+    p.respond(nonce,{...result,version:'0.4.3'},provider==='playtomic'?'gac:auto-search-response':'gac:additional-sources-response');
+    assert.equal(p.node('offers').children.length,1,provider);assert.match(p.text('offers'),/FICTIONAL compatible court/);
+    assert.match(p.text('offers'),/36\.50/);assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,reference.url);
+    assert.match(p.text('sourceStatus'),/Player-visible offer loaded/);
+  }
+});
+
+test('manual comparison retains its own validated provider without an automatic-channel restriction',()=>{
+  for(const provider of ['playtomic','racket_id']){
+    const p=pageRig(),observation=pageObservation(provider);p.find();
+    p.node('personalPayload').value=JSON.stringify(observation);p.node('comparePersonal').events.click();
+    assert.match(p.text('offers'),/FICTIONAL compatible court/);
+    assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,observation.sourceUrl);
+    assert.match(p.text('sourceStatus'),provider==='playtomic'?/Playtomic Player-visible offer loaded/:/Racket ID Player-visible offer loaded/);
+  }
+});
+
+test('bound observations still require freshness, schema, allowed URLs, exact cents and requested duration',()=>{
+  for(const patch of [
+    {capturedAt:new Date(Date.now()-60000).toISOString()},
+    {sourceUrl:'https://example.invalid/booking'},
+    {unexpected:'PRIVATE FIELD'},
+    {offers:[{...pageObservation('playtomic').offers[0],priceEur:36.005}]},
+    {offers:[{...pageObservation('playtomic').offers[0],durationMinutes:120}]}
+  ])for(const channel of ['single','partial','additional']){
+    const p=pageRig(),nonce=p.find(),provider=channel==='additional'?'racket_id':'playtomic',observation={...pageObservation(provider),...patch};
+    const result=channel==='single'?{status:'observed',observation}:{status:'partial',sources:[{provider,status:'observed',observation}]};
+    p.respond(nonce,{...result,version:'0.4.3'},channel==='additional'?'gac:additional-sources-response':'gac:auto-search-response');
+    assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);assert.doesNotMatch(p.text('sourceStatus'),/Player-visible offer loaded|Fresh player-visible/);
+    assert.doesNotMatch(p.text('personalStatus'),/PRIVATE FIELD/);
+  }
+});
+
+test('a compatible provider mismatch settles only its group and cannot be overwritten by a duplicate',()=>{
+  const p=pageRig(),nonce=p.find();
+  p.respond(nonce,{status:'observed',observation:pageObservation('racket_id'),version:'0.4.3'},'gac:auto-search-response');
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  const primary=p.text('personalStatus');
+  p.respond(nonce,{status:'observed',observation:pageObservation('playtomic'),version:'0.4.3'},'gac:auto-search-response');
+  assert.equal(p.text('personalStatus'),primary);assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  p.respond(nonce,{status:'partial',sources:[{provider:'racket_id',status:'observed',observation:pageObservation('racket_id')}],version:'0.4.3'});
+  assert.match(p.text('offers'),/FICTIONAL compatible court/);assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,source2);
 });

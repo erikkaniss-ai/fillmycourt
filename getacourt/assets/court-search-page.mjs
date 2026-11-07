@@ -146,7 +146,7 @@ window.addEventListener('gac:auto-search-response',event=>{
     try{raw=JSON.stringify(detail.result.observation);}catch{
       personalStatus.textContent='The player observation could not be validated.';return;
     }
-    if(importPersonal(raw,request.query,request.revision))
+    if(importPersonal(raw,request.query,request.revision,'playtomic'))
       status.textContent='Verified personal observation received. Select a court to continue with Playtomic.';
   }else if(detail.result?.status==='partial'&&Array.isArray(detail.result.sources)){
     // One first-party Playtomic site grant, several independently checked named
@@ -159,7 +159,7 @@ window.addEventListener('gac:auto-search-response',event=>{
       if(result.status==='observed'){
         let raw;
         try{raw=JSON.stringify(result.observation);}catch{raw='';}
-        if(raw&&importPersonal(raw,request.query,request.revision))accepted++;
+        if(raw&&importPersonal(raw,request.query,request.revision,'playtomic'))accepted++;
         else unavailable++;
       }else unavailable++;
     }
@@ -216,7 +216,7 @@ window.addEventListener('gac:additional-sources-response',event=>{
     if(row.status==='observed'){
       let raw;
       try{raw=JSON.stringify(row.observation);}catch{raw='';}
-      if(raw&&importPersonal(raw,pending.query,pending.revision)){
+      if(raw&&importPersonal(raw,pending.query,pending.revision,row.provider)){
         accepted++;additionalStates.set(row.provider,'Fresh player-visible priced observation · partial'+version);
       }else additionalStates.set(row.provider,'Client observation rejected; availability unverified'+version);
     }else{
@@ -311,15 +311,17 @@ function errorText(error){
   return ({
     OBSERVATION_EXPIRED:'The Reader observation expired. Search the club again (60-second lifetime).',
     OBSERVATION_QUERY_MISMATCH:'Reader date or sport differs from this search.',
+    OBSERVATION_PROVIDER_MISMATCH:'The observation source does not match the requested provider. Availability unverified.',
     OBSERVATION_LOCATION_MISMATCH:'The observed club does not match the searched area or exact club name.',
     NO_MATCHING_OBSERVED_OFFERS:'No observed offers match the selected start range and duration. Other times may exist.'
   })[error?.message]||'The report was rejected. Use only a fresh sanitized GetACourt Reader observation.';
 }
-function importPersonal(raw,expectedQuery,expectedRevision){
+function importPersonal(raw,expectedQuery,expectedRevision,expectedProvider){
   if(expectedRevision!==revision||query!==expectedQuery||!allowed())return false;
   try{
     const validator=globalThis.GetACourtPersonalSourceObservation?.validateObservation;
     const v=normalizePersonalObservation(raw,expectedQuery,{now:Date.now(),validator});
+    if(expectedProvider!==undefined&&v.sourceId!==expectedProvider)throw Error('OBSERVATION_PROVIDER_MISMATCH');
     // One club report is a partial snapshot, never a global stock count.
     if(!observations.has(v.sourceUrl)&&observations.size===5)
       observations.delete(observations.keys().next().value);
