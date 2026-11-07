@@ -280,9 +280,13 @@ test("no provider is searched without an explicit Get Find gesture, no repeated 
 
 // Run the real page event handlers against a minimal DOM. This exercises the
 // failed live path without accessing a real provider, extension or session.
-function pageRig(queryPatch={}){
+function pageRig(queryPatch={},clock=null){
   const pageQuery={...q,location:'Cascais',...queryPatch},handlers={},posted=[],nodes=new Map(),timers=new Map();
   const pageDocument={};
+  const PageDate=clock?class extends Date {
+    constructor(...args){super(...(args.length?args:[clock.now]));}
+    static now(){return clock.now;}
+  }:Date;
   let nextTimer=0,nonceByte=0;
   const element=()=>({children:[],options:[],events:{},dataset:{},attributes:{},value:'',textContent:'',ownerDocument:pageDocument,
     classList:{toggle(){},add(){}},focus(){},scrollIntoView(){},
@@ -299,7 +303,7 @@ function pageRig(queryPatch={}){
   node('search').elements={namedItem:()=>node('date')};
   node('search').requestSubmit=()=>node('search').events.submit({preventDefault(){}});
   node('budgetFilter').value=node('radiusFilter').value='any';node('offerSort').value='time';
-  const context=vm.createContext({Date,URL,Intl,TextEncoder,Uint8Array,JSON,
+  const context=vm.createContext({Date:PageDate,URL,Intl,TextEncoder,Uint8Array,JSON,
     normalizePersonalObservation,validateQuery:value=>value,localDay:()=>date,
     projectEvents,projectEventSources,filterEvents,groupEventVenues,eventPriceLabel,kindLabel,eventDemoFixtures,renderEventCards,eventTimeLabel,
     FormData:class extends Map {constructor(){super(Object.entries(pageQuery));}},
@@ -684,4 +688,92 @@ test('a compatible provider mismatch settles only its group and cannot be overwr
   assert.equal(p.text('personalStatus'),primary);assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
   p.respond(nonce,{status:'partial',sources:[{provider:'racket_id',status:'observed',observation:pageObservation('racket_id')}],version:'0.4.3'});
   assert.match(p.text('offers'),/FICTIONAL compatible court/);assert.equal(p.node('offers').children[0].children.find(c=>c.href)?.href,source2);
+});
+
+function deadlineReply(page,nonce,kind,observation,version='0.4.3'){
+  const provider=kind==='additional'?'racket_id':'playtomic';
+  const result=kind==='single'?{status:'observed',observation}:
+    {status:'partial',sources:[{provider,status:'observed',observation}]};
+  page.respond(nonce,{...result,version},kind==='additional'?'gac:additional-sources-response':'gac:auto-search-response');
+}
+
+for(const kind of ['single','partial','additional'])for(const elapsed of [44999,45000,45001])
+test(`absolute deadline ${kind} response at ${elapsed}ms with its timer callback still queued`,()=>{
+  for(const ackMode of ['absent','early','late','queued']){
+    const start=Date.now(),clock={now:start},p=pageRig({},clock),nonce=p.find();
+    const provider=kind==='additional'?'racket_id':'playtomic';
+    const observation={...pageObservation(provider),capturedAt:new Date(start).toISOString()};
+    // The observation itself remains fresh; only the request deadline can reject it.
+    assert.equal(normalizePersonalObservation(JSON.stringify(observation),{...q,location:'Cascais'},
+      {validator:validate,now:start+elapsed}).sourceId,provider);
+    const deadlines=()=>[...p.timers].filter(([,t])=>t.delay===45000).map(([id])=>id);
+    const initial=deadlines();assert.equal(initial.length,2);
+    const queuedTimeout=[...p.timers.values()].filter(t=>t.delay===45000)[kind==='additional'?0:1].fn;
+    if(ackMode==='early')p.ack(nonce);
+    clock.now=start+elapsed;
+    if(ackMode==='late')p.ack(nonce);
+    assert.deepEqual(deadlines(),initial);
+    deadlineReply(p,nonce,kind,observation);
+    if(ackMode==='queued')p.ack(nonce);
+    assert.equal(p.text('offers').includes('FICTIONAL compatible court'),elapsed<45000,ackMode);
+    if(elapsed>=45000){
+      assert.doesNotMatch(p.text('sourceStatus'),/Player-visible offer loaded|Fresh player-visible/);
+      const field=kind==='additional'?'sourceStatus':'personalStatus',settled=p.text(field);
+      assert.match(settled,/timed out|only unsupported replies received/);
+      queuedTimeout();assert.equal(p.text(field),settled);
+    }else assert.match(p.text('sourceStatus'),/Player-visible offer loaded/);
+  }
+});
+
+test('an ACK queued beyond the absolute deadline cannot revive the settled primary request',()=>{
+  const start=Date.now(),clock={now:start},p=pageRig({},clock),nonce=p.find();
+  const queuedAck=()=>p.ack(nonce);
+  clock.now=start+45001;
+  const observation={...pageObservation('playtomic'),capturedAt:new Date(start).toISOString()};
+  deadlineReply(p,nonce,'single',observation);
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+  const settled=p.text('personalStatus');assert.match(settled,/timed out/);
+  queuedAck();deadlineReply(p,nonce,'single',observation);
+  assert.equal(p.text('personalStatus'),settled);assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+});
+
+for(const lateKind of ['single','partial','additional'])test(`late ${lateKind} response preserves an earlier independent valid offer`,()=>{
+  const start=Date.now(),clock={now:start},p=pageRig({},clock),nonce=p.find();
+  const goodKind=lateKind==='additional'?'single':'additional',goodProvider=goodKind==='additional'?'racket_id':'playtomic';
+  const good={...pageObservation(goodProvider),capturedAt:new Date(start).toISOString()};
+  good.offers[0].court='FICTIONAL earlier independent court';
+  clock.now=start+44999;deadlineReply(p,nonce,goodKind,good);
+  const card=p.node('offers').children[0],status=p.text('searchStatus');
+  assert.match(p.text('offers'),/earlier independent/);
+  const late={...pageObservation(lateKind==='additional'?'racket_id':'playtomic'),capturedAt:new Date(start).toISOString()};
+  late.offers[0].court='FICTIONAL late court';
+  clock.now=start+45001;deadlineReply(p,nonce,lateKind,late);
+  assert.equal(p.node('offers').children.length,1);assert.equal(p.node('offers').children[0],card);
+  assert.doesNotMatch(p.text('offers'),/FICTIONAL late court/);assert.equal(p.text('searchStatus'),status);
+  assert.equal(card.children.find(c=>c.href)?.href,good.sourceUrl);
+});
+
+test('an incompatible reply before the absolute deadline never settles a healthy current group',()=>{
+  for(const kind of ['single','partial','additional']){
+    const start=Date.now(),clock={now:start},p=pageRig({},clock),nonce=p.find();
+    const observation={...pageObservation(kind==='additional'?'racket_id':'playtomic'),capturedAt:new Date(start).toISOString()};
+    clock.now=start+44999;deadlineReply(p,nonce,kind,observation,'0.2.3');
+    assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+    deadlineReply(p,nonce,kind,observation);
+    assert.match(p.text('offers'),/FICTIONAL compatible court/);
+  }
+});
+
+test('expired stale nonces and queued old timeouts cannot expire a newly started healthy query',()=>{
+  for(const kind of ['single','partial','additional']){
+    const start=Date.now(),clock={now:start},p=pageRig({},clock),stale=p.find();
+    const queued=[...p.timers.values()].filter(t=>t.delay===45000).map(t=>t.fn);
+    clock.now=start+45001;const current=p.find();
+    const observation={...pageObservation(kind==='additional'?'racket_id':'playtomic'),capturedAt:new Date(clock.now).toISOString()};
+    for(const timeout of queued)timeout();
+    deadlineReply(p,stale,kind,observation);deadlineReply(p,'f'.repeat(48),kind,observation);
+    assert.doesNotMatch(p.text('offers'),/FICTIONAL compatible court/);
+    deadlineReply(p,current,kind,observation);
+    assert.match(p.text('offers'),/FICTIONAL compatible court/);
+  }
 });

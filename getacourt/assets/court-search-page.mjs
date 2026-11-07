@@ -96,7 +96,7 @@ function startAutomaticSearch(){
   const deadlineAt=Date.now()+45000;
   const request={nonce,query,revision,deadlineAt,acked:false,incompatible,group:'playtomic',unsupported:false};
   cancelAuto();cancelAdditional();pendingAuto=request;
-  const extraRequest={nonce,query,revision,incompatible,group:'additional',unsupported:false};
+  const extraRequest={nonce,query,revision,deadlineAt,incompatible,group:'additional',unsupported:false};
   additionalPending=extraRequest;
   additionalTimer=setTimeout(()=>{
     if(additionalPending===extraRequest){
@@ -134,6 +134,11 @@ window.addEventListener('gac:auto-search-response',event=>{
   const request=pendingAuto,detail=event.detail;
   if(!request||!detail||detail.nonce!==request.nonce||
      request.revision!==revision||query!==request.query)return;
+  if(Date.now()>=request.deadlineAt){
+    cancelAuto();
+    personalStatus.textContent=readerDeadline(request,'Playtomic search');
+    finishWaitingStatus();return;
+  }
   if(returnedVersion(detail.result)!==compatibleReader){
     personalStatus.textContent='Waiting for compatible Reader '+compatibleReader+
       '; unsupported replies: '+incompatibleReply(request,detail.result)+'. Availability unverified.';
@@ -188,6 +193,11 @@ window.addEventListener('gac:additional-sources-response',event=>{
   const pending=additionalPending,detail=event?.detail;
   if(!pending||!detail||detail.nonce!==pending.nonce||
     pending.revision!==revision||pending.query!==query)return;
+  if(Date.now()>=pending.deadlineAt){
+    cancelAdditional();
+    additionalStates.set('additional',readerDeadline(pending,'Additional provider search'));
+    renderSources();finishWaitingStatus();return;
+  }
   if(returnedVersion(detail.result)!==compatibleReader){
     additionalStates.set('additional','Waiting for compatible Reader '+compatibleReader+
       '; unsupported replies: '+incompatibleReply(pending,detail.result)+'. Availability unverified.');
