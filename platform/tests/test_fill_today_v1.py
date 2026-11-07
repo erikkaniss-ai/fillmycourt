@@ -279,6 +279,233 @@ def test_fill_today_opportunity_quotes_follow_rate_priority(fill_today):
     assert r.json()["summary"]["highest_single_quote_minor"] == 6000
 
 
+@pytest.mark.parametrize("date,day_hours,capacity,starts60,starts90", [
+    ("2030-01-01", 24, 1410, 46, 45),
+    ("2030-03-31", 23, 1350, 44, 43),
+    ("2030-10-27", 25, 1470, 48, 47),
+])
+def test_fill_today_native_pg_day_boundaries(fill_today, date, day_hours, capacity, starts60, starts90):
+    # Existing disposable CI fixture only; no fake SQL rows or app factory.
+    # These dates qualify the installed timezone rules, not future legislation.
+    from fmc.fill_today_read import read_today
+    _, store, user_id, org_id, court_id = fill_today
+    day = datetime.fromisoformat(date).date()
+    with store.trusted() as c:
+        updated = c.execute(text("""
+            update public.court_rates
+            set start_minute=0,end_minute=1410,weekday=:weekday
+            where organization_id=cast(:org as uuid) and court_id=cast(:court as uuid)
+        """), {"org": org_id, "court": court_id, "weekday": day.weekday()})
+        assert updated.rowcount == 1
+
+    body = read_today(store, Actor(id=user_id), org_id, date, day)
+    local, utc = ZoneInfo("Europe/Lisbon"), ZoneInfo("UTC")
+    begin = datetime(day.year, day.month, day.day, tzinfo=local)
+    finish = begin + timedelta(days=1)
+    assert body["date"] == date and body["timezone"] == "Europe/Lisbon" and body["currency"] == "EUR"
+    day_start, day_end = (datetime.fromisoformat(body[key]).astimezone(utc) for key in ("day_start", "day_end"))
+    assert day_start == begin.astimezone(utc) and day_end == finish.astimezone(utc)
+    assert day_end - day_start == timedelta(hours=day_hours)
+    assert body["summary"] == {
+        "capacity_minutes": capacity, "booked_minutes": 0, "held_minutes": 0, "blocked_minutes": 0,
+        "empty_minutes": capacity, "utilization_pct": 0.0, "bookings": 0, "cancellations": 0,
+        "revenue_minor": 0, "active_courts": 1, "courts_with_rate_coverage": 1,
+        "courts_without_rate_coverage": 0, "bookable_60_starts": starts60, "bookable_90_starts": starts90,
+        "highest_single_quote_minor": 3600, "highest_single_quote_duration_minutes": 90,
+    }
+    court, = body["courts"]
+    assert court["court_id"] == court_id and court["has_rate_coverage"] is True
+    assert court["capacity_minutes"] == court["empty_minutes"] == capacity
+    assert court["booked_minutes"] == court["held_minutes"] == court["blocked_minutes"] == 0
+    sellable, = court["sellable_windows"]
+    empty, = body["empty_windows"]
+    assert (sellable["start_minute"], sellable["end_minute"]) == (0, 1410)
+    for window in (sellable, empty):
+        assert window["court_id"] == court_id
+        assert isinstance(window["starts_at"], datetime) and isinstance(window["ends_at"], datetime)
+        assert window["starts_at"].utcoffset() is not None and window["ends_at"].utcoffset() is not None
+        start, end = window["starts_at"].astimezone(utc), window["ends_at"].astimezone(utc)
+        assert start == begin.astimezone(utc) and end == (begin + timedelta(minutes=1410)).astimezone(utc)
+        assert end - start == timedelta(minutes=capacity)
+    assert empty["duration_minutes"] == capacity
+    assert empty["bookable_60_count"] == starts60 and empty["bookable_90_count"] == starts90
+    assert (empty["min_60_amount_minor"], empty["max_60_amount_minor"],
+            empty["min_90_amount_minor"], empty["max_90_amount_minor"]) == (2400, 2400, 3600, 3600)
+    assert empty["best_amount_minor"] == 3600 and empty["best_duration_minutes"] == 90 and empty["currency"] == "EUR"
+    print("FILL_TODAY_NATIVE_PG_PASS kind=day date=" + date)
+
+
+def test_fill_today_native_pg_hold_expiry_uses_database_now(fill_today):
+    from fmc.fill_today_read import read_today
+    _, store, user_id, org_id, court_id = fill_today
+    # Only disposable fixture rows; expiry is computed by PostgreSQL, not the
+    # Python clock or the requested day. No exact-now or blocked-expiry claim.
+    with store.trusted() as c:
+        inserted = c.execute(text("""
+            insert into public.booking_holds(organization_id,court_id,starts_at,ends_at,expires_at,idempotency_key)
+            values
+              (cast(:org as uuid),cast(:court as uuid),
+               '2026-10-05 15:00:00+01','2026-10-05 16:00:00+01',now()+interval '1 day','today-native-active-hold'),
+              (cast(:org as uuid),cast(:court as uuid),
+               '2026-10-05 16:00:00+01','2026-10-05 17:00:00+01',now()-interval '1 day','today-native-expired-hold')
+        """), {"org": org_id, "court": court_id})
+        assert inserted.rowcount == 2
+
+    date = "2026-10-05"
+    body = read_today(store, Actor(id=user_id), org_id, date, datetime.fromisoformat(date).date())
+    summary = body["summary"]
+    assert summary["capacity_minutes"] == 1050 and summary["booked_minutes"] == 90
+    assert summary["blocked_minutes"] == 60 and summary["held_minutes"] == 60 and summary["empty_minutes"] == 840
+    assert (summary["bookings"], summary["cancellations"], summary["revenue_minor"]) == (1, 1, 3600)
+    court, = body["courts"]
+    assert court["court_id"] == court_id and court["held_minutes"] == 60 and court["empty_minutes"] == 840
+    sellable, = court["sellable_windows"]
+    assert (sellable["start_minute"], sellable["end_minute"]) == (360, 1410)
+    local, utc = ZoneInfo("Europe/Lisbon"), ZoneInfo("UTC")
+    at = lambda hour, minute=0: datetime(2026, 10, 5, hour, minute, tzinfo=local).astimezone(utc)
+    assert sellable["starts_at"].astimezone(utc) == at(6) and sellable["ends_at"].astimezone(utc) == at(23, 30)
+    windows = body["empty_windows"]
+    assert windows and all(window["court_id"] == court_id for window in windows)
+    assert all(not (window["starts_at"].astimezone(utc) < at(16) and window["ends_at"].astimezone(utc) > at(15)) for window in windows)
+    expired_window, = [window for window in windows if window["starts_at"].astimezone(utc) == at(16)]
+    assert expired_window["ends_at"].astimezone(utc) == at(23, 30) and expired_window["duration_minutes"] == 450
+    print("FILL_TODAY_NATIVE_PG_PASS kind=holds date=" + date)
+
+
+def test_fill_today_user_transaction_mode_prerequisite(fill_today, capsys):
+    from fmc.supabase_v1 import one
+    _, store, user_id, _, _ = fill_today
+    # Query-only added body; the unchanged disposable fixture still seeds and
+    # cleans up SQL rows. Observe inherited mode without changing any setting.
+    with store.user(user_id) as c:
+        isolation_row = one(c.execute(text("SHOW transaction_isolation")))
+        read_only_row = one(c.execute(text("SHOW transaction_read_only")))
+    if type(isolation_row) is not dict or len(isolation_row) != 1:
+        pytest.fail("Native transaction isolation result shape is unrecognized.", pytrace=False)
+    if type(read_only_row) is not dict or len(read_only_row) != 1:
+        pytest.fail("Native transaction read-only result shape is unrecognized.", pytrace=False)
+    isolation, = isolation_row.values()
+    read_only, = read_only_row.values()
+    allowed_isolation = {
+        "read uncommitted": "read_uncommitted",
+        "read committed": "read_committed",
+        "repeatable read": "repeatable_read",
+        "serializable": "serializable",
+    }
+    # Fail closed without printing arbitrary database values or row metadata.
+    if type(isolation) is not str or isolation not in allowed_isolation:
+        pytest.fail("Native transaction isolation value is unrecognized.", pytrace=False)
+    if type(read_only) is not str or read_only not in ("on", "off"):
+        pytest.fail("Native transaction read-only value is unrecognized.", pytrace=False)
+    with capsys.disabled():
+        print("FILL_TODAY_USER_TX_MODE_OBSERVED isolation=" + allowed_isolation[isolation] + " read_only=" + read_only)
+
+
+@pytest.mark.parametrize("mode", ["keep", "revoke"])
+def test_fill_today_preacquired_membership_snapshot(fill_today, capsys, mode):
+    from contextlib import ExitStack, contextmanager
+    from fmc.fill_today_read import SCOPE, SNAPSHOT, read_today
+    from fmc.supabase_v1 import one
+    _, store, user_id, org_id, court_id = fill_today
+    trace, state = [], {"trusted_closed": False, "user_closed": False, "deleted": 0, "user_contexts": 0}
+    body = None
+
+    # Pre-acquire the existing trusted context before user setup/SCOPE. The
+    # dedicated stack holds only this context; there is no in-hook checkout.
+    with ExitStack() as trusted_stack:
+        trusted = trusted_stack.enter_context(store.trusted())
+        trace.append("trusted_acquired")
+        trusted.execute(text("SET LOCAL lock_timeout='500ms'"))
+        trusted.execute(text("SET LOCAL statement_timeout='1000ms'"))
+
+        class ConnectionObserver:
+            def __init__(self, native):
+                self.native = native
+
+            def execute(self, statement, params):
+                if statement is SCOPE:
+                    assert not state["trusted_closed"]
+                    result = self.native.execute(statement, params)
+                    trace.append("scope_returned")
+                    if mode == "revoke":
+                        deleted = trusted.execute(text("""
+                            delete from public.organization_members
+                            where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
+                        """), {"org": org_id, "uid": user_id})
+                        assert deleted.rowcount == 1
+                        state["deleted"] = deleted.rowcount
+                        trace.append("member_deleted")
+                    # Record success only AFTER actual trusted-context close
+                    # returns. Native SCOPE rows are never consumed/replaced.
+                    trusted_stack.close()
+                    state["trusted_closed"] = True
+                    trace.append("trusted_closed")
+                    return result
+                assert statement is SNAPSHOT and state["trusted_closed"]
+                trace.append("snapshot_entered")
+                result = self.native.execute(statement, params)
+                trace.append("snapshot_returned")
+                return result
+
+        class UserObserver:
+            @contextmanager
+            def user(self, uid):
+                assert uid == user_id
+                state["user_contexts"] += 1
+                try:
+                    with store.user(uid) as native:
+                        assert native is not trusted
+                        trace.append("user_acquired")
+                        native.execute(text("SET LOCAL lock_timeout='500ms'"))
+                        native.execute(text("SET LOCAL statement_timeout='1000ms'"))
+                        for query, expected in (("SHOW transaction_isolation", "read committed"),
+                                                ("SHOW transaction_read_only", "off")):
+                            row = one(native.execute(text(query)))
+                            if type(row) is not dict or len(row) != 1:
+                                pytest.fail("Native membership transaction mode shape is unsupported.", pytrace=False)
+                            value, = row.values()
+                            if type(value) is not str or value != expected:
+                                pytest.fail("Native membership transaction mode is unsupported.", pytrace=False)
+                        trace.append("user_mode_confirmed")
+                        yield ConnectionObserver(native)
+                except DomainError:
+                    # The original user context has unwound before this point;
+                    # preserve the real helper exception, without suppression.
+                    state["user_closed"] = True
+                    trace.append("user_closed")
+                    raise
+                else:
+                    state["user_closed"] = True
+                    trace.append("user_closed")
+
+        if mode == "revoke":
+            with pytest.raises(DomainError) as denied:
+                body = read_today(UserObserver(), Actor(id=user_id), org_id, "2026-10-05", datetime(2026, 10, 5).date())
+            assert denied.value.code == "FORBIDDEN" and denied.value.status == 403 and body is None
+        else:
+            body = read_today(UserObserver(), Actor(id=user_id), org_id, "2026-10-05", datetime(2026, 10, 5).date())
+            assert body["date"] == "2026-10-05" and body["timezone"] == "Europe/Lisbon" and body["currency"] == "EUR"
+            summary = body["summary"]
+            assert (summary["capacity_minutes"], summary["booked_minutes"], summary["held_minutes"],
+                    summary["blocked_minutes"], summary["empty_minutes"]) == (1050, 90, 0, 60, 900)
+            assert (summary["bookings"], summary["cancellations"], summary["revenue_minor"]) == (1, 1, 3600)
+            court, = body["courts"]
+            assert court["court_id"] == court_id and court["has_rate_coverage"] is True
+            window, = court["sellable_windows"]
+            assert (window["start_minute"], window["end_minute"]) == (360, 1410) and body["empty_windows"]
+
+    assert state["trusted_closed"] and state["user_closed"] and state["user_contexts"] == 1
+    assert state["deleted"] == (1 if mode == "revoke" else 0)
+    assert trace == ["trusted_acquired", "user_acquired", "user_mode_confirmed", "scope_returned"] + (
+        ["member_deleted"] if mode == "revoke" else []
+    ) + ["trusted_closed", "snapshot_entered", "snapshot_returned", "user_closed"]
+    # Two completed pre-acquired contexts only; no claim about a client deadline,
+    # timeout cleanup, or undoing the separately committed member deletion.
+    result = "forbidden403" if mode == "revoke" else "dto"
+    with capsys.disabled():
+        print("FILL_TODAY_PREACQUIRED_MEMBERSHIP_PG_PASS case=" + mode + " result=" + result)
+
+
 
 def test_fill_demand_aware_opportunity_is_incremental_private_and_lifecycle_aware(fill_today):
     url, store, user_id, org_id, court_id = fill_today
@@ -1638,3 +1865,474 @@ def test_f11_offline_ed25519_core_attestation_registry_and_security(fill_today):
     assert cancelled.status_code==200 and cancelled.json()["readiness"]=="BOOKING_NOT_ACTIVE"
     assert cancelled.json()["fixture_count"]==0
     assert cancelled.json()["billable"] is False
+@pytest.mark.parametrize("mode", ["keep", "revoke"])
+def test_fill_calendar_final_membership_contract(fill_today, capsys, monkeypatch, mode):
+    from contextlib import ExitStack, contextmanager
+    from threading import get_ident
+
+    from fmc import v1_app
+    from fmc.supabase_v1 import one
+
+    url, store, user_id, org_id, _ = fill_today
+
+    def require(condition, message):
+        if not condition:
+            pytest.fail(message, pytrace=False)
+
+    # Only these nonsecret mode keys are checked, only in disposable CI.
+    # Never enable, rewrite or unset a mode to make this observation run.
+    for key in ("FILL_UAT_GUARD", "FILL_UAT_BOOTSTRAP", "FILL_UAT_SERVER_VALIDATOR"):
+        require(os.environ.get(key, "off") == "off", "Calendar observation requires disabled UAT modes.")
+
+    trace = []
+    state = {
+        "constructor_calls": 0, "user_contexts": 0, "role_attempts": 0,
+        "role_successes": 0, "role_denials": 0, "denial_code": None, "denial_status": None,
+        "trusted_closed": False, "user_closed": False, "deleted": 0,
+        "lifecycle_closed": False, "thread": None, "user_exit": None,
+    }
+
+    class ConnectionObserver:
+        def __init__(self, native):
+            self.native = native
+
+        def execute(self, statement, params=None):
+            require(get_ident() == state["thread"], "Calendar native observer changed execution chain.")
+            query = " ".join(str(statement).lower().split())
+            if query.startswith("select role::text from public.organization_members "):
+                phase = "role"
+            elif " from public.bookings b " in query:
+                phase = "bookings"
+            elif " from public.booking_holds " in query:
+                phase = "holds"
+            elif " from public.court_blocks " in query:
+                phase = "blocks"
+            else:
+                pytest.fail("Calendar observation encountered unsupported native SQL.", pytrace=False)
+            require(type(params) is dict and params.get("org") == org_id,
+                    "Calendar native organization scope changed.")
+            if phase == "role":
+                require(params.get("uid") == user_id, "Calendar native membership scope changed.")
+            else:
+                require(state["role_successes"] >= 1 and state["trusted_closed"],
+                        "Calendar payload preceded accepted role or committed hook.")
+            trace.append(phase + "_entered")
+            result = self.native.execute(statement, params)
+            trace.append(phase + "_returned")
+            # The original CursorResult goes to original one()/rows(). The next
+            # query/response demonstrates materialization; no result is wrapped.
+            return result
+
+    class StoreObserver:
+        engine = store.engine
+
+        @contextmanager
+        def user(self, uid):
+            require(uid == user_id, "Calendar user scope changed.")
+            state["user_contexts"] += 1
+            require(state["user_contexts"] == 1, "Calendar acquired an additional user context.")
+            state["thread"] = get_ident()
+            # Both original connections are acquired/used in this same handler
+            # chain. No connection crosses from the main test thread.
+            with ExitStack() as trusted_stack:
+                trusted = trusted_stack.enter_context(store.trusted())
+                trace.append("trusted_acquired")
+                trusted.execute(text("SET LOCAL lock_timeout='500ms'"))
+                trusted.execute(text("SET LOCAL statement_timeout='1000ms'"))
+                self.trusted, self.trusted_stack = trusted, trusted_stack
+                try:
+                    with store.user(uid) as native:
+                        require(native is not trusted, "Calendar native contexts were not distinct.")
+                        trace.append("user_acquired")
+                        native.execute(text("SET LOCAL lock_timeout='500ms'"))
+                        native.execute(text("SET LOCAL statement_timeout='1000ms'"))
+                        for query, expected in (("SHOW transaction_isolation", "read committed"),
+                                                ("SHOW transaction_read_only", "off")):
+                            row = one(native.execute(text(query)))
+                            require(type(row) is dict and len(row) == 1,
+                                    "Calendar native transaction mode shape is unsupported.")
+                            value, = row.values()
+                            require(type(value) is str and value == expected,
+                                    "Calendar native transaction mode is unsupported.")
+                        trace.append("user_mode_confirmed")
+                        yield ConnectionObserver(native)
+                except DomainError:
+                    # Preserve an actual handler denial after original context
+                    # unwinding, never substitute a role or an exception.
+                    state["user_closed"] = True
+                    state["user_exit"] = "denial_unwound"
+                    trace.append("user_closed")
+                    raise
+                else:
+                    state["user_closed"] = True
+                    state["user_exit"] = "normal"
+                    trace.append("user_closed")
+
+        def require_role(self, connection, org, uid, allowed=None):
+            require(get_ident() == state["thread"], "Calendar role changed execution chain.")
+            require(org == org_id and uid == user_id and allowed is None,
+                    "Calendar role arguments changed.")
+            state["role_attempts"] += 1
+            attempt = state["role_attempts"]
+            trace.append("role_attempted")
+            try:
+                actual_role = store.require_role(connection, org, uid, allowed)
+            except DomainError as denied:
+                state["role_denials"] += 1
+                state["denial_code"], state["denial_status"] = denied.code, denied.status
+                trace.append("role_denied")
+                raise  # Preserve the actual original denial, never synthesize it.
+            # Every success consumed the actual native membership row. Genuine
+            # later calls are delegated and return their own uncached scalar.
+            state["role_successes"] += 1
+            require(actual_role == "owner", "Calendar native role observation is unsupported.")
+            trace.append("role_accepted" if attempt == 1 else "role_rechecked")
+            if attempt == 1:
+                if mode == "revoke":
+                    deleted = self.trusted.execute(text("""
+                        delete from public.organization_members
+                        where organization_id=cast(:org as uuid) and user_id=cast(:uid as uuid)
+                    """), {"org": org_id, "uid": user_id})
+                    require(deleted.rowcount == 1, "Calendar membership mutation was inconclusive.")
+                    state["deleted"] = deleted.rowcount
+                    trace.append("member_deleted")
+                # One normal close, only after the initial actual role success.
+                # No second mutation, cached role or in-recheck checkout.
+                self.trusted_stack.close()
+                state["trusted_closed"] = True
+                trace.append("trusted_closed")
+            return actual_role
+
+        def __getattr__(self, name):
+            return getattr(store, name)
+
+    observer = StoreObserver()
+
+    def bind_existing(database):
+        state["constructor_calls"] += 1
+        require(state["constructor_calls"] == 1 and database == url,
+                "Calendar factory did not bind the existing fixture store.")
+        require(observer.engine is store.engine, "Calendar factory engine identity changed.")
+        return observer
+
+    monkeypatch.setattr(v1_app, "V1Store", bind_existing)
+    settings = Settings(
+        origin="https://fill.test", environment="test", database=url,
+        supabase_url="https://example.supabase.co", supabase_publishable_key="sb_publishable_ci",
+        data_contract="supabase-v1",
+    )
+    try:
+        app = create_v1_app(settings, "operations", auth_override=StaticAuth(user_id))
+        require(state["constructor_calls"] == 1, "Calendar factory binding was not exercised.")
+        guard = app.state.fill_uat_guard
+        require(guard.lease is None and guard.ledger is None and guard.admin is None
+                and guard.bootstrap is None and guard.cleanup_error is False,
+                "Calendar observation requires the real disabled guard.")
+        with TestClient(app) as client:
+            trace.append("lifecycle_entered")
+            response = client.get(
+                f"/api/fmc/{org_id}/calendar",
+                params={"start": "2026-10-05T00:00:00+01:00", "end": "2026-10-06T00:00:00+01:00"},
+                headers={"Authorization": "Bearer ci-owner-token"},
+            )
+            trace.append("response_returned")
+        state["lifecycle_closed"] = True
+        trace.append("lifecycle_closed")
+    except Exception:
+        # Keep the native exception path intact through the real handler/client;
+        # fail at the test boundary without dumping SQL parameters or credentials.
+        with capsys.disabled():
+            print("FILL_CALENDAR_POSTROLE_MEMBERSHIP_PG_INCONCLUSIVE case=" + mode
+                  + " outcome=native_or_lifecycle_error")
+        pytest.fail("Calendar native observation was inconclusive.", pytrace=False)
+
+    require(state["trusted_closed"] and state["user_closed"] and state["lifecycle_closed"]
+            and state["user_contexts"] == 1 and state["role_attempts"] in (1, 2)
+            and state["role_successes"] + state["role_denials"] == state["role_attempts"],
+            "Calendar native contexts or lifecycle did not complete.")
+    require(state["deleted"] == (1 if mode == "revoke" else 0),
+            "Calendar committed membership observation is incomplete.")
+    expected = ["lifecycle_entered", "trusted_acquired", "user_acquired", "user_mode_confirmed",
+                "role_attempted", "role_entered", "role_returned", "role_accepted"]
+    if mode == "revoke":
+        expected.append("member_deleted")
+    expected += ["trusted_closed"]
+    for phase in ("bookings", "holds", "blocks"):
+        expected += [phase + "_entered", phase + "_returned"]
+    if state["role_attempts"] == 2:
+        expected += ["role_attempted", "role_entered", "role_returned",
+                     "role_denied" if state["role_denials"] else "role_rechecked"]
+    expected += ["user_closed", "response_returned", "lifecycle_closed"]
+    require(trace == expected, "Calendar post-role native payload trace was inconclusive.")
+
+    if response.status_code == 200:
+        try:
+            body = response.json()
+        except Exception:
+            pytest.fail("Calendar native response was not a supported JSON payload.", pytrace=False)
+        require(type(body) is dict and all(type(body.get(k)) is list for k in ("bookings", "holds", "blocks")),
+                "Calendar native response collection shape is unsupported.")
+        counts = tuple(len(body[k]) for k in ("bookings", "holds", "blocks"))
+        require(0 <= counts[0] <= 2 and counts[1] == 0 and 0 <= counts[2] <= 1,
+                "Calendar native observation exceeded its unchanged fixture scope.")
+        outcome = "complete" if counts == (2, 0, 1) else "empty" if counts == (0, 0, 0) else "mixed"
+    else:
+        require(mode == "revoke" and response.status_code == 403,
+                "Calendar native observation returned an unexpected HTTP result.")
+        outcome, counts = "denied", None
+    require(mode != "keep" or (response.status_code == 200 and counts == (2, 0, 1)),
+            "Calendar unchanged-membership control failed.")
+    # Emit the actual baseline before the contract expectation: a genuine RED
+    # must be measured HTTP200/empty, not a fixture or missing-recheck assertion.
+    cardinality = (" bookings=" + str(counts[0]) + " holds=" + str(counts[1]) + " blocks=" + str(counts[2])
+                   if counts is not None else " collections=unreturned")
+    with capsys.disabled():
+        print("FILL_CALENDAR_POSTROLE_MEMBERSHIP_PG_OBSERVED case=" + mode + " outcome=" + outcome
+              + " status=" + str(response.status_code) + cardinality
+              + " role_attempts=" + str(state["role_attempts"])
+              + " role_denials=" + str(state["role_denials"])
+              + " isolation=read_committed read_only=off trace=complete lifecycle=exited")
+    if mode == "revoke":
+        require(response.status_code == 403,
+                "Calendar revoked membership must return HTTP403 instead of a successful Calendar DTO.")
+        try:
+            denied_body = response.json()
+        except Exception:
+            pytest.fail("Calendar denial response was not supported JSON.", pytrace=False)
+        require(type(denied_body) is dict
+                and not any(key in denied_body for key in ("bookings", "holds", "blocks")),
+                "Calendar denial must not return a Calendar collections DTO.")
+        require(state["role_attempts"] == 2 and state["role_denials"] == 1
+                and state["denial_code"] == "FORBIDDEN" and state["denial_status"] == 403
+                and state["user_exit"] == "denial_unwound",
+                "Calendar denial did not originate from the final native membership check.")
+    else:
+        require(state["role_denials"] == 0 and state["user_exit"] == "normal",
+                "Calendar unchanged-membership control did not exit normally.")
+        require(state["role_attempts"] == 2 and state["role_successes"] == 2,
+                "Calendar positive control did not exercise the final native role recheck.")
+    # This final-check contract is not statement-atomic or a late-wire guarantee;
+    # zero holds still does not qualify active-hold removal or hosted F1.
+    with capsys.disabled():
+        print("FILL_CALENDAR_FINAL_MEMBERSHIP_PG_CONTRACT_PASS case=" + mode
+              + " status=" + str(response.status_code) + cardinality
+              + " role_attempts=" + str(state["role_attempts"])
+              + " role_denials=" + str(state["role_denials"])
+              + " user_exit=" + state["user_exit"]
+              + " isolation=read_committed read_only=off trace=complete lifecycle=exited")
+
+
+@pytest.mark.parametrize("status", ["confirmed", "pending_payment"])
+@pytest.mark.parametrize("population", ["sole_foreign", "mixed", "same", "empty", "cancelled_foreign", "other_org_foreign", "before_day_foreign", "at_finish_foreign"])
+def test_fill_today_native_pg_revenue_denomination(fill_today, capsys, status, population):
+    """Exercise the existing disposable migrated-PG fixture, never booking routes.
+
+    The inherited SQL principal/Auth stub is local fixture setup, not supported
+    Supabase provisioning or full API admission evidence. All rows are fictional.
+    """
+    from fmc.fill_today_read import read_today
+
+    _, store, user_id, org_id, court_id = fill_today
+    day = datetime(2026, 10, 5, tzinfo=ZoneInfo("Europe/Lisbon"))
+    finish = day + timedelta(days=1)
+    extra_org, extra_venue, extra_court = (uuid.uuid4() for _ in range(3))
+    try:
+        with store.trusted() as c:
+            if c.dialect.name != "postgresql":
+                pytest.fail("DENOMINATION_REQUIRES_NATIVE_PG", pytrace=False)
+            c.execute(text("DELETE FROM public.bookings WHERE organization_id=:org"), {"org": org_id})
+            if population == "other_org_foreign":
+                c.execute(text("INSERT INTO public.organizations (id,slug,name,timezone,default_currency) VALUES (:org,:slug,'Fictional currency control','Europe/Lisbon','USD')"), {"org": extra_org, "slug": str(extra_org)})
+                c.execute(text("INSERT INTO public.venues (id,organization_id,name,timezone,currency,address) VALUES (:venue,:org,'Fictional control venue','Europe/Lisbon','USD','{}')"), {"venue": extra_venue, "org": extra_org})
+                c.execute(text("INSERT INTO public.courts (id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled) VALUES (:court,:venue,'Fictional control court','padel',false,'native',true)"), {"court": extra_court, "venue": extra_venue})
+            rows = []
+            if population not in ("sole_foreign", "empty"):
+                rows.append((org_id, court_id, day + timedelta(hours=10), "EUR", 1500, status))
+            if population not in ("same", "empty"):
+                starts_at = day + timedelta(hours=13)
+                row_org, row_court, row_status = org_id, court_id, status
+                if population == "before_day_foreign":
+                    starts_at = day - timedelta(hours=1)
+                elif population == "at_finish_foreign":
+                    starts_at = finish
+                elif population == "cancelled_foreign":
+                    row_status = "cancelled"
+                elif population == "other_org_foreign":
+                    row_org, row_court = extra_org, extra_court
+                rows.append((row_org, row_court, starts_at, "USD", 4200, row_status))
+            for index, (row_org, row_court, starts_at, currency, amount, row_status) in enumerate(rows):
+                c.execute(text("""INSERT INTO public.bookings
+                    (organization_id,venue_id,court_id,status,starts_at,ends_at,currency,gross_amount_minor,source,idempotency_key)
+                    SELECT :org,venue_id,id,:status,:starts,:ends,:currency,:amount,'getacourt',:key
+                    FROM public.courts WHERE id=:court"""),
+                    {"org": row_org, "court": row_court, "status": row_status,
+                     "starts": starts_at, "ends": starts_at + timedelta(minutes=30),
+                     "currency": currency, "amount": amount,
+                     "key": "denomination-" + str(uuid.uuid4()) + "-" + str(index)})
+        must_deny = population in ("sole_foreign", "mixed")
+        try:
+            result = read_today(store, Actor(id=user_id), org_id, "2026-10-05", day)
+        except DomainError as error:
+            if not must_deny or error.status != 503:
+                pytest.fail("DENOMINATION_UNEXPECTED_FAILURE", pytrace=False)
+            with capsys.disabled():
+                print("FILL_REVENUE_DENOMINATION_GREEN case=" + population + " status=" + status + " unavailable=1 native_pg=1")
+        else:
+            if must_deny:
+                wrong_pair = result["currency"] == "EUR" and result["summary"]["revenue_minor"] == (4200 if population == "sole_foreign" else 5700)
+                with capsys.disabled():
+                    print("FILL_REVENUE_DENOMINATION_RED case=" + population + " status=" + status + " original_success=1 wrong_unit=" + str(int(wrong_pair)) + " native_pg=1")
+                pytest.fail("DENOMINATION_EXPECTED_UNAVAILABLE", pytrace=False)
+            expected = 0 if population == "empty" else 1500
+            if result["currency"] != "EUR" or result["summary"]["revenue_minor"] != expected:
+                pytest.fail("DENOMINATION_CONTROL_CHANGED", pytrace=False)
+            with capsys.disabled():
+                print("FILL_REVENUE_DENOMINATION_CONTROL_PASS case=" + population + " status=" + status + " native_pg=1")
+    finally:
+        with store.trusted() as c:
+            c.execute(text("DELETE FROM public.organizations WHERE id=:org"), {"org": extra_org})
+
+
+
+@pytest.mark.parametrize("case", [
+    "sole_foreign", "mixed_foreign_max", "mixed_foreign_not_max",
+    "foreign_beyond_window_limit", "foreign_zero", "uniform_eur", "uniform_usd",
+    "zero_eur", "no_opportunities", "inactive_foreign_rate", "unselected_foreign_rate",
+    "outside_weekday_foreign_rate", "other_tenant_foreign_rate", "inactive_foreign_court"])
+def test_fill_today_native_pg_recovery_quote_denomination(fill_today, capsys, case):
+    """Real read-only ASGI GET over disposable migrated PG, with fictional rows.
+
+    Inherited fixture SQL principal/Auth stub does not claim supported Supabase
+    provisioning or full booking/provider admission. No writer route is invoked.
+    """
+    url, store, user_id, org_id, court_id = fill_today
+    extra_org, extra_venue, extra_court = (uuid.uuid4() for _ in range(3))
+    client = None
+    hidden_court = None
+    deny = case in {"sole_foreign", "mixed_foreign_max", "mixed_foreign_not_max",
+                    "foreign_beyond_window_limit", "foreign_zero"}
+    report_currency = "USD" if case == "uniform_usd" else "EUR"
+    try:
+        with store.trusted() as c:
+            if c.dialect.name != "postgresql":
+                pytest.fail("RECOVERY_DENOMINATION_REQUIRES_NATIVE_PG", pytrace=False)
+            c.execute(text("DELETE FROM public.bookings WHERE organization_id=:org"), {"org": org_id})
+            c.execute(text("DELETE FROM public.court_blocks WHERE organization_id=:org"), {"org": org_id})
+            c.execute(text("DELETE FROM public.court_rates WHERE organization_id=:org"), {"org": org_id})
+            venue_id = c.execute(text("SELECT venue_id FROM public.courts WHERE id=:court"), {"court": court_id}).scalar_one()
+
+            def add_court(active=True, tenant=org_id, venue=venue_id, identity=None):
+                identity = identity or uuid.uuid4()
+                c.execute(text("""INSERT INTO public.courts
+                    (id,venue_id,name,sport,indoor,inventory_mode,native_write_enabled,active)
+                    VALUES (:court,:venue,:name,'padel',false,'native',true,:active)"""),
+                    {"court": identity, "venue": venue, "active": active, "name": "Fictional quote court " + str(identity)})
+                return identity
+
+            def add_rate(court, currency, price, start=600, end=840, priority=100, active=True, weekday=0, tenant=org_id):
+                c.execute(text("""INSERT INTO public.court_rates
+                    (organization_id,court_id,weekday,start_minute,end_minute,price_minor,currency,priority,active)
+                    VALUES (:org,:court,:weekday,:start,:end,:price,:currency,:priority,:active)"""),
+                    {"org": tenant, "court": court, "weekday": weekday, "start": start,
+                     "end": end, "price": price, "currency": currency, "priority": priority, "active": active})
+
+            if case == "uniform_usd":
+                c.execute(text("UPDATE public.organizations SET default_currency='USD' WHERE id=:org"), {"org": org_id})
+                c.execute(text("UPDATE public.venues SET currency='USD' WHERE id=:venue"), {"venue": venue_id})
+            if case in {"sole_foreign", "foreign_zero"}:
+                add_rate(court_id, "USD", 0 if case == "foreign_zero" else 1000)
+            elif case == "mixed_foreign_max":
+                add_rate(court_id, "EUR", 1000, end=720)
+                add_rate(court_id, "USD", 2000, start=720)
+            elif case == "mixed_foreign_not_max":
+                add_rate(court_id, "USD", 100, end=660)
+                add_rate(court_id, "EUR", 2000, start=660)
+            elif case != "no_opportunities":
+                add_rate(court_id, report_currency, 0 if case == "zero_eur" else 1000)
+            if case == "foreign_beyond_window_limit":
+                for _ in range(29):
+                    add_rate(add_court(), "EUR", 1000)
+                hidden_court = add_court()
+                add_rate(hidden_court, "USD", 100, end=660)
+            elif case == "inactive_foreign_rate":
+                add_rate(court_id, "USD", 100, priority=0, active=False)
+            elif case == "unselected_foreign_rate":
+                add_rate(court_id, "USD", 100, priority=200)
+            elif case == "outside_weekday_foreign_rate":
+                add_rate(court_id, "USD", 100, weekday=1)
+            elif case == "inactive_foreign_court":
+                add_rate(add_court(active=False), "USD", 100)
+            elif case == "other_tenant_foreign_rate":
+                c.execute(text("INSERT INTO public.organizations (id,slug,name,timezone,default_currency) VALUES (:org,:slug,'Fictional quote control','Europe/Lisbon','USD')"), {"org": extra_org, "slug": str(extra_org)})
+                c.execute(text("INSERT INTO public.venues (id,organization_id,name,timezone,currency,address) VALUES (:venue,:org,'Fictional control venue','Europe/Lisbon','USD','{}')"), {"org": extra_org, "venue": extra_venue})
+                add_court(tenant=extra_org, venue=extra_venue, identity=extra_court)
+                add_rate(extra_court, "USD", 100, tenant=extra_org)
+        settings = Settings(
+            origin="https://fill.test",
+            environment="test",
+            database=url,
+            supabase_url="https://example.supabase.co",
+            supabase_publishable_key="sb_publishable_ci",
+            data_contract="supabase-v1",
+        )
+        client = TestClient(create_v1_app(settings, "operations", auth_override=StaticAuth(user_id)))
+        r = client.get(
+            f"/api/fmc/{org_id}/today",
+            params={"date": "2026-10-05"},
+            headers={"Authorization": "Bearer ci-owner-token"},
+        )
+        if deny:
+            if r.status_code == 200:
+                body = r.json()
+                windows = body["empty_windows"]
+                no_revenue = body["summary"]["bookings"] == 0 and body["summary"]["revenue_minor"] == 0
+                if case in {"sole_foreign", "foreign_zero"}:
+                    witness = any(w["currency"] == "USD" for w in windows) and body["currency"] == "EUR"
+                elif case == "mixed_foreign_max":
+                    witness = body["summary"]["highest_single_quote_minor"] == 3000 and any(w["currency"] == "USD" for w in windows)
+                elif case == "mixed_foreign_not_max":
+                    witness = (body["summary"]["highest_single_quote_minor"] == 3000
+                               and any(w["currency"] == "EUR" and w["min_60_amount_minor"] == 100
+                                       and w["max_60_amount_minor"] == 2000 for w in windows))
+                else:
+                    witness = (len(windows) == 30 and all(w["currency"] == "EUR" for w in windows)
+                               and any(str(v["court_id"]) == str(hidden_court) and v["empty_minutes"] == 60
+                                       and v["has_rate_coverage"] for v in body["courts"]))
+                if not witness or not no_revenue:
+                    pytest.fail("RECOVERY_DENOMINATION_RED_PRECONDITION_MISSING", pytrace=False)
+                with capsys.disabled():
+                    print("FILL_RECOVERY_QUOTE_RED case=" + case + " actual_status=200 no_revenue=1 selected_foreign=1"
+                          + " foreign_not_numeric_max=" + str(int(case == "mixed_foreign_not_max"))
+                          + " before_display_limit=" + str(int(case == "foreign_beyond_window_limit")) + " native_pg=1")
+                pytest.fail("RECOVERY_DENOMINATION_EXPECTED_SANITIZED_503", pytrace=False)
+            if r.status_code != 503 or any(k in r.json() for k in ("summary", "empty_windows")) or "USD" in r.text:
+                pytest.fail("RECOVERY_DENOMINATION_UNSAFE_FAILURE", pytrace=False)
+            with capsys.disabled():
+                print("FILL_RECOVERY_QUOTE_GREEN case=" + case + " actual_status=503 sanitized=1 native_pg=1")
+        else:
+            if r.status_code != 200:
+                pytest.fail("RECOVERY_DENOMINATION_CONTROL_UNAVAILABLE", pytrace=False)
+            body = r.json()
+            expected = 0 if case in {"no_opportunities", "zero_eur"} else 1500
+            if (set(body) != {"date", "day_start", "day_end", "timezone", "currency", "summary", "courts", "empty_windows"}
+                    or body["currency"] != report_currency or body["summary"]["bookings"] != 0
+                    or body["summary"]["revenue_minor"] != 0 or body["summary"]["highest_single_quote_minor"] != expected):
+                pytest.fail("RECOVERY_DENOMINATION_CONTROL_DTO_CHANGED", pytrace=False)
+            if case == "no_opportunities":
+                if body["empty_windows"]:
+                    pytest.fail("RECOVERY_DENOMINATION_EMPTY_CONTROL_CHANGED", pytrace=False)
+            else:
+                quote = body["empty_windows"][0]
+                base_amount = 0 if case == "zero_eur" else 1000
+                if (quote["currency"] != report_currency or quote["min_60_amount_minor"] != base_amount
+                        or quote["max_60_amount_minor"] != base_amount
+                        or quote["min_90_amount_minor"] != expected or quote["max_90_amount_minor"] != expected
+                        or quote["best_amount_minor"] != expected or quote["best_duration_minutes"] != 90):
+                    pytest.fail("RECOVERY_DENOMINATION_CONTROL_AMOUNT_CHANGED", pytrace=False)
+            with capsys.disabled():
+                print("FILL_RECOVERY_QUOTE_CONTROL_PASS case=" + case + " actual_status=200 native_pg=1")
+    finally:
+        if client is not None:
+            client.close()
+        with store.trusted() as c:
+            c.execute(text("DELETE FROM public.organizations WHERE id=:org"), {"org": extra_org})

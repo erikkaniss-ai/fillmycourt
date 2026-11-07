@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "mode": "READ_ONLY_GO_PACKAGE",
+  "domain": "get",
+  "sourceSha": "79977c8672db84e6c062a804268dd9123e04f480",
+  "checkId": "google-oauth",
+  "asOf": "2026-10-21T10:20:00Z",
+  "reviewUntil": "2026-10-21T11:20:00Z",
+  "authorityVerified": false,
+  "executionEnabled": false,
+  "actions": ["team-login", "staging-google-login", "create-test-user-session", "refresh-own-test-session", "sign-out-own-test-session"],
+  "items": [
+    {"id": "original-authority", "state": "PRESENT"},
+    {"id": "source-binding", "state": "PRESENT"},
+    {"id": "protected-deploy", "state": "PRESENT"},
+    {"id": "independent-runtime", "state": "PRESENT"},
+    {"id": "isolation", "state": "PRESENT"},
+    {"id": "tester-consent", "state": "PRESENT"},
+    {"id": "scope-allowlist", "state": "PRESENT"},
+    {"id": "current-evidence", "state": "PRESENT"},
+    {"id": "unresolved-blockers", "state": "PRESENT"},
+    {"id": "expiry-revocation-stop", "state": "PRESENT"},
+    {"id": "source-ci", "state": "PRESENT"},
+    {"id": "perimeter", "state": "PRESENT"},
+    {"id": "oauth-config", "state": "PRESENT"},
+    {"id": "oauth-consent", "state": "PRESENT"},
+    {"id": "separate-state-change-go", "state": "PRESENT"}
+  ]
+}

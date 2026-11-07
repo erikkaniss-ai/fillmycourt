@@ -1,0 +1,171 @@
+// FillMyCourt private-preview only: strictly GET-only gateway to Railway Operations.
+// Never route to transactional Core or a provider; no server-side privileged token.
+// The deployed staging Operations API verifies the forwarded player's Supabase JWT.
+// Fixed, independent staging site: no public Fill/MyCourt project is permitted.
+const FILL_PREVIEW_SITE_ID = "d763b7a1-dccd-4638-8876-ac1670171698";
+const OPERATIONS_HOST = "fmc-operations-api-staging.up.railway.app";
+const OPERATIONS_BASE = "https://" + OPERATIONS_HOST;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const JSON_HEADERS = {
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store, private",
+  "pragma": "no-cache",
+  "vary": "Authorization",
+  "x-content-type-options": "nosniff",
+  "x-robots-tag": "noindex, nofollow, noarchive"
+};
+const reply = (status, error) => new Response(JSON.stringify({error}), {
+  status, headers: JSON_HEADERS
+});
+function onlyOneQuery(url, allowed) {
+  const names = [...url.searchParams.keys()];
+  return names.length === allowed.length &&
+    names.every((k, i) => allowed.includes(k) && names.indexOf(k) === i);
+}
+function exactDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+  const d = new Date(value + "T00:00:00Z");
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+function route(url) {
+  const path = url.pathname;
+  if (path === "/api/me" || path === "/api/fmc/organizations") {
+    return url.search === "" ? {path} : {error: "INVALID_QUERY"};
+  }
+  const provenance = /^\/api\/fmc\/([^/]+)\/provider-provenance\/([^/]+)$/.exec(path);
+  if (provenance) {
+    const [, org, connection] = provenance;
+    if (!UUID.test(org)) return {error: "INVALID_ORGANIZATION"};
+    if (connection === "connections")
+      return url.search === "" ? {path} : {error: "INVALID_QUERY"};
+    if (connection === "preflight") {
+      const sha = url.searchParams.get("expected_operations_sha");
+      if (!onlyOneQuery(url, ["expected_operations_sha"]) || !/^[0-9a-f]{40}$/.test(sha || ""))
+        return {error: "INVALID_PREFLIGHT_QUERY"};
+      return {path: path + "?expected_operations_sha=" + sha};
+    }
+    if (!UUID.test(connection)) return {error: "INVALID_CONNECTION"};
+    const after = url.searchParams.get("after_booking_id");
+    const allowed = ["max_age_seconds", "limit", ...(after === null ? [] : ["after_booking_id"])];
+    const age = url.searchParams.get("max_age_seconds");
+    const limit = url.searchParams.get("limit");
+    if (!onlyOneQuery(url, allowed) || !/^[1-9][0-9]*$/.test(age || "") ||
+        Number(age) > 31536000 || !/^[1-9][0-9]*$/.test(limit || "") ||
+        Number(limit) > 50 || (after !== null && !UUID.test(after)))
+      return {error: "INVALID_REVIEW_QUERY"};
+    return {path: path + "?max_age_seconds=" + age + "&limit=" + limit +
+      (after === null ? "" : "&after_booking_id=" + encodeURIComponent(after))};
+  }
+  const match = /^\/api\/fmc\/([^/]+)\/(today|calendar)$/.exec(path);
+  if (!match) return null;
+  const org = match[1], operation = match[2];
+  if (!UUID.test(org)) return {error: "INVALID_ORGANIZATION"};
+  if (operation === "today") {
+    if (!onlyOneQuery(url, ["date"]) || !exactDate(url.searchParams.get("date")))
+      return {error: "INVALID_DATE"};
+    return {path: "/api/fmc/" + org + "/today?date=" +
+      encodeURIComponent(url.searchParams.get("date"))};
+  }
+  if (!onlyOneQuery(url, ["start", "end"])) return {error: "INVALID_RANGE"};
+  const start = url.searchParams.get("start");
+  const end = url.searchParams.get("end");
+  const beginMs = Date.parse(start || "");
+  const endMs = Date.parse(end || "");
+  if (!Number.isFinite(beginMs) || !Number.isFinite(endMs) ||
+      !/T.*(?:Z|[+-]\d\d:\d\d)$/.test(start || "") ||
+      !/T.*(?:Z|[+-]\d\d:\d\d)$/.test(end || "") ||
+      endMs <= beginMs || endMs - beginMs > 31 * 86400000)
+    return {error: "INVALID_RANGE"};
+  return {path: "/api/fmc/" + org + "/calendar?start=" +
+    encodeURIComponent(start) + "&end=" + encodeURIComponent(end)};
+}
+function configuredBase(context) {
+  // Netlify's trusted runtime context binds the request to one staging-only
+  // project. A mistaken deployment on the public FillMyCourt site fails shut.
+  if (context?.site?.id !== FILL_PREVIEW_SITE_ID) return null;
+  // This is a PUBLIC address, not a secret. The optional site environment
+  // variable is backwards-compatible but no longer a deployment prerequisite.
+  // It may only point to the exact verified Railway Operations host.
+  const value = globalThis.Netlify?.env?.get("FILL_OPERATIONS_API_BASE") || OPERATIONS_BASE;
+  let parsed;
+  try { parsed = new URL(value); } catch { return null; }
+  if (parsed.protocol !== "https:" || parsed.hostname !== OPERATIONS_HOST ||
+      parsed.username || parsed.password || parsed.port ||
+      (parsed.pathname !== "/" && parsed.pathname !== "") ||
+      parsed.search || parsed.hash) return null;
+  return parsed.origin;
+}
+export default async function fillOperatorReadonly(request, context) {
+  if (request.method !== "GET") return reply(405, "READ_ONLY");
+  const url = new URL(request.url);
+  const destination = route(url);
+  if (!destination) return reply(404, "NOT_FOUND");
+  if (destination.error) return reply(422, destination.error);
+  const origin = request.headers.get("origin");
+  if (origin && origin !== url.origin) return reply(403, "INVALID_ORIGIN");
+  const authorization = request.headers.get("authorization");
+  if (!authorization || !/^Bearer [^\s]{10,4096}$/.test(authorization))
+    return reply(401, "AUTH_REQUIRED");
+  const base = configuredBase(context);
+  if (!base) return reply(503, "UNAPPROVED_PREVIEW_SITE_OR_OPERATIONS");
+  try {
+    const upstream = await fetch(base + destination.path, {
+      method: "GET", redirect: "manual", cache: "no-store",
+      headers: {authorization, accept: "application/json"},
+      signal: AbortSignal.timeout(9000)
+    });
+    if (upstream.status >= 300 && upstream.status < 400)
+      return reply(502, "OPERATIONS_REDIRECT_REJECTED");
+    if (!upstream.headers.get("content-type")?.toLowerCase().includes("application/json"))
+      return reply(502, "OPERATIONS_INVALID_RESPONSE");
+    if (Number(upstream.headers.get("content-length") || 0) > 1024 * 1024)
+      return reply(502, "OPERATIONS_RESPONSE_LIMIT");
+    // Read incrementally: a chunked/lying upstream cannot consume unbounded
+    // function memory. The byte ceiling is UTF-8 wire bytes, not JS length.
+    const reader = upstream.body?.getReader();
+    if (!reader) return reply(502, "OPERATIONS_INVALID_RESPONSE");
+    const chunks = [];
+    const limit = 1024 * 1024;
+    let bytesRead = 0;
+    try {
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) {
+          await reader.cancel();
+          return reply(502, "OPERATIONS_INVALID_RESPONSE");
+        }
+        bytesRead += value.byteLength;
+        if (bytesRead > limit) {
+          await reader.cancel();
+          return reply(502, "OPERATIONS_RESPONSE_LIMIT");
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(bytesRead);
+    let position = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, position);
+      position += chunk.byteLength;
+    }
+    let body;
+    try {
+      body = new TextDecoder("utf-8", {fatal:true}).decode(bytes);
+    } catch {
+      return reply(502, "OPERATIONS_INVALID_RESPONSE");
+    }
+    return new Response(body, {status: upstream.status, headers: JSON_HEADERS});
+  } catch {
+    return reply(502, "OPERATIONS_UNAVAILABLE");
+  }
+}
+export const config = {
+  path: ["/api/me", "/api/fmc/organizations",
+    "/api/fmc/:org/today", "/api/fmc/:org/calendar",
+    "/api/fmc/:org/provider-provenance/connections",
+    "/api/fmc/:org/provider-provenance/preflight",
+    "/api/fmc/:org/provider-provenance/:connection"]
+};

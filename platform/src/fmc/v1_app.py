@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
 import math
+import os
 from pathlib import Path
 import re
 import uuid
@@ -20,6 +22,11 @@ from sqlalchemy import text
 
 from .common import DomainError, SPORTS, require_key
 from .supabase_v1 import Actor, SupabaseAuth, V1Store, one, rows
+from .provider_provenance_review import review_provider_provenance
+from .provider_provenance_preflight import operations_provenance_preflight
+from .fill_uat_guard import DeliveryGuard, from_environment as fill_guard_from_environment
+from .fill_today_read import read_today
+from .fill_import_preview import parse_people_csv
 
 
 ROLE_ADMIN = {"owner", "admin"}
@@ -764,8 +771,23 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
         raise RuntimeError("Unknown service mode")
     db = V1Store(settings.database)
     auth = auth_override or SupabaseAuth(settings.supabase_url, settings.supabase_publishable_key)
+    fill_guard = fill_guard_from_environment(settings, service, db.engine)
     app = FastAPI(title="FillMyCourt shared platform", version="0.5.0",
-                  docs_url=None, redoc_url=None, openapi_url=None)
+                  docs_url=None, redoc_url=None, openapi_url=None, lifespan=fill_guard.lifespan)
+    app.state.fill_uat_guard = fill_guard
+    # No validator config/client/task exists by default. Core/all modes do not
+    # install this Operations-only hook. The independent guard owns the outer
+    # lifespan so its cleanup continues while the validator runs or stops.
+    if service == "operations":
+        from .fill_uat_server_validator import from_environment as server_validator_from_environment
+        server_validator = server_validator_from_environment(settings, service, fill_guard, app)
+        if server_validator is not None:
+            @asynccontextmanager
+            async def fill_server_lifespan(application):
+                async with fill_guard.lifespan(application):
+                    async with server_validator.lifespan(application):
+                        yield
+            app.router.lifespan_context = fill_server_lifespan
 
     @app.exception_handler(DomainError)
     async def domain_error(request, exc):
@@ -793,8 +815,16 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
             response.headers["X-Robots-Tag"] = "noindex,nofollow"
         return response
 
+    # Outermost: check the complete response after all other middleware too.
+    if service == "operations":
+        app.add_middleware(DeliveryGuard, guard=fill_guard, auth=auth)
+
     def who(request: Request) -> Actor:
-        return auth.verify(request.headers.get("authorization"))
+        actor = auth.verify(request.headers.get("authorization"))
+        if service == "operations":
+            request.state.fill_f1_actor = actor
+            fill_guard.check(actor, request.method)
+        return actor
 
     def role(c, org: str, actor: Actor, allowed=None):
         return db.require_role(c, org, actor.id, set(allowed) if allowed else None)
@@ -1081,30 +1111,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
         def stage_import(org: str, body: ImportIn, request: Request):
             a = who(request)
             raw = body.csv
-            reader = csv.DictReader(io.StringIO(raw))
-            allowed = {"external_id", "name", "email", "phone", "marketing_consent"}
-            if not reader.fieldnames or not set(reader.fieldnames).issubset(allowed):
-                raise DomainError("CSV_HEADERS", "Use external_id,name,email,phone,marketing_consent headers.", 422)
-            staged, errors = [], []
-            seen = set()
-            for line, item in enumerate(reader, start=2):
-                row = {k: (v or "").strip() for k, v in item.items()}
-                if not any(row.values()):
-                    continue
-                key = row.get("external_id") or row.get("email").lower() or row.get("phone")
-                if not key:
-                    errors.append({"line": line, "error": "missing_identity"})
-                    continue
-                if key in seen:
-                    errors.append({"line": line, "error": "duplicate_in_file"})
-                    continue
-                seen.add(key)
-                consent = row.get("marketing_consent", "").lower()
-                if consent not in ("", "true", "false", "unknown"):
-                    errors.append({"line": line, "error": "invalid_marketing_consent"})
-                    continue
-                row["marketing_consent"] = None if consent in ("", "unknown") else consent == "true"
-                staged.append(row)
+            staged, errors = parse_people_csv(raw)
             fingerprint = hashlib.sha256(raw.encode()).hexdigest()
             with db.user(a.id) as c:
                 role(c, org, a, ROLE_MANAGER)
@@ -1146,16 +1153,16 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     if item.get("external_id"):
                         existing = one(c.execute(text("""
                             select * from public.people where organization_id=cast(:org as uuid)
-                              and source=:source and external_key=:external limit 1
+                              and source=:source and external_key=:external limit 1 for update
                         """), {"org": org, "source": b["source"], "external": item["external_id"]}))
                     if not existing and item.get("email"):
                         existing = one(c.execute(text("""
                             select * from public.people where organization_id=cast(:org as uuid)
-                              and lower(email)=lower(:email) limit 1
+                              and lower(email)=lower(:email) limit 1 for update
                         """), {"org": org, "email": item["email"]}))
                     before = dict(existing) if existing else None
                     if existing:
-                        c.execute(text("""
+                        updated = c.execute(text("""
                             update public.people set
                               external_key=coalesce(nullif(:external,''),external_key),
                               full_name=coalesce(nullif(:name,''),full_name),
@@ -1167,6 +1174,9 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                         """), {"external": item.get("external_id",""), "name": item.get("name",""),
                                "email": item.get("email",""), "phone": item.get("phone",""),
                                "consent": item.get("marketing_consent"), "source": b["source"], "id": str(existing["id"])})
+                        updated_count = updated.rowcount
+                        if type(updated_count) is not int or updated_count != 1:
+                            raise DomainError("IMPORT_COMMIT_CONFLICT", "Import commit requires review.", 409)
                         pid = str(existing["id"])
                         changes.append({"id": pid, "created": False, "before": {k: str(v) if isinstance(v,(datetime,uuid.UUID)) else v for k,v in before.items()}})
                     else:
@@ -1203,14 +1213,17 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     raise DomainError("IMPORT_STATE", "Only a committed import can be rolled back.", 409)
                 for ch in reversed(b["result"].get("changes", [])):
                     if ch.get("created"):
-                        c.execute(text("""
+                        deleted = c.execute(text("""
                             delete from public.people p where p.id=cast(:id as uuid) and p.organization_id=cast(:org as uuid)
                               and p.auth_user_id is null
                               and not exists (select 1 from public.bookings b where b.player_id=p.id)
                         """), {"id": ch["id"], "org": org})
+                        deleted_count = deleted.rowcount
+                        if type(deleted_count) is not int or deleted_count != 1:
+                            raise DomainError("IMPORT_ROLLBACK_CONFLICT", "Import rollback requires review.", 409)
                     else:
                         before = ch.get("before") or {}
-                        c.execute(text("""
+                        updated = c.execute(text("""
                             update public.people set external_key=:external,full_name=:name,email=:email,phone=:phone,
                               marketing_consent=:consent,source=:source,updated_at=now()
                             where id=cast(:id as uuid) and organization_id=cast(:org as uuid)
@@ -1218,6 +1231,9 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                                "email": before.get("email"), "phone": before.get("phone"),
                                "consent": before.get("marketing_consent"), "source": before.get("source","fmc"),
                                "id": ch["id"], "org": org})
+                        updated_count = updated.rowcount
+                        if type(updated_count) is not int or updated_count != 1:
+                            raise DomainError("IMPORT_ROLLBACK_CONFLICT", "Import rollback requires review.", 409)
                 c.execute(text("""
                     update public.import_batches set status='rolled_back',rolled_back_at=now()
                     where id=cast(:id as uuid)
@@ -1360,314 +1376,7 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                 day = datetime.strptime(date, "%Y-%m-%d").date()
             except Exception:
                 raise DomainError("DATE", "Use YYYY-MM-DD.", 422)
-            with db.user(a.id) as c:
-                role(c, org, a)
-                orgrow = one(c.execute(text("""
-                    select timezone,default_currency::text currency
-                    from public.organizations where id=cast(:org as uuid)
-                """), {"org": org}))
-                if not orgrow:
-                    raise DomainError("ORG_NOT_FOUND", "Organization not found.", 404)
-                tz = ZoneInfo(orgrow["timezone"])
-                begin = datetime(day.year, day.month, day.day, tzinfo=tz)
-                finish = begin + timedelta(days=1)
-                weekday = day.weekday()
-                court_rows = rows(c.execute(text("""
-                    with active_courts as (
-                      select c.id,c.name
-                      from public.courts c
-                      join public.venues v on v.id=c.venue_id
-                      where v.organization_id=cast(:org as uuid) and c.active and v.active
-                    ),
-                    buckets as (
-                      select ac.id court_id,ac.name court_name,gs starts_at,gs+interval '30 minutes' ends_at,
-                             (extract(hour from (gs at time zone :tz))::int*60
-                              + extract(minute from (gs at time zone :tz))::int) local_minute
-                      from active_courts ac
-                      cross join generate_series(:begin,:finish-interval '30 minutes',interval '30 minutes') gs
-                    ),
-                    open_buckets as (
-                      select b.*
-                      from buckets b
-                      where exists (
-                        select 1 from public.court_rates r
-                        where r.court_id=b.court_id and r.active
-                          and (r.weekday is null or r.weekday=:weekday)
-                          and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
-                      )
-                    ),
-                    court_metrics as (
-                      select ob.court_id,
-                           min(ob.local_minute)::int open_start_minute,
-                           (max(ob.local_minute)+30)::int open_end_minute,
-                           count(*)::int*30 capacity_minutes,
-                           count(*) filter (where exists (
-                             select 1 from public.bookings bk
-                             where bk.court_id=ob.court_id
-                               and bk.status in ('confirmed','pending_payment')
-                               and bk.starts_at<ob.ends_at and bk.ends_at>ob.starts_at
-                           ))::int*30 booked_minutes,
-                           count(*) filter (where exists (
-                             select 1 from public.booking_holds h
-                             where h.court_id=ob.court_id and h.expires_at>now()
-                               and h.starts_at<ob.ends_at and h.ends_at>ob.starts_at
-                           ))::int*30 held_minutes,
-                           count(*) filter (where exists (
-                             select 1 from public.court_blocks bl
-                             where bl.court_id=ob.court_id
-                               and bl.starts_at<ob.ends_at and bl.ends_at>ob.starts_at
-                           ))::int*30 blocked_minutes,
-                           (
-                             select count(*)::int
-                             from public.bookings bk
-                             where bk.court_id=ob.court_id
-                               and bk.status in ('confirmed','pending_payment')
-                               and bk.starts_at>=:begin and bk.starts_at<:finish
-                           ) bookings,
-                           (
-                             select count(*)::int
-                             from public.bookings bk
-                             where bk.court_id=ob.court_id
-                               and bk.status='cancelled'
-                               and bk.starts_at>=:begin and bk.starts_at<:finish
-                           ) cancellations,
-                           (
-                             select coalesce(sum(bk.gross_amount_minor),0)::int
-                             from public.bookings bk
-                           where bk.court_id=ob.court_id
-                             and bk.status in ('confirmed','pending_payment')
-                             and bk.starts_at>=:begin and bk.starts_at<:finish
-                           ) revenue_minor
-                      from open_buckets ob
-                      group by ob.court_id
-                    )
-                    select ac.id::text court_id,ac.name court_name,
-                           coalesce(cm.open_start_minute,0)::int open_start_minute,
-                           coalesce(cm.open_end_minute,0)::int open_end_minute,
-                           coalesce(cm.capacity_minutes,0)::int capacity_minutes,
-                           coalesce(cm.booked_minutes,0)::int booked_minutes,
-                           coalesce(cm.held_minutes,0)::int held_minutes,
-                           coalesce(cm.blocked_minutes,0)::int blocked_minutes,
-                           coalesce(cm.bookings,0)::int bookings,
-                           coalesce(cm.cancellations,0)::int cancellations,
-                           coalesce(cm.revenue_minor,0)::int revenue_minor,
-                           cm.court_id is not null has_rate_coverage
-                    from active_courts ac
-                    left join court_metrics cm on cm.court_id=ac.id
-                    order by ac.name
-                """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
-                sellable_windows = rows(c.execute(text("""
-                    with active_courts as (
-                      select c.id,c.name
-                      from public.courts c
-                      join public.venues v on v.id=c.venue_id
-                      where v.organization_id=cast(:org as uuid) and c.active and v.active
-                    ),
-                    buckets as (
-                      select ac.id court_id,ac.name court_name,gs starts_at,gs+interval '30 minutes' ends_at,
-                             (extract(hour from (gs at time zone :tz))::int*60
-                              + extract(minute from (gs at time zone :tz))::int) local_minute
-                      from active_courts ac
-                      cross join generate_series(:begin,:finish-interval '30 minutes',interval '30 minutes') gs
-                    ),
-                    open_buckets as (
-                      select b.*
-                      from buckets b
-                      where exists (
-                        select 1 from public.court_rates r
-                        where r.court_id=b.court_id and r.active
-                          and (r.weekday is null or r.weekday=:weekday)
-                          and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
-                      )
-                    ),
-                    numbered as (
-                      select ob.*,row_number() over(partition by ob.court_id order by ob.starts_at) rn
-                      from open_buckets ob
-                    ),
-                    islands as (
-                      select n.*,n.starts_at-(n.rn*interval '30 minutes') grp
-                      from numbered n
-                    )
-                    select court_id::text,court_name,
-                           min(starts_at) starts_at,max(ends_at) ends_at,
-                           min(local_minute)::int start_minute,
-                           (max(local_minute)+30)::int end_minute
-                    from islands
-                    group by court_id,court_name,grp
-                    order by court_name,starts_at
-                """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
-                windows_by_court = {}
-                for window in sellable_windows:
-                    windows_by_court.setdefault(window["court_id"], []).append(window)
-                empty_windows = rows(c.execute(text("""
-                    with active_courts as (
-                      select c.id,c.name
-                      from public.courts c
-                      join public.venues v on v.id=c.venue_id
-                      where v.organization_id=cast(:org as uuid) and c.active and v.active
-                    ),
-                    buckets as (
-                      select ac.id court_id,ac.name court_name,gs starts_at,gs+interval '30 minutes' ends_at,
-                             (extract(hour from (gs at time zone :tz))::int*60
-                              + extract(minute from (gs at time zone :tz))::int) local_minute
-                      from active_courts ac
-                      cross join generate_series(:begin,:finish-interval '30 minutes',interval '30 minutes') gs
-                    ),
-                    open_buckets as (
-                      select b.*
-                      from buckets b
-                      where exists (
-                        select 1 from public.court_rates r
-                        where r.court_id=b.court_id and r.active
-                          and (r.weekday is null or r.weekday=:weekday)
-                          and r.start_minute<=b.local_minute and r.end_minute>b.local_minute
-                      )
-                    ),
-                    free_buckets as (
-                      select ob.*,
-                             row_number() over(partition by ob.court_id order by ob.starts_at) rn
-                      from open_buckets ob
-                      where not exists (
-                        select 1 from public.bookings bk
-                        where bk.court_id=ob.court_id
-                          and bk.status in ('confirmed','pending_payment')
-                          and bk.starts_at<ob.ends_at and bk.ends_at>ob.starts_at
-                      )
-                      and not exists (
-                        select 1 from public.booking_holds h
-                        where h.court_id=ob.court_id and h.expires_at>now()
-                          and h.starts_at<ob.ends_at and h.ends_at>ob.starts_at
-                      )
-                      and not exists (
-                        select 1 from public.court_blocks bl
-                        where bl.court_id=ob.court_id
-                          and bl.starts_at<ob.ends_at and bl.ends_at>ob.starts_at
-                      )
-                    ),
-                    islands as (
-                      select fb.*,
-                             fb.starts_at - (fb.rn * interval '30 minutes') grp
-                      from free_buckets fb
-                    ),
-                    windows as (
-                      select court_id,court_name,
-                             min(starts_at) starts_at,max(ends_at) ends_at,
-                             count(*)::int*30 duration_minutes
-                      from islands
-                      group by court_id,court_name,grp
-                      having count(*) >= 2
-                    ),
-                    opportunities as (
-                      select w.court_id,w.starts_at window_start,d.duration_minutes,gs starts_at,
-                             ((rate.price_minor*d.duration_minutes+59)/60)::int amount_minor,
-                             rate.currency::text currency
-                      from windows w
-                      cross join (values (60),(90)) d(duration_minutes)
-                      cross join lateral generate_series(
-                        w.starts_at,
-                        w.ends_at-make_interval(mins=>d.duration_minutes),
-                        interval '30 minutes'
-                      ) gs
-                      join lateral (
-                        select r.price_minor,r.currency
-                        from public.court_rates r
-                        where r.court_id=w.court_id and r.active
-                          and (
-                            r.weekday is null or
-                            r.weekday=(extract(isodow from (gs at time zone :tz))::int-1)
-                          )
-                          and r.start_minute<=(
-                            extract(hour from (gs at time zone :tz))::int*60
-                            + extract(minute from (gs at time zone :tz))::int
-                          )
-                          and r.end_minute>(
-                            extract(hour from (gs at time zone :tz))::int*60
-                            + extract(minute from (gs at time zone :tz))::int
-                          )
-                        order by r.priority asc,r.created_at desc
-                        limit 1
-                      ) rate on true
-                    )
-                    select w.court_id::text,w.court_name,w.starts_at,w.ends_at,w.duration_minutes,
-                           count(*) filter (where o.duration_minutes=60)::int bookable_60_count,
-                           min(o.amount_minor) filter (where o.duration_minutes=60)::int min_60_amount_minor,
-                           max(o.amount_minor) filter (where o.duration_minutes=60)::int max_60_amount_minor,
-                           count(*) filter (where o.duration_minutes=90)::int bookable_90_count,
-                           min(o.amount_minor) filter (where o.duration_minutes=90)::int min_90_amount_minor,
-                           max(o.amount_minor) filter (where o.duration_minutes=90)::int max_90_amount_minor,
-                           (array_agg(o.amount_minor order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
-                             filter (where o.amount_minor is not null))[1]::int best_amount_minor,
-                           (array_agg(o.duration_minutes order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
-                             filter (where o.amount_minor is not null))[1]::int best_duration_minutes,
-                           (array_agg(o.starts_at order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
-                             filter (where o.amount_minor is not null))[1] best_starts_at,
-                           (array_agg(o.currency order by o.amount_minor desc,o.duration_minutes desc,o.starts_at)
-                             filter (where o.amount_minor is not null))[1] currency
-                    from windows w
-                    left join opportunities o
-                      on o.court_id=w.court_id and o.window_start=w.starts_at
-                    group by w.court_id,w.court_name,w.starts_at,w.ends_at,w.duration_minutes
-                    order by w.duration_minutes desc,w.starts_at
-                    limit 30
-                """), {"org": org, "tz": orgrow["timezone"], "begin": begin, "finish": finish, "weekday": weekday}))
-                bookable_60_starts = sum(int(x.get("bookable_60_count") or 0) for x in empty_windows)
-                bookable_90_starts = sum(int(x.get("bookable_90_count") or 0) for x in empty_windows)
-                best_quote = max(
-                    (x for x in empty_windows if x.get("best_amount_minor") is not None),
-                    key=lambda x: int(x.get("best_amount_minor") or 0),
-                    default=None,
-                )
-                financial = one(c.execute(text("""
-                    select
-                      count(*) filter (where status in ('confirmed','pending_payment'))::int bookings,
-                      count(*) filter (where status='cancelled')::int cancellations,
-                      coalesce(sum(gross_amount_minor) filter (where status in ('confirmed','pending_payment')),0)::int revenue_minor
-                    from public.bookings
-                    where organization_id=cast(:org as uuid)
-                      and starts_at>=:begin and starts_at<:finish
-                """), {"org": org, "begin": begin, "finish": finish})) or {}
-                capacity = sum(int(x["capacity_minutes"] or 0) for x in court_rows)
-                booked = sum(int(x["booked_minutes"] or 0) for x in court_rows)
-                held = sum(int(x["held_minutes"] or 0) for x in court_rows)
-                blocked = sum(int(x["blocked_minutes"] or 0) for x in court_rows)
-                courts_with_rate_coverage = sum(1 for x in court_rows if x.get("has_rate_coverage"))
-                courts_without_rate_coverage = len(court_rows) - courts_with_rate_coverage
-                for x in court_rows:
-                    x["sellable_windows"] = windows_by_court.get(x["court_id"], [])
-                    cap = int(x["capacity_minutes"] or 0)
-                    used = int(x["booked_minutes"] or 0)
-                    x["utilization_pct"] = round((used / cap * 100) if cap else 0, 1)
-                    x["empty_minutes"] = max(0, cap - used - int(x["held_minutes"] or 0) - int(x["blocked_minutes"] or 0))
-                return {
-                    "date": date,
-                    "day_start": begin.isoformat(),
-                    "day_end": finish.isoformat(),
-                    "timezone": orgrow["timezone"],
-                    "currency": orgrow["currency"],
-                    "summary": {
-                        "capacity_minutes": capacity,
-                        "booked_minutes": booked,
-                        "held_minutes": held,
-                        "blocked_minutes": blocked,
-                        "empty_minutes": max(0, capacity - booked - held - blocked),
-                        "utilization_pct": round((booked / capacity * 100) if capacity else 0, 1),
-                        "bookings": int(financial.get("bookings") or 0),
-                        "cancellations": int(financial.get("cancellations") or 0),
-                        "revenue_minor": int(financial.get("revenue_minor") or 0),
-                        "active_courts": len(court_rows),
-                        "courts_with_rate_coverage": courts_with_rate_coverage,
-                        "courts_without_rate_coverage": courts_without_rate_coverage,
-                        "bookable_60_starts": bookable_60_starts,
-                        "bookable_90_starts": bookable_90_starts,
-                        "highest_single_quote_minor": int((best_quote or {}).get("best_amount_minor") or 0),
-                        "highest_single_quote_duration_minutes": (
-                            int((best_quote or {}).get("best_duration_minutes"))
-                            if (best_quote or {}).get("best_duration_minutes") is not None else None
-                        ),
-                    },
-                    "courts": court_rows,
-                    "empty_windows": empty_windows,
-                }
+            return read_today(db, a, org, date, day)
 
         @app.get("/api/fmc/{org}/calendar")
         def calendar(org: str, request: Request, start: str, end: str):
@@ -1697,7 +1406,41 @@ def create_v1_app(settings, service: str = "all", auth_override=None):
                     where organization_id=cast(:org as uuid) and starts_at<:finish and ends_at>:begin
                     order by starts_at
                 """), {"org": org, "begin": begin, "finish": finish}))
+                # Recheck membership after all collections, before returning data.
+                role(c, org, a)
                 return {"bookings": bookings, "holds": holds, "blocks": blocks}
+
+        @app.get("/api/fmc/{org}/provider-provenance/connections")
+        def provenance_connections(org: uuid.UUID, request: Request):
+            a = who(request)
+            # Never reuse /providers: its config is not an operator-view DTO.
+            with db.user(a.id, readonly=True) as c:
+                role(c, str(org), a, ROLE_ADMIN)
+                return {"items": rows(c.execute(text("""
+                    select id::text,provider from public.provider_connections
+                    where organization_id=cast(:org as uuid) and provider='playtomic'
+                    order by id limit 100
+                """), {"org": str(org)}))}
+
+        @app.get("/api/fmc/{org}/provider-provenance/preflight")
+        def provenance_preflight(org: uuid.UUID, request: Request,
+                                 expected_operations_sha: str = Query(pattern="^[0-9a-f]{40}$")):
+            return operations_provenance_preflight(
+                db, user_id=who(request).id, organization_id=str(org),
+                expected_sha=expected_operations_sha, service=service,
+                environment=settings.environment, env=os.environ, routes=app.routes,
+                now=datetime.now(timezone.utc))
+
+        @app.get("/api/fmc/{org}/provider-provenance/{connection_id}")
+        def provenance_report(org: uuid.UUID, connection_id: uuid.UUID, request: Request,
+                              max_age_seconds: int = Query(ge=1, le=31536000),
+                              limit: int = Query(default=50, ge=1, le=50),
+                              after_booking_id: uuid.UUID | None = None):
+            return review_provider_provenance(
+                db, user_id=who(request).id, organization_id=str(org),
+                connection_id=str(connection_id), now=datetime.now(timezone.utc),
+                max_age_seconds=max_age_seconds, limit=limit,
+                after_booking_id=str(after_booking_id) if after_booking_id else None)
 
         @app.get("/api/fmc/{org}/providers")
         def providers(org: str, request: Request):

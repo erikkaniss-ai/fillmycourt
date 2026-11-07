@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "mode": "READ_ONLY_GO_PACKAGE",
+  "domain": "club",
+  "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "organisationId": "11111111-1111-4111-8111-111111111111",
+  "checkId": "club-provenance-uat",
+  "asOf": "2026-10-21T10:20:00Z",
+  "reviewUntil": "2026-10-21T11:20:00Z",
+  "authorityVerified": false,
+  "executionEnabled": false,
+  "actions": ["operations-preflight-get", "stored-provenance-get", "two-synthetic-org-isolation", "unauthenticated-access-denial", "wrong-role-access-denial", "cross-org-access-denial"],
+  "items": [
+    {"id": "source-binding", "state": "PRESENT"},
+    {"id": "original-authority", "state": "UNKNOWN"}
+  ]
+}

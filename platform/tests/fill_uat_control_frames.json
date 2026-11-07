@@ -1,0 +1,120 @@
+{
+  "kind": "PUBLIC_SCRUBBED_B11_DISCOVERY",
+  "original_t0": "2026-11-01T08:26:21.841587Z",
+  "frames": [
+    {
+      "line": 15176,
+      "timestamp": "2026-11-01T08:26:22.252Z",
+      "method": "complete",
+      "started_at_ms": 1793521582143,
+      "completed_at_ms": 1793521582252,
+      "duration": {
+        "secs": 0,
+        "nanos": 108296700
+      },
+      "node_execution_ms": 88,
+      "snapshot": {
+        "attempts": [],
+        "authorization_id": "01a195d0-a2d3-7492-ada1-13093bfac556",
+        "candidate_sha": "ed0eeea4ccde35ff54ee8331795326c15a49a5f9",
+        "deployment_id": "9d1c8b64-9a14-4410-98ce-836950832ade",
+        "lease_digest": null,
+        "observed_at": "2026-11-01T08:26:22.237273Z",
+        "project_ref": "yclqnbcrchwieyzkyumx",
+        "reconciliation_required": false,
+        "run_id": "c84ce71e-da5d-4d35-80b8-03df361e90a4",
+        "starts_at": "2026-11-01T08:26:21.841587Z",
+        "stopped": false
+      },
+      "provenance": {
+        "tool": "mcp__codex_apps__supabase_execute_sql",
+        "project_id": "yclqnbcrchwieyzkyumx",
+        "query_sha256": "dc985c900e0b7f46689c1cc41dadff760d0af370cc5f6fcf134ae0d34d99278e",
+        "original_timestamp_preserved": true
+      },
+      "result": {
+        "phase": "DISCOVERY",
+        "stopped": false,
+        "controlFailure": null,
+        "clockWait": {
+          "originalObservedAt": "2026-11-01T08:26:22.237273Z",
+          "requestedMs": 76,
+          "elapsedMs": 82.3863999999594,
+          "code": "PAST_VERIFIED"
+        },
+        "observations_count": 0
+      }
+    },
+    {
+      "line": 15180,
+      "timestamp": "2026-11-01T08:26:27.208Z",
+      "method": "complete",
+      "started_at_ms": 1793521584970,
+      "completed_at_ms": 1793521587204,
+      "duration": {
+        "secs": 2,
+        "nanos": 234338600
+      },
+      "node_execution_ms": 9,
+      "snapshot": {
+        "attempts": [],
+        "authorization_id": "01a195d0-a2d3-7492-ada1-13093bfac556",
+        "candidate_sha": "ed0eeea4ccde35ff54ee8331795326c15a49a5f9",
+        "deployment_id": "9d1c8b64-9a14-4410-98ce-836950832ade",
+        "lease_digest": null,
+        "observed_at": "2026-11-01T08:26:25.083349Z",
+        "project_ref": "yclqnbcrchwieyzkyumx",
+        "reconciliation_required": false,
+        "run_id": "c84ce71e-da5d-4d35-80b8-03df361e90a4",
+        "starts_at": "2026-11-01T08:26:21.841587Z",
+        "stopped": false
+      },
+      "provenance": {
+        "tool": "mcp__codex_apps__supabase_execute_sql",
+        "project_id": "yclqnbcrchwieyzkyumx",
+        "query_sha256": "dc985c900e0b7f46689c1cc41dadff760d0af370cc5f6fcf134ae0d34d99278e",
+        "original_timestamp_preserved": true
+      },
+      "result": {
+        "phase": "CLEANUP_ONLY",
+        "stopped": true,
+        "controlFailure": {
+          "stage": "DISCOVERY",
+          "code": "CONTROL_REJECTED"
+        },
+        "clockWait": {
+          "originalObservedAt": "2026-11-01T08:26:22.237273Z",
+          "requestedMs": 76,
+          "elapsedMs": 82.3863999999594,
+          "code": "PAST_VERIFIED"
+        },
+        "observations_count": 0
+      }
+    }
+  ],
+  "partial": {
+    "provenance": "Derived from the official bounded readonly partial cleanup snapshot; not a captured active discovery frame. Original source snapshot times retained.",
+    "snapshot": {
+      "run_id": "c84ce71e-da5d-4d35-80b8-03df361e90a4",
+      "authorization_id": "01a195d0-a2d3-7492-ada1-13093bfac556",
+      "candidate_sha": "ed0eeea4ccde35ff54ee8331795326c15a49a5f9",
+      "project_ref": "yclqnbcrchwieyzkyumx",
+      "deployment_id": "9d1c8b64-9a14-4410-98ce-836950832ade",
+      "starts_at": "2026-11-01T08:26:21.841587Z",
+      "observed_at": "2026-11-01T08:26:56.375060Z",
+      "stopped": true,
+      "reconciliation_required": true,
+      "lease_digest": null,
+      "attempts": [
+        {
+          "label": "canary",
+          "settled": false,
+          "user_id": "cf5ec236-b8a8-4de2-a7c4-1a1ebe5a5d91",
+          "verified": true,
+          "operation": "create",
+          "reserved_at": "2026-11-01T08:26:26.778572Z"
+        }
+      ]
+    }
+  }
+}
