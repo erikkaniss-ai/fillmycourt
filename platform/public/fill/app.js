@@ -244,7 +244,7 @@
       Number(right.duration_minutes || 0) - Number(left.duration_minutes || 0)
       || new Date(left.starts_at) - new Date(right.starts_at)
     ));
-    const highestQuote = summary.highest_single_quote_minor || (currency === "EUR" && summary.highest_single_quote_minor === 0)
+    const highestQuote = summary.highest_single_quote_minor || (currency === "EUR" && summary.highest_single_quote_minor === 0 && [60, 90].includes(summary.highest_single_quote_duration_minutes))
       ? mon(summary.highest_single_quote_minor, currency)
       : "—";
 
