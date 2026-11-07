@@ -409,13 +409,13 @@
         label: wallLabel(ms), localMinute: minuteInZone(new Date(ms).toISOString(), timezone) });
     }
 
-    // Core Calendar includes cancelled history. Only booked/pending-payment,
-    // active holds and blocks occupy court time. Clip multi-day events in UTC.
+    // Held/confirmed/pending-payment bookings, active holds and blocks occupy
+    // court time; cancelled history does not. Clip multi-day events in UTC.
     const events = [
       ...(state.calendar?.blocks || []).map((row) => ({...row, kind: "block", status: "blocked"})),
       ...(state.calendar?.bookings || [])
-        .filter((row) => ["confirmed", "pending_payment"].includes(row.status))
-        .map((row) => ({...row, kind: "booking"})),
+        .filter((row) => ["held", "confirmed", "pending_payment"].includes(row.status))
+        .map((row) => ({...row, kind: row.status === "held" ? "hold" : "booking"})),
       ...(state.calendar?.holds || []).map((row) => ({...row, kind: "hold", status: "held"})),
     ].map((row) => {
       const start = calendarInstant(row.starts_at), end = calendarInstant(row.ends_at);
