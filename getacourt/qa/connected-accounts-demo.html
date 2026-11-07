@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'">
+  <title>Connected Accounts | GetACourt fixture-only UX</title>
+  <link rel="stylesheet" href="./connected-accounts-demo.css">
+  <script src="../assets/provider-supply-contract.js" defer></script>
+  <script src="./connected-accounts-lifecycle.js" defer></script>
+  <script src="./connected-accounts-demo.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <div class="topline">
+      <div class="wordmark">GetACourt</div>
+      <span class="fixture">LOCAL FIXTURE · NOT CONNECTED</span>
+    </div>
+    <div class="lead">
+      <h1>Connected booking accounts</h1>
+      <p>Explore a future permission-aware experience. This isolated UI does not connect to a provider, sign you in, or show bookable court inventory.</p>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <p class="warning"><strong>Demo only.</strong> Provider permissions, account linking and availability feeds have not been verified. No real account, booking, payment, storage or external network request is used here.</p>
+    <div class="layout">
+      <section class="panel" aria-labelledby="selectionHeading">
+        <h2 id="selectionHeading">1. Choose a provider</h2>
+        <p class="muted small">These are research candidates, not active GetACourt integrations.</p>
+        <div class="list" id="providers" role="group" aria-label="Provider research candidates"></div>
+        <h3 id="modeHeading">View permission ownership</h3>
+        <div class="modes" role="group" aria-labelledby="modeHeading">
+          <button id="playerMode" type="button" class="mode selected" aria-pressed="true">Player account</button>
+          <button id="clubMode" type="button" class="mode" aria-pressed="false">Club supply</button>
+        </div>
+        <p class="small muted">Switching ownership resets demo consent; it never transfers rights.</p>
+      </section>
+      <section class="panel" aria-labelledby="detailsHeading">
+        <h2 id="detailsHeading">2. Review access requirements</h2>
+        <p class="muted small">No redirect, API call or credential storage is available in this demo.</p>
+        <div class="overview">
+          <p class="eyebrow" id="modeLabel">Player account</p>
+          <h3 id="providerTitle">Playtomic</h3>
+          <p id="status" role="status" aria-live="polite">Provider account NOT connected.</p>
+          <p id="description">Official authorization has not been established.</p>
+        </div>
+        <h3 id="rightsHeading">Not yet authorized</h3>
+        <ul id="rights" aria-labelledby="rightsHeading"></ul>
+        <h3 id="nextHeading">What would be required</h3>
+        <ul id="next" aria-labelledby="nextHeading"></ul>
+        <div class="controls">
+          <button id="consentButton" type="button" class="action">Record demo consent</button>
+          <button id="expireButton" type="button" class="action secondary" disabled>Simulate expiry</button>
+          <button id="reconnectButton" type="button" class="action secondary" disabled>Request demo reconnect</button>
+          <button id="withdrawButton" type="button" class="action secondary" disabled>Withdraw demo consent</button>
+        </div>
+        <p id="scopeMessage" class="small muted">Demo-only consent is not real OAuth, provider authorization or a saved account.</p>
+        <section class="outcome" aria-labelledby="outcomeHeading">
+          <h3 id="outcomeHeading" >Availability contract</h3>
+          <p id="result" role="status" aria-live="polite">Availability: UNKNOWN · 0 slots</p>
+          <p id="requestLog">Provider HTTP requests: 0 · Booking actions: 0 · Persistent storage: none</p>
+        </section>
+      </section>
+    </div>
+    <p class="foot">This demonstration is isolated from the main GetACourt app. Official player delegation, club data licensing, usable court availability, venue coverage and handoff rights require independent contractual and technical approval. The current booking writer and production services are unchanged.</p>
+  </main>
+</body>
+</html>

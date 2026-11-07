@@ -4,12 +4,12 @@
   const state = {
     sport:"padel", venues:[], filter:"all", sort:"recommended", view:"list",
     selected:null, hold:null, timer:null, map:null, mapLayer:null,
-    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, onlinePayments:false },
-    session:null, profile:null, geo:null, searchMeta:{}, hasSearched:false, routines:[], watchNotifications:[]
+    platform:{ bookingEnabled:false, authConfigured:false, emailSignInEnabled:false, googleSignInEnabled:false,onlinePayments:false },
+    session:null, profile:null, authEpoch:0, geo:null, geoRequestEpoch:0, searchMeta:{}, searchRevision:0, hasSearched:false, routines:[], watchNotifications:[]
   };
 
   const el = {
-    form:q("#searchForm"), location:q("#locationInput"), date:q("#dateInput"),
+    form:q("#searchForm"), location:q("#locationInput"), date:q("#dateInput"), dateStatus:q("#dateStatus"),
     from:q("#fromInput"), to:q("#toInput"), grid:q("#resultsGrid"),
     count:q("#resultCount"), title:q("#resultsTitle"), refresh:q("#refreshButton"),
     dialog:q("#bookingDialog"), bookingForm:q("#bookingForm"), summary:q("#bookingSummary"),
@@ -18,10 +18,12 @@
     bookingsList:q("#bookingsList"), myBookings:q("#myBookingsButton"),
     closeBookings:q("#closeBookingsButton"), toast:q("#toast"),
     authButton:q("#authButton"), authDialog:q("#authDialog"), authForm:q("#authForm"),
-    authEmail:q("#authEmail"), authStatus:q("#authStatus"), authSubmit:q("#authSubmitButton"), closeAuth:q("#closeAuthButton"),
+    authEmail:q("#authEmail"), authStatus:q("#authStatus"), authSubmit:q("#authSubmitButton"),
+    googleSignIn:q("#googleSignInButton"),emailSignInFields:q("#emailSignInFields"),closeAuth:q("#closeAuthButton"),
     profileDialog:q("#profileDialog"), profileForm:q("#profileForm"), profileName:q("#profileName"),
     profileArea:q("#profileArea"), profileMarketing:q("#profileMarketing"), profileStatus:q("#profileStatus"),
     closeProfile:q("#closeProfileButton"), profileSignOut:q("#profileSignOutButton"),
+    profileImportBookings:q("#profileImportBookingsButton"),
     nearMe:q("#nearMeButton"), radiusNote:q("#radiusNote"),
     sortSelect:q("#sortSelect"), listView:q("#listViewButton"), mapView:q("#mapViewButton"),
     resultsMap:q("#resultsMap"), quickPicks:q("#quickPicks"), venueDialog:q("#venueDialog"),
@@ -29,6 +31,10 @@
     bookingIdentityLabel:q("#bookingIdentityLabel"), bookingIdentityNote:q("#bookingIdentityNote"),
     bookingIdentityAction:q("#bookingIdentityAction"), bookingPaymentStatus:q("#bookingPaymentStatus"),
     myWatches:q("#myWatchesButton"), watchesDialog:q("#watchesDialog"), watchesList:q("#watchesList"),
+    importButton:q("#importBookingsButton"),importDialog:q("#importDialog"),
+    importForm:q("#importForm"),importFile:q("#importFile"),importProvider:q("#importProvider"),
+    importOwnData:q("#importOwnData"),importStatus:q("#importStatus"),importItems:q("#importItems"),
+    importClear:q("#importClear"),closeImport:q("#closeImportButton"),importSubmit:q("#importSubmit"),
     closeWatches:q("#closeWatchesButton"), watchAlerts:q("#watchAlerts"),
     watchPrompt:q("#watchPrompt"), watchPromptTitle:q("#watchPromptTitle"), watchPromptText:q("#watchPromptText"),
     watchPromptButton:q("#watchPromptButton"), watchDialog:q("#watchDialog"), watchForm:q("#watchForm"),
@@ -36,17 +42,27 @@
     watchRadius:q("#watchRadius"), watchIndoor:q("#watchIndoor"), closeWatch:q("#closeWatchButton")
   };
 
+  const personalImports=window.GACPersonalBookingImports?.createStore();
   const now = new Date();
   const today = now.getFullYear()+"-"+String(now.getMonth()+1).padStart(2,"0")+"-"+String(now.getDate()).padStart(2,"0");
   el.date.value=today; el.date.min=today;
   el.name.value=localStorage.getItem("gac.name")||"";
   el.email.value=localStorage.getItem("gac.email")||"";
   state.session=loadSession();
-  consumeAuthHash();
+  rejectImplicitAuthHash();
+  // Capture the OAuth code immediately and remove it from the address bar
+  // before loading network data, to avoid referer/history leakage.
+  const googleCallback=window.GACAuth?.captureCallback(location.href)||null;
+  if(googleCallback)history.replaceState(null,"",googleCallback.cleanUrl);
 
   function esc(v){return String(v==null?"":v).replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));}
   function money(v,currency){return new Intl.NumberFormat("en-GB",{style:"currency",currency:currency||"EUR",maximumFractionDigits:0}).format(v);}
   function prettyDate(v){return new Intl.DateTimeFormat("en-GB",{weekday:"short",day:"numeric",month:"short"}).format(new Date(v+"T12:00:00"));}
+  function validSearchDate(dateValue,minDate){return /^\d{4}-\d{2}-\d{2}$/.test(dateValue)&&dateValue>=minDate;}
+  // Shadow-only, bounded in-memory event schema. No remote submission or PII.
+  function shadowSignal(stage,detail={}){
+    try{window.GACSignals?.record(stage,{...detail,sport:state.sport,locationMode:state.geo?"near_me":"typed_area"});}catch{}
+  }
   function toast(message){el.toast.textContent=message;el.toast.classList.add("show");setTimeout(()=>el.toast.classList.remove("show"),2600);}
   function uid(){return crypto.randomUUID ? crypto.randomUUID() : Date.now()+"-"+Math.random().toString(16).slice(2);}
   function weekdayIndex(dateValue){const d=new Date(dateValue+"T12:00:00");return (d.getDay()+6)%7;}
@@ -56,14 +72,61 @@
   function loadSession(){
     try{return JSON.parse(localStorage.getItem("gac.session")||"null");}catch{return null;}
   }
+  function clearPrivateViews(){
+    // Older isolated auth tests invoke this function without bootstrapping
+    // optional import modules. In the app it always clears user-bound data.
+    if(typeof personalImports!=="undefined")personalImports?.clear();
+    if(el.importItems)el.importItems.replaceChildren();
+    if(el.importFile)el.importFile.value="";
+    if(el.importOwnData)el.importOwnData.checked=false;
+    if(el.importStatus)el.importStatus.textContent="No personal calendar imported in this session.";
+    if(el.importDialog?.open)el.importDialog.close();
+    state.profile=null;
+    state.routines=[];
+    state.watchNotifications=[];
+    if(el.bookingsList)el.bookingsList.replaceChildren();
+    if(el.watchesList)el.watchesList.replaceChildren();
+    if(el.watchAlerts)el.watchAlerts.replaceChildren();
+    if(el.bookingsDialog?.open)el.bookingsDialog.close();
+    if(el.watchesDialog?.open)el.watchesDialog.close();
+    if(el.profileDialog?.open)el.profileDialog.close();
+    if(el.watchDialog?.open)el.watchDialog.close();
+  }
   function saveSession(data){
-    if(!data){localStorage.removeItem("gac.session");state.session=null;state.profile=null;updateAuthUI();return;}
-    state.session={
+    const previousUser=jwtPayload(state.session?.accessToken||"").sub||null;
+    if(!data){
+      state.authEpoch++;
+      localStorage.removeItem("gac.session");
+      state.session=null;
+      clearPrivateViews();
+      updateAuthUI();
+      return;
+    }
+    const nextSession={
       accessToken:data.access_token||data.accessToken,
       refreshToken:data.refresh_token||data.refreshToken,
       expiresAt:Date.now()+Number(data.expires_in||3600)*1000
     };
+    const nextUser=jwtPayload(nextSession.accessToken||"").sub||null;
+    // A rotated token for the SAME user must not invalidate in-flight
+    // profile/bookings reads. Only identity changes and sign-out do that.
+    const identityChanged=!state.session || !previousUser || !nextUser || previousUser!==nextUser;
+    if(identityChanged)state.authEpoch++;
+    if(state.session && identityChanged)clearPrivateViews();
+    state.session=nextSession;
     localStorage.setItem("gac.session",JSON.stringify(state.session));
+    updateAuthUI();
+  }
+  // storage events run in OTHER tabs; clear identity-bound UI immediately
+  // when sign-out or an account switch occurred in a sibling tab.
+  function syncExternalSession(){
+    const previous=jwtPayload(state.session?.accessToken||"").sub||null;
+    const persisted=loadSession();
+    const next=jwtPayload(persisted?.accessToken||"").sub||null;
+    const identityChanged=!persisted || !next || !previous || previous!==next;
+    if(identityChanged)state.authEpoch++;
+    state.session=persisted;
+    if(identityChanged)clearPrivateViews();
     updateAuthUI();
   }
   function jwtPayload(token){
@@ -72,23 +135,76 @@
       return JSON.parse(decodeURIComponent(Array.from(atob(part)).map(c=>"%"+c.charCodeAt(0).toString(16).padStart(2,"0")).join("")));
     }catch{return {};}
   }
-  function consumeAuthHash(){
+  function rejectImplicitAuthHash(){
+    // GetACourt's approved Google flow is PKCE code exchange only.
+    // Arbitrary URL fragments must never mint a persistent player session,
+    // including when the Google and email sign-in flags are OFF.
     const hash=new URLSearchParams(location.hash.replace(/^#/,""));
-    const access=hash.get("access_token"), refresh=hash.get("refresh_token");
-    if(access&&refresh){
-      saveSession({access_token:access,refresh_token:refresh,expires_in:Number(hash.get("expires_in")||3600)});
+    if(hash.has("access_token")||hash.has("refresh_token")){
       history.replaceState(null,"",location.pathname+location.search);
-      setTimeout(()=>{toast("Signed in to GetACourt.");loadProfile(true);},100);
     }
   }
+  async function completeGoogleSignIn(){
+    if(!googleCallback)return;
+    const pending=window.GACAuth?.takePending(sessionStorage);
+    if(!pending||pending.redirectUrl!==googleCallback.originPath||!state.platform.googleSignInEnabled){
+      toast("Google sign-in expired or was not initiated here. Please sign in again.");
+      return;
+    }
+    if(googleCallback.error){toast("Google sign-in was not completed.");return;}
+    if(!googleCallback.code){toast("Google sign-in could not be completed.");return;}
+    try{
+      const session=await api("/api/gac/auth/google/exchange",{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({authCode:googleCallback.code,codeVerifier:pending.codeVerifier})
+      });
+      saveSession(session);
+      toast("Signed in with Google.");
+      await loadProfile(true);
+    }catch{toast("Google sign-in failed. Please try again.");}
+  }
+  async function startGoogleSignIn(){
+    if(!state.platform.googleSignInEnabled||!state.platform.supabaseAuthUrl)return;
+    if(!window.crypto?.subtle||!window.GACAuth){
+      el.authStatus.textContent="Your browser does not support secure Google sign-in.";return;
+    }
+    el.googleSignIn.disabled=true;
+    try{
+      const verifier=window.GACAuth.verifier(window.crypto);
+      const challenge=await window.GACAuth.challenge(window.crypto,verifier);
+      const redirectUrl=location.origin+location.pathname;
+      window.GACAuth.savePending(sessionStorage,verifier,redirectUrl);
+      const url=window.GACAuth.authorizeUrl(state.platform.supabaseAuthUrl,redirectUrl,challenge);
+      location.assign(url);
+    }catch{
+      el.googleSignIn.disabled=false;
+      el.authStatus.textContent="Could not initiate Google sign-in.";
+    }
+  }
+  // Deduplicate concurrent refresh calls and prevent sign-out/old refresh races.
+  let refreshInFlight=null;
   async function accessToken(){
     if(!state.session?.accessToken) return null;
     if((state.session.expiresAt||0)-Date.now()>60000) return state.session.accessToken;
     if(!state.session.refreshToken){saveSession(null);return null;}
-    try{
-      const data=await api("/api/gac/auth/refresh",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({refreshToken:state.session.refreshToken})},false);
-      saveSession(data); return state.session.accessToken;
-    }catch{saveSession(null);return null;}
+    if(refreshInFlight)return refreshInFlight;
+    const currentRefreshToken=state.session.refreshToken;
+    refreshInFlight=(async()=>{
+      try{
+        const data=await api("/api/gac/auth/refresh",{
+          method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({refreshToken:currentRefreshToken})
+        },false);
+        if(state.session?.refreshToken!==currentRefreshToken)return null;
+        saveSession(data);
+        return state.session?.accessToken||null;
+      }catch{
+        if(state.session?.refreshToken===currentRefreshToken)saveSession(null);
+        return null;
+      }
+    })();
+    try{return await refreshInFlight;}
+    finally{refreshInFlight=null;}
   }
   function updateAuthUI(){
     if(!el.authButton) return;
@@ -114,12 +230,12 @@
       return;
     }
     el.bookingIdentityLabel.textContent="Not signed in";
-    if(state.platform.emailSignInEnabled){
+    if(state.platform.emailSignInEnabled||state.platform.googleSignInEnabled){
       el.bookingIdentityNote.textContent="Sign in before a live court hold can be created.";
       el.bookingIdentityAction.textContent="Sign in";
       el.bookingIdentityAction.disabled=false;
     }else{
-      el.bookingIdentityNote.textContent="Email sign-in delivery is not enabled in this staging environment.";
+      el.bookingIdentityNote.textContent="Player sign-in is not enabled in this environment.";
       el.bookingIdentityAction.textContent="Sign-in pending";
       el.bookingIdentityAction.disabled=true;
     }
@@ -127,12 +243,16 @@
 
   async function api(path,options={},auth=false){
     const opts={...options,headers:new Headers(options.headers||{})};
+    let requestToken=null;
     if(auth){
-      const token=await accessToken();
-      if(!token) throw Object.assign(new Error("Sign in is required."),{code:"AUTH_REQUIRED"});
-      opts.headers.set("authorization","Bearer "+token);
+      requestToken=await accessToken();
+      if(!requestToken) throw Object.assign(new Error("Sign in is required."),{code:"AUTH_REQUIRED"});
+      opts.headers.set("authorization","Bearer "+requestToken);
     }
     const res=await fetch(path,opts);
+    if(auth && res.status===401 && state.session?.accessToken===requestToken){
+      saveSession(null);
+    }
     let detail={};
     if(!res.ok){
       try{detail=await res.json();}catch{}
@@ -144,23 +264,39 @@
 
   async function loadPlatform(){
     try{state.platform=await api("/api/gac/platform-config");}
-    catch{state.platform={bookingEnabled:false,authConfigured:false,emailSignInEnabled:false,onlinePayments:false};}
+    catch{state.platform={bookingEnabled:false,authConfigured:false,emailSignInEnabled:false,googleSignInEnabled:false,onlinePayments:false};}
     const strip=q("#previewStrip");
-    if(strip) strip.textContent="Staging environment · "+(state.platform.bookingEnabled?"native booking enabled":"bookings disabled")+(state.platform.emailSignInEnabled?"":" · email sign-in pending");
+    if(strip) strip.textContent="Staging environment · "+(state.platform.bookingEnabled?"native booking enabled":"bookings disabled")+((state.platform.googleSignInEnabled||state.platform.emailSignInEnabled)?"":" · player sign-in pending");
     if(el.bookingPaymentStatus) el.bookingPaymentStatus.textContent=state.platform.onlinePayments?"Online payment enabled":"Online payments disabled in staging";
     renderBookingIdentity();
   }
 
-  function loading(){el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
-  async function search(){
+  function loading(){el.grid.setAttribute("aria-busy","true");el.count.textContent="Searching live inventory…";el.grid.innerHTML='<div class="skeleton"></div><div class="skeleton"></div>';}
+  async function search(options={}){
+    const revision=++state.searchRevision;
     const p={sport:state.sport,location:el.location.value.trim()||"Cascais",date:el.date.value,from:el.from.value,to:el.to.value};
+    if(!validSearchDate(p.date,el.date.min)){
+      el.grid.setAttribute("aria-busy","false");
+      if(el.dateStatus)el.dateStatus.textContent="Choose a valid date (today or later).";
+      toast("Choose a valid future date.");
+      return;
+    }
     if(state.geo){p.lat=String(state.geo.lat);p.lon=String(state.geo.lon);}
+    shadowSignal("search_requested");
+    if(el.dateStatus)el.dateStatus.textContent="Searching "+prettyDate(p.date)+"…";
     loading();
     try{
       const data=await api("/api/gac/search?"+new URLSearchParams(p).toString());
+      if(revision!==state.searchRevision)return; // stale request cannot overwrite newest date
+      if(el.dateStatus)el.dateStatus.textContent="Showing "+prettyDate(p.date);
       state.venues=data.venues||[];
       state.searchMeta=data.search||{};
       state.hasSearched=true;
+      shadowSignal("availability_result",{
+        venueCount:state.venues.length,
+        slotCount:state.venues.reduce((n,v)=>n+(v.slots||[]).filter(s=>s.status==="available").length,0),
+        sourceClass:data.mode==="platform"?"core_reported":"fixture_or_unknown"
+      });
       if(el.radiusNote){
         const s=data.search||{};
         el.radiusNote.textContent=s.radiusUsedKm
@@ -168,32 +304,51 @@
           : "";
       }
     }catch(err){
+      if(revision!==state.searchRevision)return;
+      if(el.dateStatus)el.dateStatus.textContent="Could not load "+prettyDate(p.date);
       state.venues=[];
       state.searchMeta={};
       state.hasSearched=true;
       if(el.radiusNote) el.radiusNote.textContent="";
       toast(err.message||"Live availability is temporarily unavailable.");
+    }finally {
+      if(revision===state.searchRevision)el.grid.setAttribute("aria-busy","false");
     }
     el.title.textContent=state.geo ? "Courts near you" : "Courts around "+p.location;
     render();
     renderWatchPrompt();
-    q("#resultsSection").scrollIntoView({behavior:"smooth",block:"start"});
+    const reduceMotion=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if(options.scroll!==false){
+      if(!options.initial) q("#resultsSection").scrollIntoView({behavior:reduceMotion?"auto":"smooth",block:"start"});
+    }
   }
 
   function useCurrentLocation(){
     if(!navigator.geolocation){toast("Location is not available in this browser.");return;}
+    // Only a direct Near me click requests consent. Typing a new location
+    // invalidates any pending device-position callback.
+    const epoch=++state.geoRequestEpoch;
     el.nearMe.disabled=true;el.nearMe.textContent="Locating…";
     navigator.geolocation.getCurrentPosition(
       pos=>{
-        state.geo={lat:pos.coords.latitude,lon:pos.coords.longitude};
-        el.location.value="Current location";
+        if(epoch!==state.geoRequestEpoch)return;
+        const lat=Number(pos?.coords?.latitude),lon=Number(pos?.coords?.longitude);
         el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
+        if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180){
+          toast("Location is invalid. Search by city instead.");
+          return;
+        }
+        state.geo={lat,lon};
+        el.location.value="Current location";
         if(el.radiusNote) el.radiusNote.textContent="Starting with nearby courts and expanding only if needed.";
         search();
       },
-      ()=>{
+      err=>{
+        if(epoch!==state.geoRequestEpoch)return;
         el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
-        toast("Could not access your location. Search by area instead.");
+        toast(err?.code===1
+          ?"Location permission was denied. You can search by city instead."
+          :"Could not access your location. Search by area instead.");
       },
       {enableHighAccuracy:false,timeout:8000,maximumAge:300000}
     );
@@ -239,7 +394,14 @@
     if(mapMode) requestAnimationFrame(renderMap);
   }
   function renderMap(){
-    if(!el.resultsMap||!window.L) return;
+    if(!el.resultsMap)return;
+    if(!window.L){
+      // Network/CDN/SRI failure: never leave the player staring at a blank map.
+      state.view="list";
+      updateView();
+      toast("Map is temporarily unavailable. Showing courts as a list.");
+      return;
+    }
     const venues=sortedVenues().filter(v=>Number.isFinite(v.lat)&&Number.isFinite(v.lon));
     if(!venues.length){
       state.view="list";
@@ -262,7 +424,7 @@
       const slots=filteredSlots(v).slice(0,3);
       const distance=v.distanceKm==null?"":(" · "+Number(v.distanceKm).toFixed(1)+" km");
       const popup='<div class="map-popup"><strong>'+esc(v.name)+'</strong><small>'+esc(v.area||"")+distance+'</small>'+
-        slots.map(s=>'<button type="button" class="map-slot" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'">'+esc(s.time)+' · '+esc(s.duration)+' min · '+money(s.price,s.currency)+'</button>').join("")+'</div>';
+        slots.map(s=>'<button type="button" class="map-slot" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'">'+esc(s.displayTime||s.time)+' · '+esc(s.duration)+' min · '+money(s.price,s.currency)+'</button>').join("")+'</div>';
       L.marker([v.lat,v.lon]).addTo(state.mapLayer).bindPopup(popup);
     });
     state.map.fitBounds(bounds,{padding:[28,28],maxZoom:14});
@@ -273,14 +435,14 @@
     const all=[];
     venues.forEach(v=>filteredSlots(v).forEach(s=>all.push({v,s})));
     if(!all.length){el.quickPicks.hidden=true;el.quickPicks.innerHTML="";return;}
-    const byEarliest=all.slice().sort((a,b)=>a.s.startsAt.localeCompare(b.s.startsAt))[0];
-    const byPrice=all.slice().sort((a,b)=>a.s.price-b.s.price||a.s.startsAt.localeCompare(b.s.startsAt))[0];
-    const byDistance=all.slice().sort((a,b)=>(a.v.distanceKm??9999)-(b.v.distanceKm??9999)||a.s.startsAt.localeCompare(b.s.startsAt))[0];
+    const byEarliest=all.slice().sort((a,b)=>Date.parse(a.s.startsAt)-Date.parse(b.s.startsAt))[0];
+    const byPrice=all.slice().sort((a,b)=>a.s.price-b.s.price||Date.parse(a.s.startsAt)-Date.parse(b.s.startsAt))[0];
+    const byDistance=all.slice().sort((a,b)=>(a.v.distanceKm??9999)-(b.v.distanceKm??9999)||Date.parse(a.s.startsAt)-Date.parse(b.s.startsAt))[0];
     const picks=[["Best match",byDistance],["Earliest",byEarliest],["Lowest price",byPrice]];
     const seen=new Set();
     el.quickPicks.innerHTML=picks.filter(([,x])=>x&& !seen.has(x.s.id) && seen.add(x.s.id)).map(([label,x])=>
       '<button class="quick-pick" type="button" data-v="'+esc(x.v.id)+'" data-s="'+esc(x.s.id)+'">'+
-      '<span>'+esc(label)+'</span><strong>'+esc(x.s.time)+' · '+money(x.s.price,x.s.currency)+'</strong><small>'+esc(x.v.name)+(x.v.distanceKm==null?"":" · "+Number(x.v.distanceKm).toFixed(1)+" km")+'</small></button>'
+      '<span>'+esc(label)+'</span><strong>'+esc(x.s.displayTime||x.s.time)+' · '+money(x.s.price,x.s.currency)+'</strong><small>'+esc(x.v.name)+(x.v.distanceKm==null?"":" · "+Number(x.v.distanceKm).toFixed(1)+" km")+'</small></button>'
     ).join("");
     el.quickPicks.hidden=!el.quickPicks.innerHTML;
     qa(".quick-pick",el.quickPicks).forEach(b=>b.addEventListener("click",()=>openVenue(b.dataset.v)));
@@ -312,7 +474,7 @@
       const tags=(v.tags||[]).map(t=>"<span>"+esc(t)+"</span>").join("");
       const slots=filteredSlots(v).map(s=>
         '<button class="slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'" '+(s.status!=="available"?"disabled":"")+'>'+
-        '<strong>'+esc(s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>'
+        '<strong>'+esc(s.displayTime||s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>'
       ).join("");
       const distance=v.distanceKm==null?"":'<span class="distance">'+Number(v.distanceKm).toFixed(1)+' km</span>';
       card.innerHTML='<div class="venue-top"><div><div class="venue-kicker">'+esc(v.area||"Connected venue")+' · '+esc(v.sport||state.sport)+'</div>'+
@@ -343,6 +505,7 @@
     e.preventDefault();
     const token=await accessToken();
     if(!token){el.watchDialog.close();openAuth("Sign in to save a Play Routine.");return;}
+    const epoch=state.authEpoch;
     const maxPrice=el.watchMaxPrice.value.trim();
     const payload={
       sport:state.sport,
@@ -362,15 +525,17 @@
     };
     try{
       const created=await api("/api/gac/play-routines",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)},true);
+      if(epoch!==state.authEpoch || !state.session)return;
       const routine=created.routine;
       let evaluated=null;
       try{
         evaluated=await api("/api/gac/play-routine-evaluate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routineId:routine.id})},true);
       }catch{}
+      if(epoch!==state.authEpoch || !state.session)return;
       el.watchDialog.close();
       toast(evaluated?.matches?.length?"Play Routine saved · matching courts found.":"Play Routine saved · I’ll keep looking.");
       await loadWatches(false);
-    }catch(err){toast(err.message||"Could not save this Play Routine.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not save this Play Routine.");}
   }
 
   function renderWatches(){
@@ -400,16 +565,19 @@
   }
 
   async function setRoutineStatus(routineId,status){
+    const epoch=state.authEpoch;
     try{
       await api("/api/gac/play-routines",{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({routineId,status})},true);
+      if(epoch!==state.authEpoch || !state.session)return;
       toast(status==="paused"?"Play Routine paused.":"Play Routine resumed.");
       await loadWatches(false);
-    }catch(err){toast(err.message||"Could not update Play Routine.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not update Play Routine.");}
   }
 
   async function loadWatches(openDialog=true){
     const token=await accessToken();
     if(!token){if(openDialog)openAuth("Sign in to manage your Play Routines.");return;}
+    const epoch=state.authEpoch;
     try{
       let routines=(await api("/api/gac/play-routines",{},true)).items||[];
       const due=routines.filter(r=>r.status==="active"&&(!r.next_check_at||new Date(r.next_check_at)<=new Date())).slice(0,4);
@@ -417,11 +585,13 @@
         await Promise.all(due.map(r=>api("/api/gac/play-routine-evaluate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({routineId:r.id})},true).catch(()=>null)));
         routines=(await api("/api/gac/play-routines",{},true)).items||[];
       }
+      const notifications=(await api("/api/gac/demand-notifications?limit=20",{},true)).items||[];
+      if(epoch!==state.authEpoch || !state.session)return;
       state.routines=routines;
-      state.watchNotifications=(await api("/api/gac/demand-notifications?limit=20",{},true)).items||[];
+      state.watchNotifications=notifications;
       renderWatches();
       if(openDialog) el.watchesDialog.showModal();
-    }catch(err){toast(err.message||"Could not load Play Routines.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not load Play Routines.");}
   }
 
   function openVenue(venueId){
@@ -435,9 +605,9 @@
     });
     const distance=v.distanceKm==null?"":'<span>'+Number(v.distanceKm).toFixed(1)+' km away</span>';
     const groups=[...byCourt.entries()].map(([court,items])=>{
-      const ordered=items.slice().sort((a,b)=>a.startsAt.localeCompare(b.startsAt)||a.duration-b.duration);
+      const ordered=items.slice().sort((a,b)=>Date.parse(a.startsAt)-Date.parse(b.startsAt)||a.duration-b.duration);
       return '<section class="venue-court-group"><div class="venue-court-head"><strong>'+esc(court)+'</strong><span>'+esc(ordered[0]?.indoor?"Indoor":"Outdoor")+'</span></div>'+
-        '<div class="slot-list venue-slot-list">'+ordered.map(s=>'<button class="slot venue-dialog-slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'"><strong>'+esc(s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>').join("")+'</div></section>';
+        '<div class="slot-list venue-slot-list">'+ordered.map(s=>'<button class="slot venue-dialog-slot" type="button" data-v="'+esc(v.id)+'" data-s="'+esc(s.id)+'"><strong>'+esc(s.displayTime||s.time)+'</strong><small>'+esc(s.duration)+' min · '+money(s.price,s.currency)+'</small></button>').join("")+'</div></section>';
     }).join("");
     el.venueDialogContent.innerHTML='<p class="eyebrow">VENUE</p><div class="venue-detail-title"><div><h2>'+esc(v.name)+'</h2><p>'+esc(v.area||"")+'</p></div>'+distance+'</div>'+
       '<div class="venue-tags">'+(v.tags||[]).map(t=>'<span>'+esc(t)+'</span>').join("")+'</div>'+
@@ -468,13 +638,22 @@
   async function selectSlot(venueId,slotId){
     const venue=state.venues.find(v=>v.id===venueId);
     const slot=venue&&venue.slots.find(s=>s.id===slotId);
-    if(!venue||!slot) return;
+    if(!venue||!slot||slot.status!=="available") return;
+    shadowSignal("slot_selected",{venueId:venue.id,slotId:slot.id,provider:slot.provider});
+    // Preserve the established single booking authority. A global staging
+    // booking flag never grants transaction rights for provider-owned slots.
+    // Do not create a Core hold or imply confirmed availability for them.
+    if(state.platform.bookingEnabled && slot.provider!=="fillmycourt"){
+      toast("This slot is not authorized for in-app booking. Check the club's official booking channel.");
+      return;
+    }
     state.selected={venue,slot};state.hold=null;el.holdBanner.hidden=true;el.progress.style.width="18%";setBookingStep("court");
     const button=q("#confirmBookingButton");
     button.onclick=null;
-    el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
+    el.summary.innerHTML="<strong>"+esc(venue.name)+"</strong><span>"+prettyDate(slot.date)+" · "+esc(slot.displayTime||slot.time)+" · "+slot.duration+" min"+(slot.courtName?" · "+esc(slot.courtName):"")+"</span><span>"+esc(state.sport)+" · "+money(slot.price,slot.currency)+" total</span>";
     renderBookingIdentity();
     if(!state.platform.bookingEnabled){
+      shadowSignal("booking_preview",{venueId:venue.id,slotId:slot.id,provider:slot.provider});
       q("#bookingHeading").textContent="Booking preview";
       el.summary.innerHTML+="<span>Preview only · no hold, club CRM record or payment will be created.</span>";
       button.textContent="Booking disabled in staging";
@@ -520,30 +699,99 @@
   function reset(){state.selected=null;state.hold=null;el.progress.style.width="18%";setBookingStep("court");setCheckoutEnabled(true);const button=q("#confirmBookingButton");button.disabled=false;button.type="submit";button.textContent="Confirm booking";button.onclick=null;}
   async function loadBookings(){
     if(!(await requireSignedIn())) return;
+    const epoch=state.authEpoch;
     try{
       const bookings=(await api("/api/gac/bookings",{},true)).bookings||[];
+      if(epoch!==state.authEpoch || !state.session)return;
       renderBookings(bookings);el.bookingsDialog.showModal();
-    }catch(err){toast(err.message||"Could not load bookings.");}
+    }catch(err){if(epoch===state.authEpoch)toast(err.message||"Could not load bookings.");}
+  }
+  async function openPersonalImports(){
+    if(!(await requireSignedIn()))return;
+    if(!personalImports){toast("Personal calendar import is unavailable.");return;}
+    const epoch=state.authEpoch,viewer=jwtPayload(state.session?.accessToken||"").sub;
+    if(!viewer)return;
+    renderPersonalImports(viewer);
+    if(epoch===state.authEpoch && state.session && el.importDialog)
+      el.importDialog.showModal();
+  }
+  function renderPersonalImports(viewer){
+    if(!personalImports||!el.importItems)return;
+    el.importItems.replaceChildren();
+    for(const booking of personalImports.list(viewer)){
+      const li=document.createElement("li");
+      li.className="booking-item";
+      const title=document.createElement("strong"),meta=document.createElement("p");
+      title.textContent=booking.title;
+      meta.textContent=new Date(booking.startsAt).toLocaleString([],{
+        weekday:"short",day:"numeric",month:"short",year:"numeric",
+        hour:"2-digit",minute:"2-digit"
+      })+" · "+booking.venue+" · "+booking.provider+" (user-imported, unverified)";
+      li.append(title,meta);el.importItems.append(li);
+    }
+  }
+  async function importPersonalCalendar(e){
+    e.preventDefault();
+    const epoch=state.authEpoch;
+    const token=await accessToken();
+    if(!token || !state.session || epoch!==state.authEpoch){openAuth("Sign in to review your own calendar.");return;}
+    const viewer=jwtPayload(token).sub, file=el.importFile?.files?.[0];
+    if(!viewer||!file||!el.importOwnData?.checked){
+      el.importStatus.textContent="Choose your own .ics calendar and confirm ownership.";return;
+    }
+    if(!/\.ics$/i.test(file.name)||file.size>window.GACPersonalBookingImports.MAX_BYTES){
+      el.importStatus.textContent="Choose a .ics file no larger than 128 KiB.";return;
+    }
+    el.importSubmit.disabled=true;
+    try{
+      const content=await file.text();
+      if(epoch!==state.authEpoch||viewer!==jwtPayload(state.session?.accessToken||"").sub)return;
+      const count=personalImports.importIcs({
+        ownerRef:viewer,provider:el.importProvider.value,content
+      });
+      el.importFile.value="";
+      el.importStatus.textContent=count+" calendar events loaded locally. No provider account connected, no available courts verified. Sign-out clears the data.";
+      renderPersonalImports(viewer);
+    }catch{
+      if(epoch===state.authEpoch)el.importStatus.textContent="Could not read this calendar: only valid UTC .ics events are supported. Nothing was uploaded.";
+    }finally{
+      if(epoch===state.authEpoch)el.importSubmit.disabled=false;
+    }
+  }
+  function clearPersonalCalendar(){
+    personalImports?.clear();
+    el.importItems?.replaceChildren();
+    if(el.importFile)el.importFile.value="";
+    if(el.importOwnData)el.importOwnData.checked=false;
+    if(el.importStatus)el.importStatus.textContent="Imported data cleared from this session.";
   }
   function renderBookings(bookings){
     if(!bookings.length){el.bookingsList.innerHTML='<div class="empty-state"><h3>No bookings yet</h3><p>Your GetACourt bookings will appear here.</p></div>';return;}
-    el.bookingsList.innerHTML=bookings.map(b=>'<article class="booking-item" data-id="'+esc(b.bookingId)+'"><div class="booking-item-head"><div><h3>'+esc((b.venue||{}).name||"Court booking")+'</h3><p>'+esc((b.slot||{}).date)+' · '+esc((b.slot||{}).time)+' · '+esc((b.slot||{}).duration)+' min</p><p>'+esc(b.reference||b.bookingId)+'</p></div><span class="booking-status">'+esc(b.status||"confirmed")+'</span></div>'+(b.status==="confirmed"?'<button class="cancel-button" type="button">Cancel booking</button>':"")+'</article>').join("");
+    el.bookingsList.innerHTML=bookings.map(b=>'<article class="booking-item" data-id="'+esc(b.bookingId)+'"><div class="booking-item-head"><div><h3>'+esc((b.venue||{}).name||"Court booking")+'</h3><p>'+esc((b.slot||{}).date)+' · '+esc((b.slot||{}).displayTime||(b.slot||{}).time)+' · '+esc((b.slot||{}).duration)+' min</p><p>'+esc(b.reference||b.bookingId)+'</p></div><span class="booking-status">'+esc(b.status||"confirmed")+'</span></div>'+(b.status==="confirmed"?'<button class="cancel-button" type="button">Cancel booking</button>':"")+'</article>').join("");
     qa(".cancel-button",el.bookingsList).forEach(b=>b.addEventListener("click",()=>cancelBooking(b.closest(".booking-item").dataset.id)));
   }
   async function cancelBooking(id){
+    const epoch=state.authEpoch;
     const item=el.bookingsList.querySelector('[data-id="'+CSS.escape(id)+'"]'),button=item&&item.querySelector(".cancel-button");
     if(button){button.disabled=true;button.textContent="Cancelling…";}
     try{
       await api("/api/gac/cancel",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({bookingId:id})},true);
+      if(epoch!==state.authEpoch || !state.session)return;
       if(item){const status=item.querySelector(".booking-status");if(status)status.textContent="cancelled";if(button)button.remove();}
       toast("Booking cancelled.");
-    }catch(err){if(button){button.disabled=false;button.textContent="Cancel booking";}toast(err.message||"Could not cancel booking.");}
+    }catch(err){
+      if(epoch!==state.authEpoch)return;
+      if(button){button.disabled=false;button.textContent="Cancel booking";}
+      toast(err.message||"Could not cancel booking.");
+    }
   }
 
   async function loadProfile(promptIfMissing=false){
     if(!state.session?.accessToken) return null;
+    const epoch=state.authEpoch;
     try{
       const data=await api("/api/gac/player-profile",{},true);
+      if(epoch!==state.authEpoch || !state.session)return null;
       state.profile=data.profile||null;
       if(state.profile){
         el.profileName.value=state.profile.full_name||"";
@@ -556,13 +804,15 @@
       if(promptIfMissing&&!state.profile) openProfile();
       return state.profile;
     }catch(err){
-      if(err.code==="AUTH_REQUIRED"||err.status===401) saveSession(null);
+      if(epoch===state.authEpoch && (err.code==="AUTH_REQUIRED"||err.status===401))saveSession(null);
       return null;
     }
   }
   async function openProfile(){
     if(!(await requireSignedIn())) return;
+    const epoch=state.authEpoch;
     const profile=await loadProfile(false);
+    if(epoch!==state.authEpoch || !state.session)return;
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
     if(!profile){
       el.profileName.value="";
@@ -581,6 +831,7 @@
     const fullName=el.profileName.value.trim();
     if(fullName.length<2){el.profileStatus.textContent="Please enter your name.";return;}
     const preferredSports=qa('input[name="preferredSport"]:checked',el.profileForm).map(x=>x.value);
+    const epoch=state.authEpoch;
     el.profileStatus.textContent="Saving…";
     try{
       const data=await api("/api/gac/player-profile",{
@@ -594,30 +845,47 @@
           marketingConsent:el.profileMarketing.checked
         })
       },true);
+      if(epoch!==state.authEpoch || !state.session)return;
       state.profile=data.profile||null;
       if(state.profile?.home_area) el.location.value=state.profile.home_area;
       updateAuthUI();
       el.profileStatus.textContent="Profile saved.";
       toast("Player profile saved.");
-      setTimeout(()=>el.profileDialog.close(),450);
-    }catch(err){el.profileStatus.textContent=err.message||"Could not save profile.";}
+      setTimeout(()=>{
+        if(epoch===state.authEpoch && el.profileDialog.open)el.profileDialog.close();
+      },450);
+    }catch(err){
+      if(epoch===state.authEpoch)el.profileStatus.textContent=err.message||"Could not save profile.";
+    }
   }
-  function signOut(){
+  async function signOut(){
+    const token=state.session?.accessToken;
+    // Privacy-first: invalidate the UI and all local tokens before network
+    // revocation. Never leave old account data visible while logout waits.
     saveSession(null);
-    if(el.profileDialog.open) el.profileDialog.close();
-    toast("Signed out.");
+    window.GACSignals?.clear();
+    let serverRevoked=true;
+    try{
+      if(token)await api("/api/gac/auth/sign-out",{
+        method:"POST",headers:{authorization:"Bearer "+token}
+      });
+    }catch{serverRevoked=false;}
+    toast(serverRevoked?"Signed out of GetACourt.":"Signed out on this device; remote session revocation is unconfirmed.");
   }
 
   function openAuth(message=""){
-    const enabled=state.platform.emailSignInEnabled===true;
-    if(el.authSubmit) el.authSubmit.disabled=!enabled;
-    el.authEmail.disabled=!enabled;
-    if(!enabled){
-      el.authStatus.textContent="Email sign-in delivery is not enabled in this staging environment.";
+    const emailEnabled=state.platform.emailSignInEnabled===true;
+    const googleEnabled=state.platform.googleSignInEnabled===true;
+    if(el.authSubmit)el.authSubmit.disabled=!emailEnabled;
+    if(el.authEmail)el.authEmail.disabled=!emailEnabled;
+    if(el.googleSignIn){el.googleSignIn.hidden=!googleEnabled;el.googleSignIn.disabled=!googleEnabled;}
+    if(el.emailSignInFields)el.emailSignInFields.hidden=!emailEnabled;
+    if(!emailEnabled&&!googleEnabled){
+      el.authStatus.textContent="Player sign-in is not enabled in this environment.";
     }else if(message){
       el.authStatus.textContent=message;
     }else{
-      el.authStatus.textContent="Use a secure email link to sign in to GetACourt.";
+      el.authStatus.textContent="Choose Google or email to sign in securely to GetACourt.";
     }
     const payload=state.session?.accessToken?jwtPayload(state.session.accessToken):{};
     if(payload.email) el.authEmail.value=payload.email;
@@ -637,9 +905,22 @@
     }catch(err){el.authStatus.textContent=err.message||"Could not send sign-in link.";}
   }
 
-  qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{qa(".sport-chip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.sport=b.dataset.sport;}));
-  qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{qa(".filter-pill").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.filter=b.dataset.filter;render();}));
+  function syncToggleState(selector,chosen){
+    qa(selector).forEach(button=>{
+      const selected=button===chosen;
+      button.classList.toggle("active",selected);
+      button.setAttribute("aria-pressed",String(selected));
+    });
+  }
+  qa(".sport-chip").forEach(b=>b.addEventListener("click",()=>{syncToggleState(".sport-chip",b);state.sport=b.dataset.sport;}));
+  qa(".filter-pill").forEach(b=>b.addEventListener("click",()=>{syncToggleState(".filter-pill",b);state.filter=b.dataset.filter;render();}));
   el.form.addEventListener("submit",e=>{e.preventDefault();search();});
+  // Native date inputs commit a calendar choice via change; re-query without
+  // requiring a second click on Find, and do not steal scroll position.
+  el.date.addEventListener("change",()=>{
+    if(validSearchDate(el.date.value,el.date.min))search({scroll:false});
+    else if(el.dateStatus)el.dateStatus.textContent="Choose a valid date (today or later).";
+  });
   el.refresh.addEventListener("click",search);
   el.sortSelect?.addEventListener("change",()=>{state.sort=el.sortSelect.value;render();});
   el.listView?.addEventListener("click",()=>{state.view="list";updateView();});
@@ -649,11 +930,22 @@
     if(b) selectSlot(b.dataset.v,b.dataset.s);
   });
   el.nearMe?.addEventListener("click",useCurrentLocation);
-  el.location.addEventListener("input",()=>{if(el.location.value!=="Current location"){state.geo=null;if(el.radiusNote)el.radiusNote.textContent="";}});
+  el.location.addEventListener("input",()=>{
+    if(el.location.value!=="Current location"){
+      state.geoRequestEpoch++; // discard any in-flight device position
+      state.geo=null;
+      el.nearMe.disabled=false;el.nearMe.textContent="◎ Near me";
+      if(el.radiusNote)el.radiusNote.textContent="";
+    }
+  });
   el.bookingForm.addEventListener("submit",confirm);
   el.dialog.addEventListener("close",()=>{clearInterval(state.timer);reset();});
   el.myBookings.addEventListener("click",loadBookings);
   el.closeBookings.addEventListener("click",()=>el.bookingsDialog.close());
+  el.importButton?.addEventListener("click",openPersonalImports);
+  el.closeImport?.addEventListener("click",()=>el.importDialog.close());
+  el.importForm?.addEventListener("submit",importPersonalCalendar);
+  el.importClear?.addEventListener("click",clearPersonalCalendar);
   el.myWatches?.addEventListener("click",()=>loadWatches(true));
   el.closeWatches?.addEventListener("click",()=>el.watchesDialog.close());
   el.watchPromptButton?.addEventListener("click",openWatchDialog);
@@ -662,12 +954,53 @@
   el.authButton.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth(""));
   el.bookingIdentityAction?.addEventListener("click",()=>state.session?.accessToken?openProfile():openAuth("Sign in before live booking."));
   el.authForm.addEventListener("submit",sendMagicLink);
+  el.googleSignIn?.addEventListener("click",startGoogleSignIn);
   el.closeAuth.addEventListener("click",()=>el.authDialog.close());
   el.profileForm.addEventListener("submit",saveProfile);
   el.closeProfile.addEventListener("click",()=>el.profileDialog.close());
   el.profileSignOut.addEventListener("click",signOut);
+  el.profileImportBookings?.addEventListener("click",()=>{
+    if(el.profileDialog?.open)el.profileDialog.close();
+    openPersonalImports();
+  });
+  window.addEventListener("storage",event=>{
+    if(event.key==="gac.session" && event.storageArea===localStorage)syncExternalSession();
+  });
+  window.addEventListener("pageshow",event=>{
+    if(event.persisted)syncExternalSession();
+  });
   el.closeVenue?.addEventListener("click",()=>el.venueDialog.close());
 
+  // Installation never activates live booking, payments, messages or caching.
+  let installPrompt=null;
+  const installCard=q("#installCard");
+  const installStatus=q("#installStatus");
+  const installed=window.matchMedia?.("(display-mode: standalone)")?.matches || navigator.standalone===true;
+  if(installed && installCard)installCard.hidden=true;
+  window.addEventListener("beforeinstallprompt",event=>{
+    event.preventDefault();
+    installPrompt=event;
+    if(installStatus)installStatus.textContent="Tap Install app to save GetACourt to your home screen.";
+  });
+  window.addEventListener("appinstalled",()=>{installPrompt=null;if(installCard)installCard.hidden=true;});
+  q("#installAppButton")?.addEventListener("click",async()=>{
+    if(installPrompt){
+      const prompt=installPrompt;installPrompt=null;
+      try{
+        await prompt.prompt();
+        const choice=await prompt.userChoice;
+        if(installStatus)installStatus.textContent=choice?.outcome==="accepted"?"Install requested; open from your home screen.":"Install not completed; use your browser install menu.";
+      }catch{if(installStatus)installStatus.textContent="Use your browser menu to add GetACourt to your home screen.";}
+    }else if(installStatus){
+      installStatus.textContent=/iPad|iPhone|iPod/i.test(navigator.userAgent||"")
+        ? "In Safari: Share → Add to Home Screen → Open as Web App → Add."
+        : "In your browser menu, choose Install app or Add to Home screen.";
+    }
+  });
   updateAuthUI();
-  loadPlatform().then(async()=>{if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}search();});
+  loadPlatform().then(async()=>{
+    await completeGoogleSignIn();
+    if(state.session?.accessToken){await loadProfile(false);await loadWatches(false);}
+    search({initial:true});
+  });
 })();

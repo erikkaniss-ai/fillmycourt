@@ -104,9 +104,11 @@ class V1Store:
             yield c
 
     @contextmanager
-    def user(self, user_id: str):
+    def user(self, user_id: str, *, readonly=False):
         """Run a transaction as Supabase's authenticated role so RLS applies."""
         with self.engine.begin() as c:
+            if readonly:
+                c.execute(text("set transaction isolation level repeatable read, read only"))
             c.execute(text("set local role authenticated"))
             c.execute(text("select set_config('request.jwt.claim.sub', :uid, true)"), {"uid": user_id})
             c.execute(text("select set_config('request.jwt.claim.role', 'authenticated', true)"))
@@ -249,6 +251,77 @@ class V1Store:
                           j.attempts,j.lease_token::text
             """), {"kinds": list(kinds), "lease": lease_seconds}))
             return r
+
+    def reserve_provider_request(self, provider_connection_id: str,
+                                 interval_seconds: int = 60) -> int:
+        """Reserve ONE future club API read across workers/streams.
+
+        Takes a PostgreSQL row lock before advancing the next-allowed time.
+        Wait >0 means NO request was reserved or made. A reservation may be
+        wasted on a failed call, deliberately favoring rate-limit safety.
+        """
+        from math import ceil
+        if type(interval_seconds) is not int or not 60 <= interval_seconds <= 3600:
+            raise DomainError("PROVIDER_RATE_POLICY", "Minimum 60-second interval.", 503)
+        with self.trusted() as c:
+            c.execute(text("""
+                insert into public.provider_request_windows(provider_connection_id)
+                values(cast(:pc as uuid)) on conflict do nothing
+            """), {"pc": provider_connection_id})
+            wait = c.execute(text("""
+                select case when next_allowed_at='-infinity'::timestamptz then 0
+                            else greatest(extract(epoch from next_allowed_at - clock_timestamp()),0)
+                       end
+                from public.provider_request_windows
+                where provider_connection_id=cast(:pc as uuid) for update
+            """), {"pc": provider_connection_id}).scalar_one()
+            if wait > 0:
+                return max(1, ceil(wait))
+            c.execute(text("""
+                update public.provider_request_windows
+                set next_allowed_at=clock_timestamp()+(:delay * interval '1 second'),
+                    updated_at=now()
+                where provider_connection_id=cast(:pc as uuid)
+            """), {"pc": provider_connection_id, "delay": interval_seconds})
+            return 0
+
+    def checkpoint_provider_job(self, c, job_id: str, lease_token: str,
+                                payload: dict, delay_seconds: int = 60) -> None:
+        """Checkpoint one observed page in the SAME DB tx as shadow records."""
+        if type(delay_seconds) is not int or not 60 <= delay_seconds <= 3600:
+            raise DomainError("PROVIDER_RATE_POLICY", "Invalid checkpoint delay.", 503)
+        saved = c.execute(text("""
+            update public.jobs
+            set payload=cast(:payload as jsonb),status='queued',
+                attempts=greatest(attempts-1,0),
+                due_at=clock_timestamp()+(:delay * interval '1 second'),
+                lease_until=null,lease_token=null,error=null,updated_at=now()
+            where id=cast(:job as uuid) and lease_token=cast(:lease as uuid)
+              and status='leased' and lease_until>clock_timestamp()
+            returning id
+        """), {"payload": json.dumps(payload), "delay": delay_seconds,
+               "job": job_id, "lease": lease_token}).scalar_one_or_none()
+        if saved is None:
+            raise DomainError("JOB_LEASE", "Provider job lease was superseded.", 409)
+
+    def defer_provider_job(self, job_id: str, lease_token: str,
+                           delay_seconds: int = 60) -> None:
+        """Rate-limit/202 deferral preserves current cursor and retry budget."""
+        if type(delay_seconds) is not int or not 1 <= delay_seconds <= 3600:
+            raise DomainError("PROVIDER_RATE_POLICY", "Invalid retry delay.", 503)
+        with self.trusted() as c:
+            saved = c.execute(text("""
+                update public.jobs
+                set status='queued',attempts=greatest(attempts-1,0),
+                    due_at=clock_timestamp()+(:delay * interval '1 second'),
+                    lease_until=null,lease_token=null,updated_at=now()
+                where id=cast(:job as uuid) and lease_token=cast(:lease as uuid)
+                  and status='leased'
+                returning id
+            """), {"job":job_id, "lease":lease_token,
+                   "delay":delay_seconds}).scalar_one_or_none()
+            if saved is None:
+                raise DomainError("JOB_LEASE", "Cannot defer superseded job.", 409)
 
     def finish_job(self, job_id: str, lease_token: str, result: dict):
         with self.trusted() as c:

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "candidate": {
+    "sha": "be691ef98b5c2adb6ff412b39fae1d44305fee08",
+    "pr": 5,
+    "branch": "get/release-candidate-mvp-qa-04",
+    "state": "open",
+    "draft": true,
+    "merged": false
+  },
+  "deployment": null,
+  "evidence": [],
+  "goRecords": []
+}
