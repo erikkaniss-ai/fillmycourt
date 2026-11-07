@@ -662,3 +662,114 @@ test("Stale timezone-less Calendar body preserves a newer valid grid and session
  assert.equal(fixture.el["#error"].hidden,true);
  assertCalendarSession(fixture);
 });
+
+// Core bookings with status held occupy time even when no active hold row exists.
+function heldBookingSnapshot(start,end){
+ const body=temporalSnapshot("bookings",start,end);
+ body.bookings[0].status="held";
+ return body;
+}
+const heldTemporalCases=validInstants.filter(data=>[
+ "ordinary Z","ordinary explicit offset","cross-day clipping","spring jump",
+ "fall repeated hour","Core microseconds within one millisecond",
+ "Core microseconds past half-hour boundary"].includes(data.name));
+assert.equal(heldTemporalCases.length,7);
+for(const data of heldTemporalCases)test(`Held booking preserves ${data.name} as held occupancy`,async()=>{
+ const day={...coveredToday,date:data.date||today.date,
+  day_start:data.dayStart||today.day_start,day_end:data.dayEnd||today.day_end,
+  courts:coveredToday.courts.map(court=>({...court,sellable_windows:[{
+   starts_at:data.dayStart||today.day_start,ends_at:data.dayEnd||today.day_end}]}))};
+ const fixture=await calendarFixture(()=>ok(heldBookingSnapshot(data.start,data.end)),day);
+ await fixture.visit();
+ const grid=fixture.el["#calendarTimeline"].innerHTML;
+ assert.equal(fixture.el["#error"].hidden,true);
+ assert.equal((grid.match(/class="lane-cell held"/g)||[]).length,data.occupied||2,
+  "A held booking must occupy the same Core instants without becoming free");
+ assert.equal((grid.match(/class="lane-cell open"/g)||[]).length,
+  (data.cells||48)-(data.occupied||2));
+ assert.doesNotMatch(grid,/class="lane-cell booked"/);
+ assert.match(grid,/<span>Hold<\/span>/,"Held booking presentation must say Hold");
+ assert.match(grid,/Active booking hold/);
+ assert.match(grid,new RegExp(`grid-template-columns:repeat\\(${data.cells||48},`));
+ assertCalendarSession(fixture);
+});
+
+test("Held booking remains occupied on an unpriced court without tariff fallback",async()=>{
+ const day={...coveredToday,summary:{...coveredToday.summary,courts_with_rate_coverage:0},
+  courts:coveredToday.courts.map(court=>({...court,has_rate_coverage:false,sellable_windows:[]}))};
+ const fixture=await calendarFixture(()=>ok(heldBookingSnapshot(
+  "2026-10-19T09:00:00+01:00","2026-10-19T10:00:00+01:00")),day);
+ await fixture.visit();
+ const grid=fixture.el["#calendarTimeline"].innerHTML;
+ assert.equal((grid.match(/class="lane-cell held"/g)||[]).length,2);
+ assert.equal((grid.match(/class="lane-cell closed"/g)||[]).length,46);
+ assert.doesNotMatch(grid,/lane-cell open|lane-cell booked/);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
+});
+
+test("Held bookings coexist with confirmed pending active holds blocks and nonoccupying history",async()=>{
+ const row=(status,start,end)=>({court_id:rowCourt,status,
+  starts_at:`2026-10-19T${start}:00+01:00`,ends_at:`2026-10-19T${end}:00+01:00`});
+ const body={bookings:[row("held","09:00","10:00"),row("confirmed","10:00","11:00"),
+  row("pending_payment","11:00","12:00"),row("cancelled","13:00","14:00"),
+  row("fictional_history","14:00","15:00")],holds:[row("held","12:00","12:30")],
+  blocks:[row("blocked","12:30","13:00")]};
+ const fixture=await calendarFixture(()=>ok(body));await fixture.visit();
+ const grid=fixture.el["#calendarTimeline"].innerHTML;
+ assert.equal((grid.match(/class="lane-cell booked"/g)||[]).length,4);
+ assert.equal((grid.match(/class="lane-cell blocked"/g)||[]).length,1);
+ assert.equal((grid.match(/class="lane-cell held"/g)||[]).length,3);
+ assert.equal((grid.match(/class="lane-cell open"/g)||[]).length,40);
+ assert.doesNotMatch(grid,/fictional_history|cancelled/);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
+});
+
+test("Held booking overlap retains block priority and half-open interval edges",async()=>{
+ const body=heldBookingSnapshot("2026-10-19T09:00:00+01:00","2026-10-19T10:00:00+01:00");
+ body.blocks.push({court_id:rowCourt,starts_at:"2026-10-19T09:30:00+01:00",
+  ends_at:"2026-10-19T10:00:00+01:00",reason:"FICTIONAL OVERLAPPING BLOCK"});
+ const fixture=await calendarFixture(()=>ok(body));await fixture.visit();
+ const grid=fixture.el["#calendarTimeline"].innerHTML;
+ assert.equal((grid.match(/class="lane-cell blocked"/g)||[]).length,1);
+ assert.equal((grid.match(/class="lane-cell held"/g)||[]).length,1);
+ assert.equal((grid.match(/class="lane-cell open"/g)||[]).length,46);
+ assert.match(grid,/FICTIONAL OVERLAPPING BLOCK/);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
+});
+
+test("Older malformed Calendar cannot erase a newer held-booking grid or revoke session",async()=>{
+ let completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});
+ const started=new Promise(done=>{notifyOlder=done;});
+ const fixture=await calendarFixture(n=>n===1?{ok:true,status:200,
+  json:()=>{notifyOlder();return older;}}:ok(heldBookingSnapshot(
+   "2026-10-19T09:00:00+01:00","2026-10-19T10:00:00+01:00")));
+ const pending=fixture.visit();await started;await fixture.visit();
+ const newer=fixture.el["#calendarTimeline"].innerHTML;
+ // The old body is malformed; its late validation failure must also stay stale.
+ completeOlder({bookings:[],holds:[]});await pending;
+ assert.equal(fixture.el["#calendarTimeline"].innerHTML,newer);
+ assert.equal((newer.match(/class="lane-cell held"/g)||[]).length,2);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
+});
+
+test("Older held-booking response cannot overwrite newer confirmed occupancy",async()=>{
+ let completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});
+ const started=new Promise(done=>{notifyOlder=done;});
+ const fixture=await calendarFixture(n=>{if(n===1){notifyOlder();return older;}
+  return ok(occupiedCalendar("FICTIONAL NEWER CONFIRMED"));});
+ const pending=fixture.visit();await started;await fixture.visit();
+ const newer=fixture.el["#calendarTimeline"].innerHTML;
+ completeOlder(ok(heldBookingSnapshot("2026-10-19T09:00:00+01:00","2026-10-19T10:00:00+01:00")));
+ await pending;
+ assert.equal(fixture.el["#calendarTimeline"].innerHTML,newer);
+ assert.match(newer,/FICTIONAL NEWER CONFIRMED/);
+ assert.equal((newer.match(/class="lane-cell booked"/g)||[]).length,48);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
+});
