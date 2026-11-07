@@ -84,7 +84,7 @@ const occupiedCalendar=(source="FICTIONAL OCCUPANCY")=>({bookings:[{
  court_id:"fictional-covered-court",starts_at:today.day_start,ends_at:today.day_end,
  status:"confirmed",source}],holds:[],blocks:[]});
 
-async function calendarFixture(reply){
+async function calendarFixture(reply, day=coveredToday){
  const el=Object.fromEntries(ids.map(id=>[id,make()]));
  const nav=["today","calendar","revenue"].map(view=>make({view}));
  const session=new Map([["fill.access","fixture-valid-session"]]),local=new Map();
@@ -103,7 +103,7 @@ async function calendarFixture(reply){
   if(path==="/api/me")return ok({user:{email:"qa@example.invalid"}});
   if(path==="/api/fmc/organizations")return ok({items:[{
    id:"fixture-org",name:"FICTIONAL CLUB",role:"support"}]});
-  if(path.startsWith("/api/fmc/fixture-org/today"))return ok(coveredToday);
+  if(path.startsWith("/api/fmc/fixture-org/today"))return ok(day);
   if(path.startsWith("/api/fmc/fixture-org/calendar"))return reply(++requests);
   throw Error("Unexpected fictional request");
  }};
@@ -574,4 +574,91 @@ test("Older Calendar 403 preserves newer populated Today Revenue and Calendar re
  assert.equal(calls.length,5,"A stale denial must not retry or fall back");
  assert.equal(calendarRequests,2);
  assert.equal(calls.every(call=>call.method==="GET"),true);
+});
+
+// Calendar instants must identify real aware Core datetimes, not Date.parse guesses.
+const temporalRows=["bookings","holds","blocks"];
+function temporalSnapshot(kind,start,end){
+ const body=emptyCalendar();
+ body[kind].push({court_id:rowCourt,starts_at:start,ends_at:end,
+  ...(kind==="bookings"?{status:"confirmed",source:"FICTIONAL TEMPORAL ROW"}:{})});
+ return body;
+}
+const malformedInstants=[
+ ["date-only","2026-10-25","2026-10-26"],
+ ["offsetless repeated hour","2026-10-25T01:30:00","2026-10-25T02:30:00"],
+ ["normalized February day","2026-02-30T09:00:00Z","2026-02-30T10:00:00Z"],
+ ["non-leap February 29","2026-02-29T09:00:00Z","2026-02-29T10:00:00Z"],
+ ["normalized April day","2026-04-31T09:00:00+01:00","2026-04-31T10:00:00+01:00"],
+ ["hour 24","2026-10-19T24:00:00Z","2026-10-20T01:00:00Z"],
+ ["offset without colon","2026-10-19T09:00:00+0100","2026-10-19T10:00:00+0100"],
+ ["space separator","2026-10-19 09:00:00Z","2026-10-19 10:00:00Z"],
+ ["lowercase spelling","2026-10-19t09:00:00z","2026-10-19t10:00:00z"],
+ ["missing seconds","2026-10-19T09:00Z","2026-10-19T10:00Z"],
+ ["invalid minute","2026-10-19T09:60:00Z","2026-10-19T11:00:00Z"],
+ ["invalid offset","2026-10-19T09:00:00+24:00","2026-10-19T10:00:00+24:00"],
+ ["unsupported precision","2026-10-19T09:00:00.0000001Z","2026-10-19T10:00:00.0000001Z"],
+];
+for(const kind of temporalRows)for(const [name,start,end] of malformedInstants){
+ test(`Calendar ${kind} rejects ${name} through load/error/cleared-grid`,async()=>{
+  await assertMalformedOccupancyRow(temporalSnapshot(kind,start,end));
+ });
+}
+// A valid start must not hide an invalid end; both boundaries are mandatory.
+for(const kind of temporalRows)test(`Calendar ${kind} rejects impossible end with valid start`,async()=>{
+ await assertMalformedOccupancyRow(temporalSnapshot(kind,
+  "2026-02-28T09:00:00Z","2026-02-30T10:00:00Z"));
+});
+
+const validInstants=[
+ {name:"ordinary Z",start:"2026-10-19T08:00:00Z",end:"2026-10-19T09:00:00Z"},
+ {name:"ordinary explicit offset",start:"2026-10-19T09:00:00+01:00",end:"2026-10-19T10:00:00+01:00"},
+ {name:"negative offset",start:"2026-10-19T04:00:00-04:00",end:"2026-10-19T05:00:00-04:00"},
+ {name:"cross-day clipping",start:"2026-10-18T23:30:00+01:00",end:"2026-10-19T00:30:00+01:00",occupied:1},
+ {name:"leap day",date:"2028-02-29",dayStart:"2028-02-29T00:00:00Z",dayEnd:"2028-03-01T00:00:00Z",
+  start:"2028-02-29T09:00:00Z",end:"2028-02-29T10:00:00Z"},
+ {name:"spring jump",date:"2026-03-29",dayStart:"2026-03-29T00:00:00+00:00",dayEnd:"2026-03-30T00:00:00+01:00",
+  start:"2026-03-29T00:30:00+00:00",end:"2026-03-29T02:30:00+01:00",cells:46},
+ {name:"fall repeated hour",date:"2026-10-25",dayStart:"2026-10-25T00:00:00+01:00",dayEnd:"2026-10-26T00:00:00+00:00",
+  start:"2026-10-25T01:30:00+01:00",end:"2026-10-25T01:30:00+00:00",cells:50},
+ ...Array.from({length:6},(_,i)=>({name:`Core fraction ${i+1} digits`,
+  start:`2026-10-19T08:00:00.${"123456".slice(0,i+1)}Z`,
+  end:`2026-10-19T09:00:00.${"123456".slice(0,i+1)}Z`,occupied:3})),
+ {name:"Core microseconds within one millisecond",start:"2026-10-19T08:00:00.000001Z",end:"2026-10-19T08:00:00.000002Z",occupied:1},
+ {name:"Core microseconds past half-hour boundary",start:"2026-10-19T08:29:59.999999Z",end:"2026-10-19T08:30:00.000001Z",occupied:2},
+];
+for(const kind of temporalRows)for(const data of validInstants){
+ test(`Calendar ${kind} preserves ${data.name} occupancy and real-day grid`,async()=>{
+  const day={...coveredToday,date:data.date||today.date,
+   day_start:data.dayStart||today.day_start,day_end:data.dayEnd||today.day_end,
+   courts:coveredToday.courts.map(court=>({...court,sellable_windows:[{
+    starts_at:data.dayStart||today.day_start,ends_at:data.dayEnd||today.day_end}]}))};
+  const fixture=await calendarFixture(()=>ok(temporalSnapshot(kind,data.start,data.end)),day);
+  await fixture.visit();
+  const grid=fixture.el["#calendarTimeline"].innerHTML;
+  assert.equal(fixture.el["#error"].hidden,true,"Valid aware Core interval must load");
+  assert.match(grid,new RegExp(`grid-template-columns:repeat\\(${data.cells||48},`));
+  const occupiedClass={bookings:"booked",holds:"held",blocks:"blocked"}[kind];
+  assert.equal((grid.match(new RegExp(`class="lane-cell ${occupiedClass}"`,"g"))||[]).length,
+   data.occupied||2,"No valid occupancy may disappear or become free");
+  assert.equal((grid.match(/class="lane-cell open"/g)||[]).length,
+   (data.cells||48)-(data.occupied||2));
+  assertCalendarSession(fixture);
+ });
+}
+
+test("Stale timezone-less Calendar body preserves a newer valid grid and session",async()=>{
+ let completeOlder,notifyOlder;
+ const older=new Promise(done=>{completeOlder=done;});
+ const started=new Promise(done=>{notifyOlder=done;});
+ const fixture=await calendarFixture(n=>n===1?{ok:true,status:200,
+  json:()=>{notifyOlder();return older;}}:ok(occupiedCalendar("FICTIONAL AWARE NEWER")));
+ const pending=fixture.visit();await started;await fixture.visit();
+ const grid=fixture.el["#calendarTimeline"].innerHTML;
+ assert.match(grid,/FICTIONAL AWARE NEWER/);
+ completeOlder(temporalSnapshot("bookings","2026-10-25T01:30:00","2026-10-25T02:30:00"));
+ await pending;
+ assert.equal(fixture.el["#calendarTimeline"].innerHTML,grid);
+ assert.equal(fixture.el["#error"].hidden,true);
+ assertCalendarSession(fixture);
 });
