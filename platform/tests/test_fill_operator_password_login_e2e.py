@@ -32,6 +32,19 @@ def test_operator_password_signin_then_get_only_workspace_and_logout():
         with sync_playwright() as p:
             browser=p.chromium.launch()
             page=browser.new_page(viewport={"width": 1200, "height":900})
+            # Page-only initial date metadata; Date.now/parse, explicit construction,
+            # timers and the host/process clock retain their native behavior.
+            page.add_init_script("""
+                (() => {
+                    const NativeDate = Date;
+                    const fixtureInitialTime = NativeDate.parse("2026-10-18T12:00:00Z");
+                    window.Date = new Proxy(NativeDate, {
+                        construct(target, args, newTarget) {
+                            return Reflect.construct(target, args.length ? args : [fixtureInitialTime], newTarget);
+                        }
+                    });
+                })();
+            """)
             def route_handler(route):
                 nonlocal attempts
                 req=route.request

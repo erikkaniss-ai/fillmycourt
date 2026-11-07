@@ -85,6 +85,19 @@ def test_fill_operator_readonly_browser_flow(tmp_path):
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page(viewport={"width": 1440, "height": 1000})
+            # Page-only initial date metadata; Date.now/parse, explicit construction,
+            # timers and the host/process clock retain their native behavior.
+            page.add_init_script("""
+                (() => {
+                    const NativeDate = Date;
+                    const fixtureInitialTime = NativeDate.parse("2026-10-16T12:00:00Z");
+                    window.Date = new Proxy(NativeDate, {
+                        construct(target, args, newTarget) {
+                            return Reflect.construct(target, args.length ? args : [fixtureInitialTime], newTarget);
+                        }
+                    });
+                })();
+            """)
             page.add_init_script("sessionStorage.setItem('fill.access', 'fixture-session')")
 
             def fulfill(route):
