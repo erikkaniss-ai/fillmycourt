@@ -304,6 +304,24 @@
     return hour * 60 + minute;
   }
 
+  function calendarInstant(value) {
+    // Core aware datetimes use seconds, optional Python microseconds, and an
+    // explicit offset. Date.parse alone accepts local/normalized invalid dates.
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|[+-](\d{2}):(\d{2}))$/.exec(value);
+    if (!match) return null;
+    const [, year, month, day, hour, minute, second, fraction = "", ,
+      offsetHour = "0", offsetMinute = "0"] = match;
+    const y = Number(year), m = Number(month), d = Number(day);
+    const leap = y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (y < 1 || m < 1 || m > 12 || d < 1 || d > days[m - 1] ||
+        Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59 ||
+        Number(offsetHour) > 23 || Number(offsetMinute) > 59) return null;
+    const milliseconds = Date.parse(value);
+    if (!Number.isFinite(milliseconds)) return null;
+    return {milliseconds, submillisecond: Number(fraction.padEnd(6, "0").slice(3))};
+  }
+
   function validCalendarSnapshot(calendar) {
     if (!calendar || typeof calendar !== "object" || Array.isArray(calendar) ||
         !["bookings", "holds", "blocks"].every((key) => Array.isArray(calendar[key]))) return false;
@@ -312,8 +330,9 @@
           typeof row.court_id !== "string" || row.court_id.length === 0 ||
           typeof row.starts_at !== "string" || typeof row.ends_at !== "string" ||
           (booking && typeof row.status !== "string")) return false;
-      const start = Date.parse(row.starts_at), end = Date.parse(row.ends_at);
-      return Number.isFinite(start) && Number.isFinite(end) && end > start;
+      const start = calendarInstant(row.starts_at), end = calendarInstant(row.ends_at);
+      return Boolean(start && end && (end.milliseconds > start.milliseconds ||
+        (end.milliseconds === start.milliseconds && end.submillisecond > start.submillisecond)));
     };
     return calendar.bookings.every((row) => validRow(row, true)) &&
       calendar.holds.every((row) => validRow(row, false)) &&
@@ -399,9 +418,12 @@
         .map((row) => ({...row, kind: "booking"})),
       ...(state.calendar?.holds || []).map((row) => ({...row, kind: "hold", status: "held"})),
     ].map((row) => {
-      const from = Date.parse(row.starts_at);
-      const until = Date.parse(row.ends_at);
-      if (!Number.isFinite(from) || !Number.isFinite(until)) return null;
+      const start = calendarInstant(row.starts_at), end = calendarInstant(row.ends_at);
+      if (!start || !end) return null; // Whole snapshot was already validated.
+      // Round outward only for the millisecond renderer so sub-ms occupancy
+      // cannot vanish or lose the next half-hour cell at an exact boundary.
+      const from = start.milliseconds;
+      const until = end.milliseconds + (end.submillisecond > 0 ? 1 : 0);
       const first = Math.max(from, dayStart);
       const last = Math.min(until, dayEnd);
       return last > first ? {...row, first, last} : null;
