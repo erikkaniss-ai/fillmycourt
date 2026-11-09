@@ -326,6 +326,11 @@ async function setup(plans, options = {}) {
   vm.runInContext(sources.background, background, {filename: sourcePaths.background});
   const responses = [];
   const send = (message, popup = false, senderChanges = {}) => new Promise(resolve => {
+    if (message.action === 'autoSearchAdditionalFromGet' && options.additionalResult) {
+      const result = options.additionalResult(clock);
+      clock.setTimeout(() => resolve(result), 1);
+      return;
+    }
     const sender = {id: 'fictional-reader', frameId: 0,
       url: popup ? chrome.runtime.getURL('popup.html') : receiver,
       ...(popup ? {} : {tab: {id: 1}}), ...senderChanges};
@@ -342,6 +347,8 @@ async function setup(plans, options = {}) {
   const snapshot = () => ({at: clock.elapsed(), status: byId('searchStatus').textContent,
     detail: byId('personalStatus').textContent,
     renderedOffers: renderCounts.at(-1)?.count || 0,
+    sourceStatus: Object.fromEntries(byId('sourceStatus').children.map(card =>
+      card.children.map(child => child.textContent))),
     autoBusy: vm.runInContext('autoBusy', background),
     ownedTabs: tabs.size, replies: responses.map(reply => ({at: reply.at, action: reply.action}))});
   return {clock, trace, responses, snapshot, submit, form, send, controls, requests, pageWindow, chrome, session,
@@ -350,6 +357,92 @@ async function setup(plans, options = {}) {
 
 
 const mainResponse = run => run.responses.find(row => row.action === 'autoSearchPlaytomicClubsFromGet');
+
+function additionalObservation(clock, provider, age = 0) {
+  const urls = {
+    matchi: 'https://www.matchi.se/facilities/fictional-club',
+    tiesports: 'https://clubs.tiesports.com/en/fictional/booking'
+  };
+  const observation = fixtureObservation(clock, {url: urls[provider], plan: {}}, query);
+  return {provider, status: 'observed', observation: {...observation, provider, sport: 'Padel',
+    capturedAt: new Date(clock.now - age).toISOString()}};
+}
+
+const unrelatedFailure = {provider: 'smashpro', status: 'unavailable', code: 'SITE_ACCESS_REQUIRED'};
+
+function additionalResult(...sources) {
+  return {version: '0.4.3', status: 'partial', sources};
+}
+
+test('at exact expiry the last additional card, source claim and aggregate success clear together', async () => {
+  const run = await setup([], {
+    additionalResult: clock => additionalResult(additionalObservation(clock, 'matchi'), unrelatedFailure)
+  });
+  await run.submit();
+  await run.clock.advanceTo(59999);
+  assert.equal(run.snapshot().renderedOffers, 1);
+  assert.match(run.snapshot().sourceStatus.MATCHi, /Player-visible offer loaded/);
+  assert.match(run.snapshot().status, /Retrieved 1 additional/);
+  assert.match(run.snapshot().sourceStatus.Smashpro, /site permission not granted.*Reader 0\.4\.3/);
+
+  await run.clock.advanceTo(60000);
+  assert.equal(run.snapshot().renderedOffers, 0);
+  assert.match(run.snapshot().sourceStatus.MATCHi, /observation expired.*availability unverified/i);
+  assert.match(run.snapshot().status, /expired.*search again/i);
+  assert.match(run.snapshot().sourceStatus.Smashpro, /site permission not granted.*Reader 0\.4\.3/);
+});
+
+test('expiry removes only that source claim and replaces the obsolete aggregate count', async () => {
+  const run = await setup([], {additionalResult: clock => additionalResult(
+    additionalObservation(clock, 'matchi', 30000), additionalObservation(clock, 'tiesports'), unrelatedFailure
+  )});
+  await run.submit();
+  await run.clock.advanceTo(29999);
+  assert.equal(run.snapshot().renderedOffers, 2);
+  assert.match(run.snapshot().status, /Retrieved 2 additional/);
+
+  await run.clock.advanceTo(30000);
+  assert.equal(run.snapshot().renderedOffers, 1);
+  assert.match(run.snapshot().sourceStatus.MATCHi, /observation expired/i);
+  assert.match(run.snapshot().sourceStatus['TiePlayer / TieSports'], /Player-visible offer loaded/);
+  assert.match(run.snapshot().status, /Fresh player-visible court offers remain/i);
+  assert.match(run.snapshot().sourceStatus.Smashpro, /site permission not granted/);
+
+  run.form.dispatchEvent({type: 'input'});
+  const reset = run.snapshot();
+  assert.equal(reset.renderedOffers, 0);
+  assert.match(reset.status, /Filters changed/);
+  assert.match(reset.sourceStatus.MATCHi, /client booking UI read not yet live-accepted/);
+  assert.match(reset.sourceStatus.Smashpro, /only claimed/);
+  await run.clock.advanceTo(60000);
+  assert.equal(run.snapshot().status, reset.status);
+});
+
+for (const [label, result, detail] of [
+  ['error', {status: 'unavailable', code: 'SITE_ACCESS_REQUIRED'}, /site access once.*Reader 0\.4\.3/],
+  ['zero reviewed clubs', {status: 'partial', sources: []}, /No availability claim/],
+  ['zero accepted offers', {status: 'partial', sources: [
+    {provider: 'playtomic', status: 'unavailable', code: 'SCHEDULE_NOT_READY'}
+  ]}, /require a valid login/]
+]) {
+  test('late Playtomic '+label+' preserves independent current offers and its own diagnostic', async () => {
+    const run = await setup([{load: 14000}], {additionalResult: clock => additionalResult(
+      additionalObservation(clock, 'matchi'), unrelatedFailure
+    )});
+    await run.submit();
+    await run.clock.advanceTo(100);
+    assert.match(run.snapshot().status, /Retrieved 1 additional/);
+    run.pageWindow.dispatchEvent({type: 'gac:auto-search-response', detail: {
+      nonce: run.requests[0].nonce, result: {...result, version: '0.4.3'}
+    }});
+
+    assert.equal(run.snapshot().renderedOffers, 1);
+    assert.match(run.snapshot().sourceStatus.MATCHi, /Player-visible offer loaded/);
+    assert.match(run.snapshot().status, /Fresh player-visible court offers remain/i);
+    assert.match(run.snapshot().detail, detail);
+    assert.match(run.snapshot().sourceStatus.Smashpro, /site permission not granted/);
+  });
+}
 
 test('actual source returns fresh partial results and retires owned work before the unchanged page deadline', async () => {
   const run = await setup(Array.from({length: 4}, () => ({load: 14000})));

@@ -72,6 +72,15 @@ function finishWaitingStatus(){
   if(!pendingAuto&&!additionalPending&&!observations.size)
     status.textContent='Search finished without verified offers. Reader compatibility or connection remains unverified; other courts may exist.';
 }
+const remainingOffersStatus='Fresh player-visible court offers remain. Recheck on the official booking site.';
+function showPlaytomicFailure(message){
+  const now=Date.now();
+  // A response may run before the expiry timer after the page was inactive.
+  if([...observations.values()].some(record=>Date.parse(record.expiresAt)<=now)){
+    paint();return;
+  }
+  status.textContent=observations.size?remainingOffersStatus:message;
+}
 function autoError(result){
   const code=readerCode(result);
   return ({
@@ -175,17 +184,17 @@ window.addEventListener('gac:auto-search-response',event=>{
         ' club(s) incomplete or unverified; '+(timeLimited?'search time limit reached. ':'')+
         'No provider-wide sold-out conclusion.';
     }else if(checked.length===0){
-      status.textContent='No reviewed Playtomic club in this exact area yet. Try Cascais, Parede, Carcavelos or Alcabideche.';
+      showPlaytomicFailure('No reviewed Playtomic club in this exact area yet. Try Cascais, Parede, Carcavelos or Alcabideche.');
       personalStatus.textContent='No availability claim was made for unsupported areas.';
     }else{
-      status.textContent='Checked '+checked.length+
-        ' reviewed Playtomic club page(s), but no complete priced offer was verified.';
+      showPlaytomicFailure('Checked '+checked.length+
+        ' reviewed Playtomic club page(s), but no complete priced offer was verified.');
       personalStatus.textContent=timeLimited?autoError({code:'SEARCH_DEADLINE'}):
         'One or more clubs require a valid login, compatible booking layout or a different date. Other slots may exist.';
     }
   }else{
+    showPlaytomicFailure('No verified available offers received. Other courts may exist.');
     personalStatus.textContent=autoError(detail.result)+readerVersion(detail.result);
-    status.textContent='No verified available offers received. Other courts may exist.';
   }
 });
 
@@ -227,7 +236,7 @@ window.addEventListener('gac:additional-sources-response',event=>{
       let raw;
       try{raw=JSON.stringify(row.observation);}catch{raw='';}
       if(raw&&importPersonal(raw,pending.query,pending.revision,row.provider)){
-        accepted++;additionalStates.set(row.provider,'Fresh player-visible priced observation · partial'+version);
+        accepted++;additionalStates.delete(row.provider);
       }else additionalStates.set(row.provider,'Client observation rejected; availability unverified'+version);
     }else{
       const reasons={
@@ -303,7 +312,16 @@ function paint(){
     renderSources();return;
   }
   const now=Date.now();
-  for(const [key,v] of observations)if(Date.parse(v.expiresAt)<=now)observations.delete(key);
+  let expired=false;
+  for(const [key,record] of observations){
+    if(Date.parse(record.expiresAt)>now)continue;
+    observations.delete(key);
+    if(!additionalStates.has(record.sourceId))
+      additionalStates.set(record.sourceId,'Player-visible observation expired · availability unverified');
+    expired=true;
+  }
+  if(expired)status.textContent=observations.size?remainingOffersStatus:
+    'The observed offers expired. Search again to check current availability.';
   const rows=mode==='demo'?demoRows:[...observations.values()].flatMap(v=>v.offers.map(o=>({o,captured:v.capturedAt,expires:v.expiresAt})))
     .sort((a,b)=>minute(a.o.startLabel)-minute(b.o.startLabel)||
       a.o.priceMinor-b.o.priceMinor||a.o.clubName.localeCompare(b.o.clubName));
