@@ -1,0 +1,33 @@
+# GetACourt — protected staging UAT authorization (21 October 2026)
+
+**Owner scope:** deploy the current GetACourt Draft PR #5 to the existing Netlify `getacourt-preview` site in `deploy-preview` (Team Login protected), and prepare separate synthetic test users in existing Supabase staging. This authorizes neither production deployment nor real external provider requests, data imports, public exposure, booking, payment, DNS or merge.
+
+The acceptance engineer must independently record: current PR HEAD, Netlify deploy ID and exact commit_ref, deploy context=deploy-preview, production unchanged, anonymous GET root HTTP 401, source/CI success and actual hosted navigation. Verify the tested backend is the existing staging Core with booking/payments disabled and inventory unknown. Never infer an availability feed from booking records.
+
+Physical iOS Safari/Android Chrome, Google OAuth/test-account login and device-location permission tests need explicit tester consent and working staging identity/configuration. No UAT check can be marked PASS from CI alone. Do not create real provider connections or enable external OAuth/login flags without separate scoped setup and evidence.
+
+If Netlify cannot deploy this exact candidate or site protection fails, stop and record BLOCKED instead of trying a public context.
+
+Release-note guard: this PR remains Draft and may only be built using the existing Netlify Deploy Preview context with Team Login. Live booking/provider grants stay disabled. A manual Netlify deploy to the production context is not authorized.
+
+## 29 October 2026 — bounded protected standalone personal search acceptance
+
+Owner requested completion of **GetACourt standalone court search**, with player-session read-only offers and official booking-provider handoff. This is approval for **one exact-head, protected, zero-Functions STATIC GetACourt search UAT** on the existing Netlify preview site and existing `get-pr5-reader-uat` alias, subject to exact-head full CI, source-ownership, Team Login anonymous HTTP 401 and post-upload verification. It is NOT authority for a production or public release, provider API/feed, customer/account data upload, full player auth delegation, booking/payment/hold or a new paid resource. Decision #105 remains binding.
+
+The package must contain only `find.html` and its six reviewed local assets from `getacourt/qa/private-reader-preview.mjs`; extension v0.2.5 must target the precise protected `find.html` receiver. The prior direct-feed `find.html` has been replaced; legacy club/GET API code remains preserved but not deployed in this isolated package. The automatic staged upload is exclusively guarded by a matching one-time `GET_STAGING_UAT_APPROVED_SHA` marker in the PR body on this commit, with the unchanged `[skip netlify]` restriction. No public site, DNS or FillMyCourt services are touched.
+
+CI/browser fixture success is NOT live availability proof: final owner-session Chrome/Edge extension search and non-booking handoff remain separate acceptance. Revert or remove the staged source/approval if its exact SHA/protection check fails. No external emails/provider contacts or customer records.
+
+## 29 October 2026 — v0.3.0 once-login private Get Search staging scope
+
+Owner explicitly rejected repeated Reader interactions and asked for a one-time personal provider login with subsequent ordinary GetACourt Find-only requests. Current reviewed source `26ab31cac6d07a7a44e2ec3e47ddb6223a4e88e8` passed four exact-head CI workflows incl. Chrome MV3 fixture-mode, browser and privacy contracts. This scope authorizes an **isolated, nonpublic, static-only Get Search UAT** using the existing Team Login-protected `get-pr5-reader-uat` alias, only the existing reviewed `getacourt/qa/private-reader-preview.mjs` bundle, `find.html` and six same-origin assets, **ZERO server Functions**. New Chrome extension v0.3.0 is installed locally by the user from reviewed source; Chrome prompts for a one-time optional `https://playtomic.com/*` grant. Neither the static bundle nor GitHub Actions retrieves Playtomic credentials, cookies or sessions.
+
+The deploy script must verify exact current PR SHA, existing Team Login perimeter, four required CI workflows and anonymous HTTP 401 for `/find.html` before marking the protected candidate accepted. All other Get/Fill/Core services, DNS, public domains, provider API, club feeds, payments, booking, customer/CRM data remain unchanged. The earlier source marker is not reusable; a **new exact-SHA scope in PR body** is required and this GitHub doc-only commit provides a scope record for it. Physical owner browser login+fresh priced court+repeated Find without extension popup/tab approval after closing the provider tab remains PENDING. A successful protected deploy is not a consumer-launch UAT or a guarantee of lifelong Playtomic session availability.
+
+
+## 29 October 2026 — bounded four-club Playtomic player-session preview v0.4.1
+
+Owner requested Get Search development through main consumer apps while Fill Work proceeds independently. This change is a **static-only, protected internal UAT**, not public launch: one normal Playtomic first-party login and one Chrome site permission, then one Get Find triggers a bounded check of four reviewed official Cascais-area club pages (Cascais Padel & Nature; Sports Club Cascais; Padel Set Club Parede; Quinta dos Lombos Padel). Only player-visible dated/court/time/duration/total EUR price snapshots qualify, partial failures explicit; no direct provider/club API, hidden endpoint, provider credentials/cookies, unsupervised polling, Book/hold/payment. The existing Playtomic user grant must be active in the owner's Chrome profile. The extension v0.4.1 remains installed locally (not uploaded to Netlify) and protected Get `find.html` is static, zero Functions.
+
+This restricted scope authorizes **one new exact-SHA** `get-pr5-reader-uat` alias deployment to the existing protected Netlify Get preview only, after four exact-head GitHub CI workflows complete SUCCESS and the existing anonymous Team Login 401 perimeter is independently checked both before and after upload. Never reuse an old exact-head consent. Neither public Get nor any Fill/Core/prod/club data is touched. Real player login, true current priced offers, extension multi-club result in desktop browser and provider-specific session expiry still need physical owner-browsing UAT and must not be claimed from synthetic CI. TieSports/TiePlayer, Racket ID, Smashpro and MATCHi remain code/fixture-only; actual logged-in interface acceptance not complete. No external provider contact or emails.
+

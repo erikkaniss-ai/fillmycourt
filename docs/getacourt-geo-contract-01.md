@@ -1,0 +1,11 @@
+# GetACourt GEO-01 — verified runtime correction (16 October 2026)
+
+**SUPERSEDES the earlier inference in this same document, not the accepted Product Decisions.**
+
+Independent readback of the actual Railway staging service and its source invalidated the earlier assertion that the deployed Core had no GPS support. The Get RC branch was based on an older, divergent Core module. Railway `fmc-core-api` actually deploys commit `0134f603445ea7f282ef0cb866d0f3591518cbb9` from `core/hotfix-booking-confirm-staging`, not the Get RC branch. That Core already supports optional `lat`, `lon` and `radius_km` (via `Query`), real PostgreSQL Haversine geo filtering in V1Store, canonical venue_lat/venue_lon/distance_km, and a native-only booking authority gate.
+
+Read-only live staging verification: GET `/api/health` returned `ok:true`, service `core`, version `0.5.0`, contract `supabase-v1`. GET `/api/availability` for the existing synthetic Cascais staging fixture with `lat=38.6979`, `lon=-9.4215`, `radius_km=5`, `location=Current location`, and a future date returned the `GetACourt Cascais Test Venue` fixture including `distance_km:0.0`. The provider source was not contacted, and no write occurred. This establishes real server geo operation for the staging fixture, NOT a public real-club booking.
+
+The prior source-only GEO-01 implementation on Get RC was redundant and had diverged from the actual deployed Core implementation. It has been reverted on the Get RC branch to the previously accepted baseline and its redundant standalone PG fixture tests removed; retained the archived CI #256 historical result and this transparent correction. No Core staging deployment/cherry-pick/branch promotion is needed for GPS. A fresh Get Netlify/Core contract test instead verifies that exact location/radius parameters and canonical coordinates are correctly passed through.
+
+Remaining P0 gates: Get RC still not published/privately deployed; Netlify publicly hosts `getacourt.com` so protecting the whole site is unacceptable. Need non-production-only access control and protected branch preview, real device GPS/Google OAuth, authorized club catalog and one authoritative booking pilot; any public release, provider writes, production changes, paid resources and architecture changes remain owner-gated. No real club/provider rights were granted by the live test.
